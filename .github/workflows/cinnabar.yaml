@@ -1,0 +1,84 @@
+name: Cinnabar
+
+# Reusable-workflow wrapper around the cinnabar composite action — the
+# "dual-publish" pattern. Use this when you want an isolated job with the right
+# permissions baked in and a standalone required status check. For dropping a
+# scan step into an existing job, use the action directly (magmamoose/cinnabar@v1).
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Runner to use.'
+        type: string
+        default: 'ubuntu-latest'
+      security:
+        type: boolean
+        default: true
+      lint:
+        type: boolean
+        default: true
+      security_fail:
+        description: 'Fail on security findings.'
+        type: boolean
+        default: true
+      lint_fail:
+        description: 'Fail on lint findings (default advisory).'
+        type: boolean
+        default: false
+      enable_sast:
+        type: boolean
+        default: true
+      enable_license_scan:
+        type: boolean
+        default: false
+      enable_sarif_upload:
+        type: boolean
+        default: true
+      trivy_severity:
+        type: string
+        default: 'CRITICAL,HIGH'
+      checkov_skip_checks:
+        type: string
+        default: ''
+      k8s_directory:
+        type: string
+        default: './k8s'
+    outputs:
+      security_result:
+        description: 'pass | findings | error | disabled | skipped'
+        value: ${{ jobs.cinnabar.outputs.security_result }}
+      lint_result:
+        description: 'pass | findings | error | disabled | skipped'
+        value: ${{ jobs.cinnabar.outputs.lint_result }}
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+jobs:
+  cinnabar:
+    name: Cinnabar
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      security_result: ${{ steps.scan.outputs.security_result }}
+      lint_result: ${{ steps.scan.outputs.lint_result }}
+    steps:
+      # Pinned to @v1: the action self-checks-out the caller repo. `uses: ./`
+      # would not work here — in a reusable workflow it resolves against the
+      # caller's checkout, which has no action.yml.
+      - name: Cinnabar scan
+        id: scan
+        uses: magmamoose/cinnabar@v1
+        with:
+          security: ${{ inputs.security }}
+          lint: ${{ inputs.lint }}
+          security_fail: ${{ inputs.security_fail }}
+          lint_fail: ${{ inputs.lint_fail }}
+          enable_sast: ${{ inputs.enable_sast }}
+          enable_license_scan: ${{ inputs.enable_license_scan }}
+          enable_sarif_upload: ${{ inputs.enable_sarif_upload }}
+          trivy_severity: ${{ inputs.trivy_severity }}
+          checkov_skip_checks: ${{ inputs.checkov_skip_checks }}
+          k8s_directory: ${{ inputs.k8s_directory }}

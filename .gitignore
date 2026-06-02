@@ -1,0 +1,9 @@
+# cinnabar
+*.sarif
+*.log
+node_modules/
+.DS_Store
+.venv/
+__pycache__/
+/tmp/
+rendered-manifests.yaml

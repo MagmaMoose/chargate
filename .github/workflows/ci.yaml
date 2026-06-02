@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  self-scan:
+    name: Self-scan (dogfood)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      # Cinnabar scans cinnabar: ShellCheck over scripts/, actionlint over the
+      # workflows, Trivy/TruffleHog/Semgrep over the tree.
+      # lint_fail is on (we control our own lint cleanliness); security findings
+      # are reported but kept non-blocking here until the baseline is vetted.
+      - name: Run cinnabar on cinnabar
+        uses: ./
+        with:
+          checkout: false
+          lint_fail: true
+          security_fail: false
+          enable_sarif_upload: false
+
+  validate:
+    name: Validate action metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: action.yml + hook manifest parse
+        shell: bash
+        run: |
+          python3 -c "import yaml; yaml.safe_load(open('action.yml')); print('action.yml ok')"
+          python3 -c "import yaml; yaml.safe_load(open('.pre-commit-hooks.yaml')); print('.pre-commit-hooks.yaml ok')"
+      - name: scripts are executable
+        shell: bash
+        run: |
+          miss=0
+          for f in scripts/*.sh scripts/lib/*.sh; do
+            [ -x "$f" ] || { echo "not executable: $f"; miss=1; }
+          done
+          [ "$miss" = 0 ] && echo "all scripts executable"
+          exit "$miss"

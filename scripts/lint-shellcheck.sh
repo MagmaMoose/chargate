@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# ShellCheck — lint shell scripts (runs when shell files change).
+set -uo pipefail
+_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/common.sh
+. "$_here/lib/common.sh"
+
+require_tool shellcheck "ShellCheck"
+
+severity="${SHELLCHECK_SEVERITY:-warning}"
+files=()
+while IFS= read -r f; do files+=("$f"); done < <(cinnabar_targets '\.(sh|bash|zsh)$' "$@")
+if [ "${#files[@]}" -eq 0 ]; then
+  log_skip "ShellCheck: no shell scripts"
+  exit "$CINNABAR_OK"
+fi
+
+gh_group "ShellCheck (severity: $severity, ${#files[@]} file(s))"
+shellcheck "--severity=$severity" "${files[@]}"
+rc=$?
+gh_endgroup
+
+case "$rc" in
+  0) log_ok "ShellCheck: clean"; exit "$CINNABAR_OK" ;;
+  1) log_error "ShellCheck reported problems"; gh_error "ShellCheck reported problems"; exit "$CINNABAR_FINDINGS" ;;
+  *) log_warn "ShellCheck failed to run (exit $rc) — not counted as a finding"; gh_warning "ShellCheck failed to run (exit $rc)"; exit "$CINNABAR_TOOLERR" ;;
+esac
