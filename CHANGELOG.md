@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.1 (2026-06-03)
+
+### Bug Fixes
+
+- Resolve tool versions via github.com release redirect
+  ([`866a230`](https://github.com/MagmaMoose/chargate/commit/866a2301f0b51a5e0f58d473c82d7249bcfced34))
+
+
 ## v1.1.0 (2026-06-03)
 
 ### Features
