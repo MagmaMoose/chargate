@@ -15,7 +15,7 @@ skip_kubescore="${SKIP_KUBESCORE:-false}"
 
 if [ ! -d "$k8s_dir" ]; then
   log_skip "Kustomize: directory '$k8s_dir' not found"
-  exit "$CINNABAR_OK"
+  exit "$CHARGATE_OK"
 fi
 
 # Prefer the kustomize binary; fall back to `kubectl kustomize`.
@@ -29,24 +29,24 @@ while IFS= read -r d; do roots+=("$d"); done < <(
 )
 if [ "${#roots[@]}" -eq 0 ]; then
   log_skip "Kustomize: no kustomization.yaml under '$k8s_dir'"
-  exit "$CINNABAR_OK"
+  exit "$CHARGATE_OK"
 fi
 
 rendered="$(mktemp)"; trap 'rm -f "$rendered"' EXIT
-status="$CINNABAR_OK"
+status="$CHARGATE_OK"
 
 gh_group "Kustomize build (${#roots[@]} dir(s))"
 for d in "${roots[@]}"; do
   log_info "building $d"
   if ! "${KUSTOMIZE[@]}" "$d" >> "$rendered"; then
     log_error "kustomize build failed in $d"; gh_error "kustomize build failed in $d"
-    status="$CINNABAR_FINDINGS"
+    status="$CHARGATE_FINDINGS"
   fi
   printf '\n---\n' >> "$rendered"
 done
 gh_endgroup
 # A broken build means there's nothing trustworthy to validate — stop here.
-[ "$status" = "$CINNABAR_OK" ] || exit "$status"
+[ "$status" = "$CHARGATE_OK" ] || exit "$status"
 
 # yamllint — advisory only, never blocks.
 if have yamllint; then
@@ -60,13 +60,13 @@ if [ "$skip_kubeconform" != "true" ]; then
   if have kubeconform; then
     gh_group "kubeconform (k8s $kube_version)"
     kubeconform -summary -ignore-missing-schemas -kubernetes-version "$kube_version" "$rendered" \
-      || { log_error "kubeconform validation failed"; gh_error "kubeconform validation failed"; status="$CINNABAR_FINDINGS"; }
+      || { log_error "kubeconform validation failed"; gh_error "kubeconform validation failed"; status="$CHARGATE_FINDINGS"; }
     gh_endgroup
   elif have docker; then
     gh_group "kubeconform via docker (k8s $kube_version)"
     docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7-alpine \
       -summary -ignore-missing-schemas -kubernetes-version "$kube_version" < "$rendered" \
-      || { log_error "kubeconform validation failed"; gh_error "kubeconform validation failed"; status="$CINNABAR_FINDINGS"; }
+      || { log_error "kubeconform validation failed"; gh_error "kubeconform validation failed"; status="$CHARGATE_FINDINGS"; }
     gh_endgroup
   else
     log_skip "kubeconform unavailable (no binary or docker)"
@@ -89,5 +89,5 @@ if [ "$skip_kubescore" != "true" ]; then
   fi
 fi
 
-[ "$status" = "$CINNABAR_OK" ] && log_ok "Kustomize: build + validation passed"
+[ "$status" = "$CHARGATE_OK" ] && log_ok "Kustomize: build + validation passed"
 exit "$status"

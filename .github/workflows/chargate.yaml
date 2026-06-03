@@ -1,9 +1,9 @@
-name: Cinnabar
+name: Chargate
 
-# Reusable-workflow wrapper around the cinnabar composite action — the
+# Reusable-workflow wrapper around the chargate composite action — the
 # "dual-publish" pattern. Use this when you want an isolated job with the right
 # permissions baked in and a standalone required status check. For dropping a
-# scan step into an existing job, use the action directly (magmamoose/cinnabar@v1).
+# scan step into an existing job, use the action directly (magmamoose/chargate@v1).
 
 on:
   workflow_call:
@@ -47,10 +47,10 @@ on:
     outputs:
       security_result:
         description: 'pass | findings | error | disabled | skipped'
-        value: ${{ jobs.cinnabar.outputs.security_result }}
+        value: ${{ jobs.chargate.outputs.security_result }}
       lint_result:
         description: 'pass | findings | error | disabled | skipped'
-        value: ${{ jobs.cinnabar.outputs.lint_result }}
+        value: ${{ jobs.chargate.outputs.lint_result }}
 
 permissions:
   contents: read
@@ -58,8 +58,8 @@ permissions:
   security-events: write
 
 jobs:
-  cinnabar:
-    name: Cinnabar
+  chargate:
+    name: Chargate
     runs-on: ${{ inputs.runner }}
     outputs:
       security_result: ${{ steps.scan.outputs.security_result }}
@@ -68,9 +68,9 @@ jobs:
       # Pinned to @v1: the action self-checks-out the caller repo. `uses: ./`
       # would not work here — in a reusable workflow it resolves against the
       # caller's checkout, which has no action.yml.
-      - name: Cinnabar scan
+      - name: Chargate scan
         id: scan
-        uses: magmamoose/cinnabar@v1
+        uses: magmamoose/chargate@v1
         with:
           security: ${{ inputs.security }}
           lint: ${{ inputs.lint }}

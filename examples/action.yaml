@@ -1,4 +1,4 @@
-# Drop the cinnabar composite action into a PR workflow.
+# Drop the chargate composite action into a PR workflow.
 # The action checks out your code itself (checkout: true by default).
 name: Security & Lint
 
@@ -13,10 +13,10 @@ permissions:
   security-events: write   # for SARIF upload (needs GitHub Advanced Security on private repos)
 
 jobs:
-  cinnabar:
+  chargate:
     runs-on: ubuntu-latest
     steps:
-      - uses: magmamoose/cinnabar@v1
+      - uses: magmamoose/chargate@v1
         with:
           # security blocks by default; lint is advisory by default
           lint_fail: false

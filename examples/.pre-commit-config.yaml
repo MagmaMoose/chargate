@@ -1,11 +1,11 @@
-# Local mirror of cinnabar's CI scanners — the same tools, on your machine.
+# Local mirror of chargate's CI scanners — the same tools, on your machine.
 #
 #   pre-commit install --hook-type pre-commit --hook-type pre-push
 #
 # Tools auto-detect: anything you don't have installed is skipped locally (CI
 # still enforces it). Fast linters run on commit; security scans run on push.
 repos:
-  - repo: https://github.com/magmamoose/cinnabar
+  - repo: https://github.com/magmamoose/chargate
     rev: v1
     hooks:
       # pre-commit (fast)

@@ -1,13 +1,13 @@
-# Cinnabar
+# Chargate
 
-[![CI](https://github.com/magmamoose/cinnabar/actions/workflows/ci.yaml/badge.svg)](https://github.com/magmamoose/cinnabar/actions/workflows/ci.yaml)
-[![License](https://img.shields.io/github/license/magmamoose/cinnabar)](LICENSE)
+[![CI](https://github.com/magmamoose/chargate/actions/workflows/ci.yaml/badge.svg)](https://github.com/magmamoose/chargate/actions/workflows/ci.yaml)
+[![License](https://img.shields.io/github/license/magmamoose/chargate)](LICENSE)
 
 One security + lint gate for your repos. Trivy, TruffleHog, Semgrep, dependency audits, Checkov, ESLint, Kustomize, Hadolint, ShellCheck and actionlint — behind a single composite action with dynamic language detection, so each run does only the work the diff calls for.
 
 The same scanners run **three ways from one source of truth**: as a composite **action**, as a reusable **workflow**, and as **pre-commit** hooks on your own machine. Write the scan logic once (`scripts/`), run it everywhere.
 
-> Sibling to [diatreme](https://github.com/magmamoose/diatreme) (release management). Diatreme ships your releases; cinnabar guards what goes into them.
+> Sibling to [diatreme](https://github.com/magmamoose/diatreme) (release management). Diatreme ships your releases; chargate guards what goes into them.
 
 ## Quickstart
 
@@ -21,10 +21,10 @@ permissions:
   pull-requests: read
   security-events: write
 jobs:
-  cinnabar:
+  chargate:
     runs-on: ubuntu-latest
     steps:
-      - uses: magmamoose/cinnabar@v1
+      - uses: magmamoose/chargate@v1
 ```
 
 That's it — the action checks out your code, detects what changed, installs the scanners it needs, and runs them. Security findings **block**; lint is **advisory** by default.
@@ -33,8 +33,8 @@ That's it — the action checks out your code, detects what changed, installs th
 
 | Surface | Use it when | How |
 |---|---|---|
-| **Composite action** | You want a scan step inside an existing job, or full control over inputs | `uses: magmamoose/cinnabar@v1` |
-| **Reusable workflow** | You want an isolated job with permissions baked in, as a standalone required check | `uses: magmamoose/cinnabar/.github/workflows/cinnabar.yaml@v1` |
+| **Composite action** | You want a scan step inside an existing job, or full control over inputs | `uses: magmamoose/chargate@v1` |
+| **Reusable workflow** | You want an isolated job with permissions baked in, as a standalone required check | `uses: magmamoose/chargate/.github/workflows/chargate.yaml@v1` |
 | **pre-commit** | You want the same checks locally before you push | add the repo to `.pre-commit-config.yaml` (see [below](#local-pre-commit)) |
 
 See [`examples/`](examples/) for ready-to-paste files for each.
@@ -68,7 +68,7 @@ Each check fires only when the relevant files change (detected with `dorny/paths
 
 ## Why it won't fail when it shouldn't
 
-Every scanner reports one of three things, and cinnabar treats them differently:
+Every scanner reports one of three things, and chargate treats them differently:
 
 | Exit | Meaning | Effect |
 |---|---|---|
@@ -100,7 +100,7 @@ Tool versions (`trivy_version`, `semgrep_version`, `hadolint_version`, `actionli
 
 ## Ignoring known findings
 
-All optional — cinnabar checks for each file before using it.
+All optional — chargate checks for each file before using it.
 
 | Scanner | How |
 |---|---|
@@ -114,7 +114,7 @@ All optional — cinnabar checks for each file before using it.
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/magmamoose/cinnabar
+  - repo: https://github.com/magmamoose/chargate
     rev: v1
     hooks:
       - id: shellcheck
@@ -135,7 +135,7 @@ Tools auto-detect: whatever you don't have installed is skipped locally, so a mi
 
 Local git hooks can't be truly *forced* — `.git/hooks` isn't cloned and `git commit --no-verify` always bypasses them. So treat local hooks as fast feedback and enforce **server-side**:
 
-- **Required status check — the real gate.** Run cinnabar on PRs (action or reusable workflow), then mark it required under **Settings → Branches → Branch protection**. Nothing merges unless cinnabar passes: zero developer setup, unbypassable.
+- **Required status check — the real gate.** Run chargate on PRs (action or reusable workflow), then mark it required under **Settings → Branches → Branch protection**. Nothing merges unless chargate passes: zero developer setup, unbypassable.
 - **[pre-commit.ci](https://pre-commit.ci)** (optional). Hosted app runs your `.pre-commit-config.yaml` on every PR and auto-fixes — also server-side, no dev action.
 
 To make the *local* hooks install themselves (pre-push feedback without per-repo `pre-commit install`):

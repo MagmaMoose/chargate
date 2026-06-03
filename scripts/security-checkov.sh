@@ -17,16 +17,16 @@ done
 # Console output always; SARIF additionally when CI asks. Checkov writes
 # "<dir>/results_sarif.sarif" under the output path.
 out_args=(--output cli)
-if [ -n "${CINNABAR_SARIF_DIR:-}" ]; then
-  mkdir -p "$CINNABAR_SARIF_DIR"
-  out_args+=(--output sarif --output-file-path "$CINNABAR_SARIF_DIR")
+if [ -n "${CHARGATE_SARIF_DIR:-}" ]; then
+  mkdir -p "$CHARGATE_SARIF_DIR"
+  out_args+=(--output sarif --output-file-path "$CHARGATE_SARIF_DIR")
 fi
 
 # Scope to changed IaC files when provided; otherwise scan the tree.
 targets=()
 while IFS= read -r f; do
   targets+=(-f "$f")
-done < <(cinnabar_targets '\.(tf|tfvars|hcl|ya?ml|json)$|(^|/)Dockerfile($|\.)' "$@")
+done < <(chargate_targets '\.(tf|tfvars|hcl|ya?ml|json)$|(^|/)Dockerfile($|\.)' "$@")
 [ "${#targets[@]}" -gt 0 ] || targets=(-d .)
 
 gh_group "Checkov (frameworks: $frameworks)"
@@ -35,7 +35,7 @@ rc=$?
 gh_endgroup
 
 case "$rc" in
-  0) log_ok "Checkov: no failed checks"; exit "$CINNABAR_OK" ;;
-  1) log_error "Checkov found policy failures"; gh_error "Checkov found IaC policy failures"; exit "$CINNABAR_FINDINGS" ;;
-  *) log_warn "Checkov failed to run (exit $rc) — not counted as a finding"; gh_warning "Checkov failed to run (exit $rc)"; exit "$CINNABAR_TOOLERR" ;;
+  0) log_ok "Checkov: no failed checks"; exit "$CHARGATE_OK" ;;
+  1) log_error "Checkov found policy failures"; gh_error "Checkov found IaC policy failures"; exit "$CHARGATE_FINDINGS" ;;
+  *) log_warn "Checkov failed to run (exit $rc) — not counted as a finding"; gh_warning "Checkov failed to run (exit $rc)"; exit "$CHARGATE_TOOLERR" ;;
 esac

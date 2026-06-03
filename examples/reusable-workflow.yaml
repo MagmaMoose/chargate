@@ -1,4 +1,4 @@
-# Call cinnabar as a reusable workflow — an isolated job with permissions baked
+# Call chargate as a reusable workflow — an isolated job with permissions baked
 # in, ideal as a standalone required status check.
 name: Security & Lint
 
@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  cinnabar:
-    uses: magmamoose/cinnabar/.github/workflows/cinnabar.yaml@v1
+  chargate:
+    uses: magmamoose/chargate/.github/workflows/chargate.yaml@v1
     permissions:
       contents: read
       pull-requests: read

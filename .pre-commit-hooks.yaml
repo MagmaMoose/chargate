@@ -1,4 +1,4 @@
-# Cinnabar pre-commit hooks — the SAME scanners cinnabar runs in CI, available
+# Chargate pre-commit hooks — the SAME scanners chargate runs in CI, available
 # locally on `git commit` / `git push`. Tools auto-detect and skip if they're not
 # installed, so a missing scanner never blocks your commit (CI still enforces it).
 #
@@ -7,7 +7,7 @@
 
 # ── Lint · fast · pre-commit ──────────────────────────────────────────────────
 - id: shellcheck
-  name: 'Cinnabar · ShellCheck'
+  name: 'Chargate · ShellCheck'
   description: Lint shell scripts.
   entry: scripts/lint-shellcheck.sh
   language: script
@@ -15,7 +15,7 @@
   stages: [pre-commit]
 
 - id: actionlint
-  name: 'Cinnabar · actionlint'
+  name: 'Chargate · actionlint'
   description: Lint GitHub Actions workflows.
   entry: scripts/lint-actionlint.sh
   language: script
@@ -23,7 +23,7 @@
   stages: [pre-commit]
 
 - id: hadolint
-  name: 'Cinnabar · Hadolint'
+  name: 'Chargate · Hadolint'
   description: Lint Dockerfiles.
   entry: scripts/lint-hadolint.sh
   language: script
@@ -31,7 +31,7 @@
   stages: [pre-commit]
 
 - id: eslint
-  name: 'Cinnabar · ESLint'
+  name: 'Chargate · ESLint'
   description: Run the project's npm lint script.
   entry: scripts/lint-eslint.sh
   language: script
@@ -41,7 +41,7 @@
 
 # ── Lint · slower · pre-push ──────────────────────────────────────────────────
 - id: kustomize
-  name: 'Cinnabar · Kustomize validate'
+  name: 'Chargate · Kustomize validate'
   description: Build + validate Kubernetes manifests (kubeconform / kube-score).
   entry: scripts/lint-kustomize.sh
   language: script
@@ -51,7 +51,7 @@
 
 # ── Security · whole-tree · pre-push ──────────────────────────────────────────
 - id: trivy
-  name: 'Cinnabar · Trivy vulnerabilities'
+  name: 'Chargate · Trivy vulnerabilities'
   description: Filesystem dependency vulnerability scan.
   entry: scripts/security-trivy-vuln.sh
   language: script
@@ -61,7 +61,7 @@
   stages: [pre-push]
 
 - id: trufflehog
-  name: 'Cinnabar · TruffleHog secrets'
+  name: 'Chargate · TruffleHog secrets'
   description: Verified-secret detection.
   entry: scripts/security-trufflehog.sh
   language: script
@@ -71,7 +71,7 @@
   stages: [pre-push]
 
 - id: semgrep
-  name: 'Cinnabar · Semgrep SAST'
+  name: 'Chargate · Semgrep SAST'
   description: Static analysis security scan.
   entry: scripts/security-semgrep.sh
   language: script
@@ -81,7 +81,7 @@
   stages: [pre-push]
 
 - id: pip-audit
-  name: 'Cinnabar · pip-audit'
+  name: 'Chargate · pip-audit'
   description: Python dependency vulnerabilities.
   entry: scripts/security-pip-audit.sh
   language: script
@@ -90,7 +90,7 @@
   stages: [pre-push]
 
 - id: npm-audit
-  name: 'Cinnabar · npm/yarn/pnpm audit'
+  name: 'Chargate · npm/yarn/pnpm audit'
   description: JavaScript dependency vulnerabilities.
   entry: scripts/security-npm-audit.sh
   language: script
@@ -99,7 +99,7 @@
   stages: [pre-push]
 
 - id: govulncheck
-  name: 'Cinnabar · govulncheck'
+  name: 'Chargate · govulncheck'
   description: Go vulnerability scan.
   entry: scripts/security-govulncheck.sh
   language: script
@@ -108,7 +108,7 @@
   stages: [pre-push]
 
 - id: checkov
-  name: 'Cinnabar · Checkov (IaC)'
+  name: 'Chargate · Checkov (IaC)'
   description: Terraform / Kubernetes / Dockerfile policy scan.
   entry: scripts/security-checkov.sh
   language: script

@@ -9,10 +9,10 @@ require_tool hadolint "hadolint"
 
 threshold="${HADOLINT_FAILURE_THRESHOLD:-error}"
 files=()
-while IFS= read -r f; do files+=("$f"); done < <(cinnabar_targets '(^|/)Dockerfile($|\.)|\.dockerfile$' "$@")
+while IFS= read -r f; do files+=("$f"); done < <(chargate_targets '(^|/)Dockerfile($|\.)|\.dockerfile$' "$@")
 if [ "${#files[@]}" -eq 0 ]; then
   log_skip "hadolint: no Dockerfiles"
-  exit "$CINNABAR_OK"
+  exit "$CHARGATE_OK"
 fi
 
 gh_group "hadolint (failure-threshold: $threshold, ${#files[@]} file(s))"
@@ -21,7 +21,7 @@ rc=$?
 gh_endgroup
 
 case "$rc" in
-  0) log_ok "hadolint: clean"; exit "$CINNABAR_OK" ;;
-  1) log_error "hadolint reported problems"; gh_error "hadolint reported problems"; exit "$CINNABAR_FINDINGS" ;;
-  *) log_warn "hadolint failed to run (exit $rc) — not counted as a finding"; gh_warning "hadolint failed to run (exit $rc)"; exit "$CINNABAR_TOOLERR" ;;
+  0) log_ok "hadolint: clean"; exit "$CHARGATE_OK" ;;
+  1) log_error "hadolint reported problems"; gh_error "hadolint reported problems"; exit "$CHARGATE_FINDINGS" ;;
+  *) log_warn "hadolint failed to run (exit $rc) — not counted as a finding"; gh_warning "hadolint failed to run (exit $rc)"; exit "$CHARGATE_TOOLERR" ;;
 esac

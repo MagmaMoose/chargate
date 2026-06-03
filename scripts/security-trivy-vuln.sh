@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Trivy filesystem vulnerability scan — cinnabar security core (always runs).
+# Trivy filesystem vulnerability scan — chargate security core (always runs).
 set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
@@ -22,7 +22,7 @@ common=(fs --scanners vuln --severity "$severity" --skip-dirs "node_modules,.git
 [ -f "$ignorefile" ] && common+=(--ignorefile "$ignorefile")
 
 # SARIF for the Security tab (CI only); best-effort, never fails the scan.
-if sarif="$(cinnabar_sarif_path trivy)"; then
+if sarif="$(chargate_sarif_path trivy)"; then
   trivy "${common[@]}" --format sarif --output "$sarif" --exit-code 0 . >/dev/null 2>&1 \
     || log_warn "Trivy SARIF generation failed (non-fatal)"
 fi
@@ -36,19 +36,19 @@ rc=$?
 gh_endgroup
 
 case "$rc" in
-  0) log_ok "Trivy: no $severity vulnerabilities found"; exit "$CINNABAR_OK" ;;
+  0) log_ok "Trivy: no $severity vulnerabilities found"; exit "$CHARGATE_OK" ;;
   2)
     if [ "$findings_mode" = "0" ]; then
       log_warn "Trivy found vulnerabilities (warn-only: TRIVY_EXIT_CODE=0)"
-      exit "$CINNABAR_OK"
+      exit "$CHARGATE_OK"
     fi
     log_error "Trivy found $severity vulnerabilities"
     gh_error "Trivy found $severity vulnerabilities"
-    exit "$CINNABAR_FINDINGS"
+    exit "$CHARGATE_FINDINGS"
     ;;
   *)
     log_warn "Trivy scan failed to run (exit $rc) — not counted as a finding"
     gh_warning "Trivy scan failed to run (exit $rc)"
-    exit "$CINNABAR_TOOLERR"
+    exit "$CHARGATE_TOOLERR"
     ;;
 esac

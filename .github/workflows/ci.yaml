@@ -18,10 +18,10 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
-      # Cinnabar scans cinnabar: ShellCheck over scripts/, actionlint over the
+      # Chargate scans chargate: ShellCheck over scripts/, actionlint over the
       # workflows, Trivy/TruffleHog/Semgrep over the tree.
-      # Both gates on: cinnabar must pass its own security + lint scan.
-      - name: Run cinnabar on cinnabar
+      # Both gates on: chargate must pass its own security + lint scan.
+      - name: Run chargate on chargate
         uses: ./
         with:
           checkout: false

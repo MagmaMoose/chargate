@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Semgrep SAST — cinnabar security core (enabled by default).
+# Semgrep SAST — chargate security core (enabled by default).
 set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
@@ -26,7 +26,7 @@ if [ -n "$baseline" ] && [ -f "$baseline" ]; then
 fi
 
 # SARIF for the Security tab (CI only); best-effort.
-if sarif="$(cinnabar_sarif_path semgrep)"; then
+if sarif="$(chargate_sarif_path semgrep)"; then
   semgrep scan "${cfg_args[@]}" "${excl_args[@]}" --sarif --output "$sarif" >/dev/null 2>&1 \
     || log_warn "Semgrep SARIF generation failed (non-fatal)"
 fi
@@ -38,7 +38,7 @@ gh_endgroup
 
 # Semgrep exit codes: 0 clean · 1 findings · ≥2 error.
 case "$rc" in
-  0) log_ok "Semgrep: no findings"; exit "$CINNABAR_OK" ;;
-  1) log_error "Semgrep found issues"; gh_error "Semgrep found issues"; exit "$CINNABAR_FINDINGS" ;;
-  *) log_warn "Semgrep failed to run (exit $rc) — not counted as a finding"; gh_warning "Semgrep failed to run (exit $rc)"; exit "$CINNABAR_TOOLERR" ;;
+  0) log_ok "Semgrep: no findings"; exit "$CHARGATE_OK" ;;
+  1) log_error "Semgrep found issues"; gh_error "Semgrep found issues"; exit "$CHARGATE_FINDINGS" ;;
+  *) log_warn "Semgrep failed to run (exit $rc) — not counted as a finding"; gh_warning "Semgrep failed to run (exit $rc)"; exit "$CHARGATE_TOOLERR" ;;
 esac

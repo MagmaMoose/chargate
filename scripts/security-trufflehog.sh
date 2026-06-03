@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TruffleHog verified-secret detection — cinnabar security core (always runs).
+# TruffleHog verified-secret detection — chargate security core (always runs).
 set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
@@ -20,7 +20,7 @@ gh_endgroup
 
 # `--fail` makes trufflehog exit 183 when verified secrets are found.
 case "$rc" in
-  0)   log_ok "TruffleHog: no verified secrets found"; exit "$CINNABAR_OK" ;;
-  183) log_error "TruffleHog found verified secret(s)"; gh_error "TruffleHog found verified secret(s)"; exit "$CINNABAR_FINDINGS" ;;
-  *)   log_warn "TruffleHog failed to run (exit $rc) — not counted as a finding"; gh_warning "TruffleHog failed to run (exit $rc)"; exit "$CINNABAR_TOOLERR" ;;
+  0)   log_ok "TruffleHog: no verified secrets found"; exit "$CHARGATE_OK" ;;
+  183) log_error "TruffleHog found verified secret(s)"; gh_error "TruffleHog found verified secret(s)"; exit "$CHARGATE_FINDINGS" ;;
+  *)   log_warn "TruffleHog failed to run (exit $rc) — not counted as a finding"; gh_warning "TruffleHog failed to run (exit $rc)"; exit "$CHARGATE_TOOLERR" ;;
 esac

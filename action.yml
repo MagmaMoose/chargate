@@ -1,5 +1,5 @@
-name: 'Cinnabar'
-description: 'Security + lint gate: Trivy, TruffleHog, Semgrep, dep audits, Checkov, ESLint, Kustomize, Hadolint, ShellCheck, actionlint — dynamic language detection, one action.'
+name: 'Chargate'
+description: 'Security + lint gate: Trivy, Semgrep, Checkov, ShellCheck & more, with dynamic language detection.'
 author: 'Caleb Sargeant'
 branding:
   icon: 'shield'
@@ -234,7 +234,7 @@ runs:
       run: |
         o() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
         if [ "$DETECT_OK" != "success" ]; then
-          echo "::warning title=Cinnabar::change detection unavailable — scanning everything (fail-safe)"
+          echo "::warning title=Chargate::change detection unavailable — scanning everything (fail-safe)"
           for k in any_changed python go javascript iac dockerfile shell workflows kustomize; do o "$k" true; done
         else
           o any_changed "${D_ANY:-false}"; o python "${D_PY:-false}"; o go "${D_GO:-false}"
@@ -242,11 +242,11 @@ runs:
           o shell "${D_SHELL:-false}"; o workflows "${D_WF:-false}"; o kustomize "${D_KUST:-false}"
         fi
 
-    - name: Cinnabar setup
+    - name: Chargate setup
       if: ${{ steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       run: |
-        echo "## 🔴 Cinnabar — detected changes" >> "$GITHUB_STEP_SUMMARY"
+        echo "## 🔴 Chargate — detected changes" >> "$GITHUB_STEP_SUMMARY"
         {
           echo ""
           echo "| Type | Changed |"
@@ -262,8 +262,8 @@ runs:
           echo ""
         } >> "$GITHUB_STEP_SUMMARY"
         if [ "${{ inputs.enable_sarif_upload }}" = "true" ]; then
-          d="$RUNNER_TEMP/cinnabar-sarif"; mkdir -p "$d"
-          echo "CINNABAR_SARIF_DIR=$d" >> "$GITHUB_ENV"
+          d="$RUNNER_TEMP/chargate-sarif"; mkdir -p "$d"
+          echo "CHARGATE_SARIF_DIR=$d" >> "$GITHUB_ENV"
         fi
 
     - name: Install tools
@@ -419,11 +419,11 @@ runs:
 
     # ── SARIF upload ──────────────────────────────────────────────────────────
     - name: Upload SARIF
-      if: ${{ always() && inputs.enable_sarif_upload == 'true' && steps.scope.outputs.any_changed == 'true' && env.CINNABAR_SARIF_DIR != '' }}
+      if: ${{ always() && inputs.enable_sarif_upload == 'true' && steps.scope.outputs.any_changed == 'true' && env.CHARGATE_SARIF_DIR != '' }}
       continue-on-error: true
       uses: github/codeql-action/upload-sarif@f5c2471be782132e47a6e6f9c725e56730d6e9a3 # v3.32.3
       with:
-        sarif_file: ${{ env.CINNABAR_SARIF_DIR }}
+        sarif_file: ${{ env.CHARGATE_SARIF_DIR }}
         token: ${{ inputs.github_token }}
 
     # ── Report + gate ─────────────────────────────────────────────────────────
@@ -467,12 +467,12 @@ runs:
         set +e
         fail=0
         if [ "${SEC_BLOCK:-false}" = "true" ]; then
-          echo "::error title=Cinnabar::Security scan found blocking issues (security_result=$SEC_RESULT)"
+          echo "::error title=Chargate::Security scan found blocking issues (security_result=$SEC_RESULT)"
           fail=1
         fi
         if [ "${LINT_BLOCK:-false}" = "true" ]; then
-          echo "::error title=Cinnabar::Lint scan found blocking issues (lint_result=$LINT_RESULT)"
+          echo "::error title=Chargate::Lint scan found blocking issues (lint_result=$LINT_RESULT)"
           fail=1
         fi
         if [ "$fail" = "1" ]; then exit 1; fi
-        echo "Cinnabar: no blocking findings (security=$SEC_RESULT, lint=$LINT_RESULT)"
+        echo "Chargate: no blocking findings (security=$SEC_RESULT, lint=$LINT_RESULT)"

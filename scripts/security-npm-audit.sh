@@ -19,7 +19,7 @@ elif [ -f pnpm-lock.yaml ]; then
   label="pnpm audit"; cmd=(corepack pnpm audit "--audit-level=$level")
 else
   log_skip "npm/yarn/pnpm audit: no lockfile found"
-  exit "$CINNABAR_OK"
+  exit "$CHARGATE_OK"
 fi
 
 gh_group "$label (level: $level)"
@@ -29,6 +29,6 @@ gh_endgroup
 
 # These tools exit non-zero when advisories at/above the level are present.
 case "$rc" in
-  0) log_ok "$label: no vulnerabilities at or above '$level'"; exit "$CINNABAR_OK" ;;
-  *) log_error "$label reported vulnerabilities (exit $rc)"; gh_error "$label reported vulnerabilities"; exit "$CINNABAR_FINDINGS" ;;
+  0) log_ok "$label: no vulnerabilities at or above '$level'"; exit "$CHARGATE_OK" ;;
+  *) log_error "$label reported vulnerabilities (exit $rc)"; gh_error "$label reported vulnerabilities"; exit "$CHARGATE_FINDINGS" ;;
 esac

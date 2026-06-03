@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cinnabar/scripts/ci-report.sh
+# chargate/scripts/ci-report.sh
 #
 # CI-only: render the scan summary to the job summary and publish the outputs
 # the Gate step uses to decide blocking. Consumes RC_* / DET_* / config env set
@@ -16,7 +16,7 @@ emit() { printf '%s\n' "$1" >> "$out"; }
 
 if [ "${DET_ANY:-false}" != "true" ]; then
   {
-    echo "## 🔴 Cinnabar scan report"
+    echo "## 🔴 Chargate scan report"
     echo ""
     echo "⏭️ No relevant file changes detected — scan skipped."
   } >> "$summary"
@@ -32,7 +32,7 @@ sec_findings=0; sec_toolerr=0; sec_ran=0
 lint_findings=0; lint_toolerr=0; lint_ran=0
 
 {
-  echo "## 🔴 Cinnabar scan report"
+  echo "## 🔴 Chargate scan report"
   echo ""
   echo "| Check | Domain | Result | Notes |"
   echo "|-------|--------|--------|-------|"

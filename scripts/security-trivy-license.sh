@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Trivy license-compliance scan — cinnabar (opt-in via the action input).
+# Trivy license-compliance scan — chargate (opt-in via the action input).
 set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
@@ -17,7 +17,7 @@ rc=$?
 gh_endgroup
 
 case "$rc" in
-  0) log_ok "Trivy license: nothing flagged"; exit "$CINNABAR_OK" ;;
-  2) log_error "Trivy flagged non-compliant license(s)"; gh_error "Trivy flagged non-compliant license(s)"; exit "$CINNABAR_FINDINGS" ;;
-  *) log_warn "Trivy license scan failed (exit $rc) — not counted as a finding"; gh_warning "Trivy license scan failed (exit $rc)"; exit "$CINNABAR_TOOLERR" ;;
+  0) log_ok "Trivy license: nothing flagged"; exit "$CHARGATE_OK" ;;
+  2) log_error "Trivy flagged non-compliant license(s)"; gh_error "Trivy flagged non-compliant license(s)"; exit "$CHARGATE_FINDINGS" ;;
+  *) log_warn "Trivy license scan failed (exit $rc) — not counted as a finding"; gh_warning "Trivy license scan failed (exit $rc)"; exit "$CHARGATE_TOOLERR" ;;
 esac

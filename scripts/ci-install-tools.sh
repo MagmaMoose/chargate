@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# cinnabar/scripts/ci-install-tools.sh
+# chargate/scripts/ci-install-tools.sh
 #
-# CI-only: install the pinned scanners cinnabar needs, gated by what the run
+# CI-only: install the pinned scanners chargate needs, gated by what the run
 # actually requires (domain toggles + detected languages). NOT used locally —
 # pre-commit relies on whatever the developer already has installed.
 #

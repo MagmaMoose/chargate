@@ -8,7 +8,7 @@ _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 require_tool actionlint "actionlint"
 
 files=()
-while IFS= read -r f; do files+=("$f"); done < <(cinnabar_targets '^\.github/workflows/.*\.ya?ml$' "$@")
+while IFS= read -r f; do files+=("$f"); done < <(chargate_targets '^\.github/workflows/.*\.ya?ml$' "$@")
 
 gh_group "actionlint"
 if [ "${#files[@]}" -gt 0 ]; then
@@ -21,7 +21,7 @@ rc=$?
 gh_endgroup
 
 case "$rc" in
-  0) log_ok "actionlint: clean"; exit "$CINNABAR_OK" ;;
-  1) log_error "actionlint reported problems"; gh_error "actionlint reported problems"; exit "$CINNABAR_FINDINGS" ;;
-  *) log_warn "actionlint failed to run (exit $rc) — not counted as a finding"; gh_warning "actionlint failed to run (exit $rc)"; exit "$CINNABAR_TOOLERR" ;;
+  0) log_ok "actionlint: clean"; exit "$CHARGATE_OK" ;;
+  1) log_error "actionlint reported problems"; gh_error "actionlint reported problems"; exit "$CHARGATE_FINDINGS" ;;
+  *) log_warn "actionlint failed to run (exit $rc) — not counted as a finding"; gh_warning "actionlint failed to run (exit $rc)"; exit "$CHARGATE_TOOLERR" ;;
 esac
