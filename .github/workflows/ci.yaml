@@ -15,19 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
       # Cinnabar scans cinnabar: ShellCheck over scripts/, actionlint over the
       # workflows, Trivy/TruffleHog/Semgrep over the tree.
-      # lint_fail is on (we control our own lint cleanliness); security findings
-      # are reported but kept non-blocking here until the baseline is vetted.
+      # Both gates on: cinnabar must pass its own security + lint scan.
       - name: Run cinnabar on cinnabar
         uses: ./
         with:
           checkout: false
           lint_fail: true
-          security_fail: false
+          security_fail: true
           enable_sarif_upload: false
 
   validate:
@@ -35,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - name: action.yml + hook manifest parse
         shell: bash
         run: |

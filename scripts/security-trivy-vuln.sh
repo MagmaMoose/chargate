@@ -12,6 +12,11 @@ findings_mode="${TRIVY_EXIT_CODE:-1}"        # 0 ⇒ warn-only, anything else �
 ignore_unfixed="${TRIVY_IGNORE_UNFIXED:-true}"
 ignorefile="${TRIVY_IGNOREFILE:-.trivyignore}"
 
+# Trivy natively reads TRIVY_* env vars. We capture what we need as explicit
+# flags, so clear them here — otherwise trivy re-reads e.g. a missing ignore
+# file and dies with a FATAL flag error.
+unset TRIVY_SEVERITY TRIVY_EXIT_CODE TRIVY_IGNORE_UNFIXED TRIVY_IGNOREFILE
+
 common=(fs --scanners vuln --severity "$severity" --skip-dirs "node_modules,.git,vendor")
 [ "$ignore_unfixed" = "true" ] && common+=(--ignore-unfixed)
 [ -f "$ignorefile" ] && common+=(--ignorefile "$ignorefile")
