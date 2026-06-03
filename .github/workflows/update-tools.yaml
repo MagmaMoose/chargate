@@ -82,7 +82,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add versions.env
           git commit -m "fix: bump pinned scanner versions to latest upstream" -m "$SUMMARY"
-          git push origin HEAD:main
+          # Rebase-retry: main may have moved (e.g. a semantic-release version commit).
+          pushed=0
+          for _ in 1 2 3; do
+            if git pull --rebase --autostash origin main && git push origin HEAD:main; then pushed=1; break; fi
+            sleep 5
+          done
+          [ "$pushed" = 1 ] || { echo "::error::could not push bump after rebase retries"; exit 1; }
           # A GITHUB_TOKEN push doesn't trigger on:push, so kick the release explicitly.
           gh workflow run release.yaml --ref main
 
