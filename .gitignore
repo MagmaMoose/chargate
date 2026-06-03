@@ -1,5 +1,7 @@
 # chargate
 *.sarif
+# …but committed test fixtures are intentional.
+!tests/fixtures/**/*.sarif
 *.log
 node_modules/
 .DS_Store

@@ -1,0 +1,67 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Trivy",
+          "rules": [
+            {
+              "id": "CVE-2023-0001",
+              "shortDescription": { "text": "Critical heap overflow in libexample" },
+              "helpUri": "https://avd.aquasec.com/nvd/cve-2023-0001",
+              "properties": { "security-severity": "9.8" }
+            },
+            {
+              "id": "CVE-2022-0002",
+              "shortDescription": { "text": "Low-severity information disclosure" },
+              "properties": { "security-severity": "3.1" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CVE-2023-0001",
+          "level": "error",
+          "message": { "text": "libexample 1.2.3 is vulnerable; upgrade to 1.2.4" },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "go.sum" }, "region": { "startLine": 42 } } }
+          ]
+        },
+        {
+          "ruleId": "CVE-2022-0002",
+          "level": "warning",
+          "message": { "text": "transitive dependency exposes build metadata" },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "package-lock.json" } } }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": {
+        "driver": {
+          "name": "Semgrep",
+          "rules": [
+            {
+              "id": "python.lang.security.dangerous-exec",
+              "shortDescription": { "text": "Use of exec() with untrusted input" },
+              "defaultConfiguration": { "level": "error" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "python.lang.security.dangerous-exec",
+          "message": { "text": "exec() called with request-derived input <script>alert(1)</script>" },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "app/views.py" }, "region": { "startLine": 17 } } }
+          ]
+        }
+      ]
+    }
+  ]
+}

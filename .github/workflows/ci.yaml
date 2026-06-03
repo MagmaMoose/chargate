@@ -49,3 +49,20 @@ jobs:
           done
           [ "$miss" = 0 ] && echo "all scripts executable"
           exit "$miss"
+      - name: dashboard renderer
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/dash/index.html"
+          python3 scripts/render-dashboard.py \
+            --sarif-dir tests/fixtures/dashboard --out "$out" \
+            --repo magmamoose/chargate --ref main --sha 0123456789abcdef0123456789abcdef01234567
+          # Findings rendered, severities bucketed, and scanner text is escaped (no XSS).
+          grep -q 'CVE-2023-0001' "$out"
+          grep -q 'sev critical' "$out"
+          grep -q 'sev low' "$out"
+          grep -q 'sev high' "$out"
+          ! grep -q '<script>alert' "$out"
+          # Empty input still produces a valid, self-explaining page (exit 0).
+          python3 scripts/render-dashboard.py --sarif-dir "$RUNNER_TEMP/none" --out "$RUNNER_TEMP/empty.html"
+          grep -q 'No findings' "$RUNNER_TEMP/empty.html"
+          echo "dashboard renderer ok"

@@ -35,6 +35,14 @@ inputs:
     description: 'Upload SARIF to the GitHub Security tab (needs GitHub Advanced Security on private repos).'
     required: false
     default: 'true'
+  enable_dashboard:
+    description: 'Render the SARIF into a self-contained HTML security dashboard and upload it as a workflow artifact. The no-GHAS "Security tab" — works on any repo, no licence needed.'
+    required: false
+    default: 'true'
+  dashboard_artifact_name:
+    description: 'Name of the uploaded dashboard artifact.'
+    required: false
+    default: 'chargate-security-dashboard'
   github_token:
     description: 'Token used for SARIF upload / API access.'
     required: false
@@ -241,7 +249,7 @@ runs:
           echo "| Kustomize | ${{ steps.scope.outputs.kustomize }} |"
           echo ""
         } >> "$GITHUB_STEP_SUMMARY"
-        if [ "${{ inputs.enable_sarif_upload }}" = "true" ]; then
+        if [ "${{ inputs.enable_sarif_upload }}" = "true" ] || [ "${{ inputs.enable_dashboard }}" = "true" ]; then
           d="$RUNNER_TEMP/chargate-sarif"; mkdir -p "$d"
           echo "CHARGATE_SARIF_DIR=$d" >> "$GITHUB_ENV"
         fi
@@ -399,6 +407,36 @@ runs:
       with:
         sarif_file: ${{ env.CHARGATE_SARIF_DIR }}
         token: ${{ inputs.github_token }}
+
+    # ── Dashboard (the no-GHAS "Security tab") ─────────────────────────────────
+    # Render the same SARIF into a self-contained HTML page and upload it as an
+    # artifact. Unlike the SARIF upload above, this needs no Advanced Security
+    # licence and works on private repos. Publishing it somewhere persistent
+    # (e.g. GitHub Pages) is deliberately left to the caller.
+    - name: Render dashboard
+      id: dashboard
+      if: ${{ always() && inputs.enable_dashboard == 'true' && steps.scope.outputs.any_changed == 'true' && env.CHARGATE_SARIF_DIR != '' }}
+      shell: bash
+      env:
+        CHARGATE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+      run: |
+        out="$RUNNER_TEMP/chargate-dashboard/index.html"
+        python3 "$GITHUB_ACTION_PATH/scripts/render-dashboard.py" \
+          --sarif-dir "$CHARGATE_SARIF_DIR" --out "$out" || { echo "dashboard render failed (non-fatal)"; exit 0; }
+        echo "path=$RUNNER_TEMP/chargate-dashboard" >> "$GITHUB_OUTPUT"
+        {
+          echo ""
+          echo "📊 A self-contained HTML security dashboard was generated from the SARIF — download the **\`${{ inputs.dashboard_artifact_name }}\`** artifact below to view it."
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload dashboard
+      if: ${{ always() && steps.dashboard.outputs.path != '' }}
+      continue-on-error: true
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.dashboard_artifact_name }}
+        path: ${{ steps.dashboard.outputs.path }}
+        if-no-files-found: ignore
 
     # ── Report + gate ─────────────────────────────────────────────────────────
     - name: Report

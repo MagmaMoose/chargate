@@ -89,6 +89,7 @@ A flaky network, a missing binary, or a scanner that segfaults shows up as a *to
 | `enable_sast` | `true` | Run Semgrep. |
 | `enable_license_scan` | `false` | Run the Trivy license scan. |
 | `enable_sarif_upload` | `true` | Upload SARIF to the Security tab (needs GitHub Advanced Security on private repos). |
+| `enable_dashboard` | `true` | Render the SARIF into a self-contained HTML dashboard and upload it as an artifact — the no-GHAS "Security tab". |
 | `trivy_severity` | `CRITICAL,HIGH` | Severities Trivy flags. |
 | `semgrep_config` | `p/default p/security-audit p/secrets` | Semgrep rulesets. |
 | `checkov_skip_checks` | — | Comma-separated Checkov IDs to skip. |
@@ -97,6 +98,22 @@ A flaky network, a missing binary, or a scanner that segfaults shows up as a *to
 Tool versions (`trivy_version`, `semgrep_version`, `hadolint_version`, `actionlint_version`, `kustomize_version`, …) are pinned inputs too. See [`action.yml`](action.yml) for the full list.
 
 **Outputs:** `scan_skipped`, `security_result`, `lint_result` (`pass | findings | error | disabled | skipped`).
+
+## Security dashboard (no GHAS needed)
+
+GitHub's Security tab only accepts SARIF if the repo has **GitHub Advanced Security** — on private repos without it, `upload-sarif` is silently dropped. So Chargate also renders the *same* SARIF (Trivy, Semgrep, Checkov) into a **self-contained HTML dashboard** and uploads it as a workflow artifact (`enable_dashboard`, on by default):
+
+- Severity summary, per-tool grouping, and every finding with file·line, rule and message.
+- One static HTML file — no JavaScript required to read it, no external assets, no network.
+- Works on **any** repo, public or private, with no licence: download the `chargate-security-dashboard` artifact from the run and open `index.html`.
+
+It's a *report*, never a gate — a malformed or empty SARIF renders a clean page and never fails the build. Where the dashboard gets published (e.g. GitHub Pages) is left to you: a public Pages site would expose your findings to the world, so Chargate stops at the artifact and lets you decide.
+
+Run it yourself against any SARIF directory:
+
+```sh
+python3 scripts/render-dashboard.py --sarif-dir path/to/sarif --out dashboard.html
+```
 
 ## Ignoring known findings
 
@@ -155,7 +172,7 @@ To make the *local* hooks install themselves (pre-push feedback without per-repo
 
 ## How it's built
 
-`scripts/*.sh` hold the scan logic and obey the exit-code contract above. `action.yml` is the CI layer: detect → install pinned tools → run the scripts → upload SARIF → render the summary and enforce the gate. `.pre-commit-hooks.yaml` maps each hook to the same scripts. Nothing is implemented twice.
+`scripts/*.sh` hold the scan logic and obey the exit-code contract above. `action.yml` is the CI layer: detect → install pinned tools → run the scripts → upload SARIF → render the dashboard → render the summary and enforce the gate. `.pre-commit-hooks.yaml` maps each hook to the same scripts. Nothing is implemented twice.
 
 ## License
 
