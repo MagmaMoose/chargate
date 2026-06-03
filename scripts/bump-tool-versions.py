@@ -10,8 +10,8 @@ it writes `changed` and `summary` to $GITHUB_OUTPUT for the update workflow.
 import json
 import os
 import re
-import subprocess
 import sys
+import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,13 +20,15 @@ CHECK = "--check" in sys.argv
 
 
 def gh_tag(repo):
-    r = subprocess.run(
-        ["gh", "api", f"repos/{repo}/releases/latest", "--jq", ".tag_name"],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        raise SystemExit(f"failed to fetch latest release for {repo}: {r.stderr.strip()}")
-    return r.stdout.strip()
+    # Resolve via the github.com /releases/latest redirect rather than the API: no
+    # auth, so it isn't subject to org IP allow lists (e.g. aquasecurity/trivy
+    # returns 403 to authenticated API calls from GitHub-hosted runner IPs).
+    url = f"https://github.com/{repo}/releases/latest"
+    with urllib.request.urlopen(url, timeout=30) as r:  # nosemgrep  # noqa: S310 — constant URL
+        final = r.geturl()
+    if "/tag/" not in final:
+        raise SystemExit(f"could not resolve latest release for {repo} (got {final})")
+    return urllib.parse.unquote(final.rsplit("/tag/", 1)[-1])
 
 
 def pypi(pkg):
