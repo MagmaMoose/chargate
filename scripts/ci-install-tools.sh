@@ -20,6 +20,10 @@ _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
 . "$_here/lib/common.sh"
 
+# Pinned tool versions — single source of truth (bumped by update-tools.yaml).
+# shellcheck disable=SC1091
+[ -f "$_here/../versions.env" ] && . "$_here/../versions.env"
+
 want() { [ "${1:-false}" = "true" ]; }
 
 BIN="$HOME/.local/bin"

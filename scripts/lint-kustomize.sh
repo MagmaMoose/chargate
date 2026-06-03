@@ -6,6 +6,8 @@ set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
 . "$_here/lib/common.sh"
+# shellcheck disable=SC1091
+[ -f "$_here/../versions.env" ] && . "$_here/../versions.env"
 
 k8s_dir="${K8S_DIRECTORY:-./k8s}"; k8s_dir="${k8s_dir#./}"
 kube_version="${KUBERNETES_VERSION:-1.32.0}"
@@ -67,7 +69,7 @@ if [ "$skip_kubeconform" != "true" ]; then
     gh_endgroup
   elif have docker; then
     gh_group "kubeconform via docker (k8s $kube_version)"
-    docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7-alpine \
+    docker run --rm -i ghcr.io/yannh/kubeconform:"${KUBECONFORM_VERSION:-v0.6.7}"-alpine \
       -summary -ignore-missing-schemas -kubernetes-version "$kube_version" < "$rendered" \
       || { log_error "kubeconform validation failed"; gh_error "kubeconform validation failed"; status="$CHARGATE_FINDINGS"; }
     gh_endgroup
@@ -84,7 +86,7 @@ if [ "$skip_kubescore" != "true" ]; then
     gh_endgroup
   elif have docker; then
     gh_group "kube-score via docker (advisory)"
-    docker run --rm -i zegl/kube-score:v1.19.0 score - --kubernetes-version "$kube_minor" < "$rendered" \
+    docker run --rm -i zegl/kube-score:"${KUBE_SCORE_VERSION:-v1.19.0}" score - --kubernetes-version "$kube_minor" < "$rendered" \
       || log_warn "kube-score reported issues (advisory)"
     gh_endgroup
   else

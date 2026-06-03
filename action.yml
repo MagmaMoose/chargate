@@ -27,6 +27,10 @@ inputs:
     description: 'Fail the job on lint findings. Default false = advisory.'
     required: false
     default: 'false'
+  strict:
+    description: 'Treat a tool that could not run (a tool error) as a failure. Used by the release gate to catch breaking upstream tool changes.'
+    required: false
+    default: 'false'
   enable_sarif_upload:
     description: 'Upload SARIF to the GitHub Security tab (needs GitHub Advanced Security on private repos).'
     required: false
@@ -45,10 +49,6 @@ inputs:
     description: 'Ignore vulnerabilities with no fix available.'
     required: false
     default: 'true'
-  trivy_version:
-    description: 'Trivy CLI version to install.'
-    required: false
-    default: 'v0.69.3'
   trivyignore_file:
     description: 'Path to a .trivyignore file (used only if it exists).'
     required: false
@@ -57,10 +57,6 @@ inputs:
   # ── Secrets / SAST ───────────────────────────────────────────────────────────
   trufflehog_exclude:
     description: 'Path to a TruffleHog exclude-paths file (used only if it exists).'
-    required: false
-    default: ''
-  trufflehog_version:
-    description: 'TruffleHog version to install (blank = latest).'
     required: false
     default: ''
   enable_sast:
@@ -75,10 +71,6 @@ inputs:
     description: 'Path to a Semgrep ignore file; if blank, .semgrepignore is auto-detected.'
     required: false
     default: ''
-  semgrep_version:
-    description: 'Semgrep version to install.'
-    required: false
-    default: '1.151.0'
 
   # ── Dependency audits ────────────────────────────────────────────────────────
   npm_audit_level:
@@ -107,10 +99,6 @@ inputs:
     description: 'Directory containing Kustomize files.'
     required: false
     default: './k8s'
-  kustomize_version:
-    description: 'Kustomize version to install.'
-    required: false
-    default: '5.8.1'
   kubernetes_version:
     description: 'Kubernetes version for manifest validation.'
     required: false
@@ -123,14 +111,6 @@ inputs:
     description: 'Skip kube-score (advisory) validation.'
     required: false
     default: 'false'
-  hadolint_version:
-    description: 'hadolint version to install.'
-    required: false
-    default: '2.12.0'
-  actionlint_version:
-    description: 'actionlint version to install.'
-    required: false
-    default: '1.7.7'
 
 outputs:
   scan_skipped:
@@ -282,12 +262,6 @@ runs:
         DET_WORKFLOWS: ${{ steps.scope.outputs.workflows }}
         DET_KUSTOMIZE: ${{ steps.scope.outputs.kustomize }}
         ESLINT_SCRIPT: ${{ inputs.eslint_script }}
-        TRIVY_VERSION: ${{ inputs.trivy_version }}
-        TRUFFLEHOG_VERSION: ${{ inputs.trufflehog_version }}
-        SEMGREP_VERSION: ${{ inputs.semgrep_version }}
-        HADOLINT_VERSION: ${{ inputs.hadolint_version }}
-        ACTIONLINT_VERSION: ${{ inputs.actionlint_version }}
-        KUSTOMIZE_VERSION: ${{ inputs.kustomize_version }}
       run: bash "$GITHUB_ACTION_PATH/scripts/ci-install-tools.sh"
 
     # ── Security ──────────────────────────────────────────────────────────────
@@ -463,9 +437,14 @@ runs:
         LINT_BLOCK: ${{ steps.report.outputs.lint_blocking }}
         SEC_RESULT: ${{ steps.report.outputs.security_result }}
         LINT_RESULT: ${{ steps.report.outputs.lint_result }}
+        STRICT: ${{ inputs.strict }}
       run: |
         set +e
         fail=0
+        if [ "${STRICT:-false}" = "true" ] && { [ "$SEC_RESULT" = "error" ] || [ "$LINT_RESULT" = "error" ]; }; then
+          echo "::error title=Chargate::strict mode — a scanner failed to run (security=$SEC_RESULT, lint=$LINT_RESULT)"
+          fail=1
+        fi
         if [ "${SEC_BLOCK:-false}" = "true" ]; then
           echo "::error title=Chargate::Security scan found blocking issues (security_result=$SEC_RESULT)"
           fail=1
