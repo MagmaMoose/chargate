@@ -131,6 +131,28 @@ pre-commit install --hook-type pre-commit --hook-type pre-push
 
 Tools auto-detect: whatever you don't have installed is skipped locally, so a missing scanner never blocks your commit — CI still enforces it. Fast linters run on `commit`, heavier security scans on `push`. Full hook list in [`.pre-commit-hooks.yaml`](.pre-commit-hooks.yaml).
 
+## Enforcing it
+
+Local git hooks can't be truly *forced* — `.git/hooks` isn't cloned and `git commit --no-verify` always bypasses them. So treat local hooks as fast feedback and enforce **server-side**:
+
+- **Required status check — the real gate.** Run cinnabar on PRs (action or reusable workflow), then mark it required under **Settings → Branches → Branch protection**. Nothing merges unless cinnabar passes: zero developer setup, unbypassable.
+- **[pre-commit.ci](https://pre-commit.ci)** (optional). Hosted app runs your `.pre-commit-config.yaml` on every PR and auto-fixes — also server-side, no dev action.
+
+To make the *local* hooks install themselves (pre-push feedback without per-repo `pre-commit install`):
+
+- **Auto-install on every future clone** (one-time per machine):
+  ```sh
+  pre-commit init-templatedir ~/.git-template
+  git config --global init.templateDir ~/.git-template
+  ```
+- **Dev Containers / Codespaces** (zero-touch) — in `.devcontainer/devcontainer.json`:
+  ```json
+  "postCreateCommand": "pre-commit install -t pre-commit -t pre-push"
+  ```
+- **Node repos** (runs on `npm install`) — add to `package.json`: `"prepare": "pre-commit install -t pre-commit -t pre-push"`
+
+**Bottom line:** the CI required check is the enforcement; local hooks are convenience.
+
 ## How it's built
 
 `scripts/*.sh` hold the scan logic and obey the exit-code contract above. `action.yml` is the CI layer: detect → install pinned tools → run the scripts → upload SARIF → render the summary and enforce the gate. `.pre-commit-hooks.yaml` maps each hook to the same scripts. Nothing is implemented twice.
