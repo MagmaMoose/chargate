@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.1.2 (2026-06-03)
+
+### Bug Fixes
+
+- Bump pinned scanner versions to latest upstream
+  ([`083fe32`](https://github.com/MagmaMoose/chargate/commit/083fe324900ca9bb1b225687b828094e57bb090e))
+
+### Continuous Integration
+
+- Make update-tools push resilient to concurrent main changes
+  ([`a3876ce`](https://github.com/MagmaMoose/chargate/commit/a3876ce75cdb62b3082908cb66741bc6b11f6936))
+
+
 ## v1.1.1 (2026-06-03)
 
 ### Bug Fixes
