@@ -25,6 +25,9 @@ if [ -n "$baseline" ] && [ -f "$baseline" ]; then
   done < "$baseline"
 fi
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset SEMGREP_CONFIG SEMGREP_BASELINE
+
 # SARIF for the Security tab (CI only); best-effort.
 if sarif="$(chargate_sarif_path semgrep)"; then
   semgrep scan "${cfg_args[@]}" "${excl_args[@]}" --sarif --output "$sarif" >/dev/null 2>&1 \

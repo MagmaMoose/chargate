@@ -13,6 +13,9 @@ if [ -n "$exclude" ] && [ -f "$exclude" ]; then
   args+=(--exclude-paths "$exclude")
 fi
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset TRUFFLEHOG_EXCLUDE
+
 gh_group "TruffleHog secret detection (verified only)"
 trufflehog "${args[@]}"
 rc=$?

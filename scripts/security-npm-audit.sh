@@ -22,6 +22,9 @@ else
   exit "$CHARGATE_OK"
 fi
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset NPM_AUDIT_LEVEL
+
 gh_group "$label (level: $level)"
 "${cmd[@]}"
 rc=$?

@@ -15,6 +15,9 @@ if [ "${#files[@]}" -eq 0 ]; then
   exit "$CHARGATE_OK"
 fi
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset HADOLINT_FAILURE_THRESHOLD
+
 gh_group "hadolint (failure-threshold: $threshold, ${#files[@]} file(s))"
 hadolint --failure-threshold "$threshold" "${files[@]}"
 rc=$?

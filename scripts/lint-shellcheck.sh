@@ -15,6 +15,9 @@ if [ "${#files[@]}" -eq 0 ]; then
   exit "$CHARGATE_OK"
 fi
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset SHELLCHECK_SEVERITY
+
 gh_group "ShellCheck (severity: $severity, ${#files[@]} file(s))"
 shellcheck "--severity=$severity" "${files[@]}"
 rc=$?

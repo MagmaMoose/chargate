@@ -35,6 +35,9 @@ fi
 rendered="$(mktemp)"; trap 'rm -f "$rendered"' EXIT
 status="$CHARGATE_OK"
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset K8S_DIRECTORY KUBERNETES_VERSION SKIP_KUBECONFORM SKIP_KUBESCORE
+
 gh_group "Kustomize build (${#roots[@]} dir(s))"
 for d in "${roots[@]}"; do
   log_info "building $d"

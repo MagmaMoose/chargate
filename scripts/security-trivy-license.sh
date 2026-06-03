@@ -9,6 +9,9 @@ require_tool trivy "Trivy"
 
 severity="${TRIVY_LICENSE_SEVERITY:-UNKNOWN,HIGH,CRITICAL}"
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset TRIVY_LICENSE_SEVERITY TRIVY_SEVERITY TRIVY_EXIT_CODE TRIVY_IGNORE_UNFIXED TRIVY_IGNOREFILE
+
 gh_group "Trivy license scan (severity: $severity)"
 # Sentinel exit-code 2 ⇒ flagged licenses; trivy uses 1 for its own errors.
 trivy fs --scanners license --severity "$severity" \

@@ -18,6 +18,9 @@ if ! grep -q "\"$script_name\"[[:space:]]*:" package.json; then
 fi
 require_tool npm "npm"
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset ESLINT_SCRIPT
+
 gh_group "ESLint (npm run $script_name)"
 npm run "$script_name"
 rc=$?

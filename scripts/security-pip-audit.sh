@@ -20,6 +20,9 @@ if [ "${#reqs[@]}" -eq 0 ]; then
   exit "$CHARGATE_OK"
 fi
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset PIP_AUDIT_SERVICE
+
 gh_group "pip-audit (service: $service)"
 pip-audit --progress-spinner off --vulnerability-service "$service" "${reqs[@]}"
 rc=$?

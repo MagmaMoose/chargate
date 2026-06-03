@@ -14,6 +14,9 @@ for cfg in .checkov.yaml .checkov.yml; do
   if [ -f "$cfg" ]; then args+=(--config-file "$cfg"); break; fi
 done
 
+# Clear our config env so the tool can't re-read it (Trivy-class collision).
+unset CHECKOV_FRAMEWORKS CHECKOV_SKIP_CHECKS
+
 # Console output always; SARIF additionally when CI asks. Checkov writes
 # "<dir>/results_sarif.sarif" under the output path.
 out_args=(--output cli)
