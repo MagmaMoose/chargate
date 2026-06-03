@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Keep the pinned third-party action SHAs (checkout, paths-filter, codeql,
+  # python-semantic-release) current. Scanner CLI versions are handled separately
+  # by update-tools.yaml / versions.env.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: fix   # so a SHA bump cuts a patch release through semantic-release
+    groups:
+      actions:
+        patterns: ['*']

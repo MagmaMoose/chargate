@@ -30,7 +30,8 @@ def gh_tag(repo):
 
 
 def pypi(pkg):
-    with urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json", timeout=30) as f:
+    url = f"https://pypi.org/pypi/{pkg}/json"  # pkg is a constant tool name, not user input
+    with urllib.request.urlopen(url, timeout=30) as f:  # nosemgrep
         return json.load(f)["info"]["version"]
 
 

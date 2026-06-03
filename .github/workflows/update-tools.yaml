@@ -1,0 +1,98 @@
+name: Update tool versions
+
+# Weekly: bump versions.env to the latest upstream scanner releases, validate the
+# new versions actually work (tool smoke + strict self-scan), and only then push
+# to main and trigger a release. If a bump breaks Chargate (breaking upstream
+# change), nothing is pushed/released and an issue is opened instead.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write          # to trigger the release workflow
+
+concurrency:
+  group: chargate-update-tools
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Bump versions.env to latest upstream
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/bump-tool-versions.py
+
+      - name: Up to date
+        if: steps.bump.outputs.changed != 'true'
+        run: echo "All pinned tools are already current."
+
+      # ── Validate the bumped versions before anything is published ──
+      - name: Install every (bumped) tool
+        if: steps.bump.outputs.changed == 'true'
+        shell: bash
+        env:
+          SECURITY: 'true'
+          LINT: 'true'
+          ENABLE_SAST: 'true'
+          DET_PYTHON: 'true'
+          DET_GO: 'true'
+          DET_JS: 'true'
+          DET_IAC: 'true'
+          DET_DOCKERFILE: 'true'
+          DET_SHELL: 'true'
+          DET_WORKFLOWS: 'true'
+          DET_KUSTOMIZE: 'true'
+        run: bash scripts/ci-install-tools.sh
+
+      - name: Tool smoke test (bumped)
+        if: steps.bump.outputs.changed == 'true'
+        shell: bash
+        run: bash scripts/ci-tool-smoke.sh
+
+      - name: Strict self-scan (bumped)
+        if: steps.bump.outputs.changed == 'true'
+        uses: ./
+        with:
+          checkout: false
+          strict: true
+          security_fail: true
+          lint_fail: true
+          enable_sarif_upload: false
+
+      # ── Validation passed → land the bump and trigger a release ──
+      - name: Commit, push, trigger release
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUMMARY: ${{ steps.bump.outputs.summary }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add versions.env
+          git commit -m "fix: bump pinned scanner versions to latest upstream" -m "$SUMMARY"
+          git push origin HEAD:main
+          # A GITHUB_TOKEN push doesn't trigger on:push, so kick the release explicitly.
+          gh workflow run release.yaml --ref main
+
+      - name: Open issue on validation failure
+        if: failure() && steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUMMARY: ${{ steps.bump.outputs.summary }}
+        run: |
+          body="A scheduled tool-version bump did not pass the strict gate — likely a breaking upstream change. Nothing was released."
+          body="${body}"$'\n\nAttempted bumps:\n'"${SUMMARY}"
+          body="${body}"$'\n\n'"Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh issue create --title "Chargate: scheduled tool bump failed validation" --body "${body}" --label automated || true
