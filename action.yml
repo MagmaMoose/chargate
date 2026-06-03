@@ -154,6 +154,7 @@ runs:
 
     - name: Detect changed files
       id: detect
+      continue-on-error: true
       uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
       with:
         filters: |
@@ -216,8 +217,33 @@ runs:
             - '**/kustomization.yaml'
             - '**/kustomization.yml'
 
+    - name: Resolve scan scope
+      id: scope
+      shell: bash
+      env:
+        DETECT_OK: ${{ steps.detect.outcome }}
+        D_ANY: ${{ steps.detect.outputs.any_changed }}
+        D_PY: ${{ steps.detect.outputs.python }}
+        D_GO: ${{ steps.detect.outputs.go }}
+        D_JS: ${{ steps.detect.outputs.javascript }}
+        D_IAC: ${{ steps.detect.outputs.iac }}
+        D_DOCKER: ${{ steps.detect.outputs.dockerfile }}
+        D_SHELL: ${{ steps.detect.outputs.shell }}
+        D_WF: ${{ steps.detect.outputs.workflows }}
+        D_KUST: ${{ steps.detect.outputs.kustomize }}
+      run: |
+        o() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+        if [ "$DETECT_OK" != "success" ]; then
+          echo "::warning title=Cinnabar::change detection unavailable — scanning everything (fail-safe)"
+          for k in any_changed python go javascript iac dockerfile shell workflows kustomize; do o "$k" true; done
+        else
+          o any_changed "${D_ANY:-false}"; o python "${D_PY:-false}"; o go "${D_GO:-false}"
+          o javascript "${D_JS:-false}"; o iac "${D_IAC:-false}"; o dockerfile "${D_DOCKER:-false}"
+          o shell "${D_SHELL:-false}"; o workflows "${D_WF:-false}"; o kustomize "${D_KUST:-false}"
+        fi
+
     - name: Cinnabar setup
-      if: ${{ steps.detect.outputs.any_changed == 'true' }}
+      if: ${{ steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       run: |
         echo "## 🔴 Cinnabar — detected changes" >> "$GITHUB_STEP_SUMMARY"
@@ -225,14 +251,14 @@ runs:
           echo ""
           echo "| Type | Changed |"
           echo "|------|---------|"
-          echo "| Python | ${{ steps.detect.outputs.python }} |"
-          echo "| Go | ${{ steps.detect.outputs.go }} |"
-          echo "| JavaScript/TypeScript | ${{ steps.detect.outputs.javascript }} |"
-          echo "| IaC | ${{ steps.detect.outputs.iac }} |"
-          echo "| Dockerfile | ${{ steps.detect.outputs.dockerfile }} |"
-          echo "| Shell | ${{ steps.detect.outputs.shell }} |"
-          echo "| Workflows | ${{ steps.detect.outputs.workflows }} |"
-          echo "| Kustomize | ${{ steps.detect.outputs.kustomize }} |"
+          echo "| Python | ${{ steps.scope.outputs.python }} |"
+          echo "| Go | ${{ steps.scope.outputs.go }} |"
+          echo "| JavaScript/TypeScript | ${{ steps.scope.outputs.javascript }} |"
+          echo "| IaC | ${{ steps.scope.outputs.iac }} |"
+          echo "| Dockerfile | ${{ steps.scope.outputs.dockerfile }} |"
+          echo "| Shell | ${{ steps.scope.outputs.shell }} |"
+          echo "| Workflows | ${{ steps.scope.outputs.workflows }} |"
+          echo "| Kustomize | ${{ steps.scope.outputs.kustomize }} |"
           echo ""
         } >> "$GITHUB_STEP_SUMMARY"
         if [ "${{ inputs.enable_sarif_upload }}" = "true" ]; then
@@ -241,20 +267,20 @@ runs:
         fi
 
     - name: Install tools
-      if: ${{ steps.detect.outputs.any_changed == 'true' }}
+      if: ${{ steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       env:
         SECURITY: ${{ inputs.security }}
         LINT: ${{ inputs.lint }}
         ENABLE_SAST: ${{ inputs.enable_sast }}
-        DET_PYTHON: ${{ steps.detect.outputs.python }}
-        DET_GO: ${{ steps.detect.outputs.go }}
-        DET_JS: ${{ steps.detect.outputs.javascript }}
-        DET_IAC: ${{ steps.detect.outputs.iac }}
-        DET_DOCKERFILE: ${{ steps.detect.outputs.dockerfile }}
-        DET_SHELL: ${{ steps.detect.outputs.shell }}
-        DET_WORKFLOWS: ${{ steps.detect.outputs.workflows }}
-        DET_KUSTOMIZE: ${{ steps.detect.outputs.kustomize }}
+        DET_PYTHON: ${{ steps.scope.outputs.python }}
+        DET_GO: ${{ steps.scope.outputs.go }}
+        DET_JS: ${{ steps.scope.outputs.javascript }}
+        DET_IAC: ${{ steps.scope.outputs.iac }}
+        DET_DOCKERFILE: ${{ steps.scope.outputs.dockerfile }}
+        DET_SHELL: ${{ steps.scope.outputs.shell }}
+        DET_WORKFLOWS: ${{ steps.scope.outputs.workflows }}
+        DET_KUSTOMIZE: ${{ steps.scope.outputs.kustomize }}
         ESLINT_SCRIPT: ${{ inputs.eslint_script }}
         TRIVY_VERSION: ${{ inputs.trivy_version }}
         TRUFFLEHOG_VERSION: ${{ inputs.trufflehog_version }}
@@ -267,7 +293,7 @@ runs:
     # ── Security ──────────────────────────────────────────────────────────────
     - name: 'Security · Trivy vulnerabilities'
       id: sec_trivy
-      if: ${{ inputs.security == 'true' && steps.detect.outputs.any_changed == 'true' }}
+      if: ${{ inputs.security == 'true' && steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       env:
         TRIVY_SEVERITY: ${{ inputs.trivy_severity }}
@@ -280,7 +306,7 @@ runs:
 
     - name: 'Security · TruffleHog secrets'
       id: sec_trufflehog
-      if: ${{ inputs.security == 'true' && steps.detect.outputs.any_changed == 'true' }}
+      if: ${{ inputs.security == 'true' && steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       env:
         TRUFFLEHOG_EXCLUDE: ${{ inputs.trufflehog_exclude }}
@@ -290,7 +316,7 @@ runs:
 
     - name: 'Security · Semgrep SAST'
       id: sec_semgrep
-      if: ${{ inputs.security == 'true' && inputs.enable_sast == 'true' && steps.detect.outputs.any_changed == 'true' }}
+      if: ${{ inputs.security == 'true' && inputs.enable_sast == 'true' && steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       env:
         SEMGREP_CONFIG: ${{ inputs.semgrep_config }}
@@ -301,7 +327,7 @@ runs:
 
     - name: 'Security · pip-audit (Python)'
       id: sec_pip_audit
-      if: ${{ inputs.security == 'true' && steps.detect.outputs.python == 'true' }}
+      if: ${{ inputs.security == 'true' && steps.scope.outputs.python == 'true' }}
       shell: bash
       run: |
         rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-pip-audit.sh" || rc=$?
@@ -309,7 +335,7 @@ runs:
 
     - name: 'Security · npm/yarn/pnpm audit (JS)'
       id: sec_npm_audit
-      if: ${{ inputs.security == 'true' && steps.detect.outputs.javascript == 'true' }}
+      if: ${{ inputs.security == 'true' && steps.scope.outputs.javascript == 'true' }}
       shell: bash
       env:
         NPM_AUDIT_LEVEL: ${{ inputs.npm_audit_level }}
@@ -319,7 +345,7 @@ runs:
 
     - name: 'Security · govulncheck (Go)'
       id: sec_govulncheck
-      if: ${{ inputs.security == 'true' && steps.detect.outputs.go == 'true' }}
+      if: ${{ inputs.security == 'true' && steps.scope.outputs.go == 'true' }}
       shell: bash
       run: |
         rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-govulncheck.sh" || rc=$?
@@ -327,7 +353,7 @@ runs:
 
     - name: 'Security · Checkov (IaC)'
       id: sec_checkov
-      if: ${{ inputs.security == 'true' && steps.detect.outputs.iac == 'true' }}
+      if: ${{ inputs.security == 'true' && steps.scope.outputs.iac == 'true' }}
       shell: bash
       env:
         CHECKOV_SKIP_CHECKS: ${{ inputs.checkov_skip_checks }}
@@ -337,7 +363,7 @@ runs:
 
     - name: 'Security · Trivy licenses'
       id: sec_trivy_license
-      if: ${{ inputs.security == 'true' && inputs.enable_license_scan == 'true' && steps.detect.outputs.any_changed == 'true' }}
+      if: ${{ inputs.security == 'true' && inputs.enable_license_scan == 'true' && steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       run: |
         rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-trivy-license.sh" || rc=$?
@@ -346,7 +372,7 @@ runs:
     # ── Lint ──────────────────────────────────────────────────────────────────
     - name: 'Lint · ESLint (JS)'
       id: lint_eslint
-      if: ${{ inputs.lint == 'true' && steps.detect.outputs.javascript == 'true' }}
+      if: ${{ inputs.lint == 'true' && steps.scope.outputs.javascript == 'true' }}
       shell: bash
       env:
         ESLINT_SCRIPT: ${{ inputs.eslint_script }}
@@ -356,7 +382,7 @@ runs:
 
     - name: 'Lint · Kustomize'
       id: lint_kustomize
-      if: ${{ inputs.lint == 'true' && steps.detect.outputs.kustomize == 'true' }}
+      if: ${{ inputs.lint == 'true' && steps.scope.outputs.kustomize == 'true' }}
       shell: bash
       env:
         K8S_DIRECTORY: ${{ inputs.k8s_directory }}
@@ -369,7 +395,7 @@ runs:
 
     - name: 'Lint · Hadolint (Dockerfile)'
       id: lint_hadolint
-      if: ${{ inputs.lint == 'true' && steps.detect.outputs.dockerfile == 'true' }}
+      if: ${{ inputs.lint == 'true' && steps.scope.outputs.dockerfile == 'true' }}
       shell: bash
       run: |
         rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-hadolint.sh" || rc=$?
@@ -377,7 +403,7 @@ runs:
 
     - name: 'Lint · ShellCheck'
       id: lint_shellcheck
-      if: ${{ inputs.lint == 'true' && steps.detect.outputs.shell == 'true' }}
+      if: ${{ inputs.lint == 'true' && steps.scope.outputs.shell == 'true' }}
       shell: bash
       run: |
         rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-shellcheck.sh" || rc=$?
@@ -385,7 +411,7 @@ runs:
 
     - name: 'Lint · actionlint'
       id: lint_actionlint
-      if: ${{ inputs.lint == 'true' && steps.detect.outputs.workflows == 'true' }}
+      if: ${{ inputs.lint == 'true' && steps.scope.outputs.workflows == 'true' }}
       shell: bash
       run: |
         rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-actionlint.sh" || rc=$?
@@ -393,7 +419,7 @@ runs:
 
     # ── SARIF upload ──────────────────────────────────────────────────────────
     - name: Upload SARIF
-      if: ${{ always() && inputs.enable_sarif_upload == 'true' && steps.detect.outputs.any_changed == 'true' && env.CINNABAR_SARIF_DIR != '' }}
+      if: ${{ always() && inputs.enable_sarif_upload == 'true' && steps.scope.outputs.any_changed == 'true' && env.CINNABAR_SARIF_DIR != '' }}
       continue-on-error: true
       uses: github/codeql-action/upload-sarif@f5c2471be782132e47a6e6f9c725e56730d6e9a3 # v3.32.3
       with:
@@ -406,7 +432,7 @@ runs:
       if: ${{ always() }}
       shell: bash
       env:
-        DET_ANY: ${{ steps.detect.outputs.any_changed }}
+        DET_ANY: ${{ steps.scope.outputs.any_changed }}
         SECURITY: ${{ inputs.security }}
         LINT: ${{ inputs.lint }}
         SECURITY_FAIL: ${{ inputs.security_fail }}
@@ -430,7 +456,7 @@ runs:
       run: bash "$GITHUB_ACTION_PATH/scripts/ci-report.sh"
 
     - name: Gate
-      if: ${{ always() && steps.detect.outputs.any_changed == 'true' }}
+      if: ${{ always() && steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       env:
         SEC_BLOCK: ${{ steps.report.outputs.security_blocking }}
