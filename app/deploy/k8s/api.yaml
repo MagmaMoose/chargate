@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chargate-api
+  labels: { app: chargate-api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: chargate-api }
+  template:
+    metadata:
+      labels: { app: chargate-api }
+    spec:
+      containers:
+        - name: api
+          image: chargate-api
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: CHARGATE_SKIP_MIGRATE   # migrations run as a separate Job
+              value: "1"
+          envFrom:
+            - secretRef:
+                name: chargate-secrets
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chargate-api
+spec:
+  selector: { app: chargate-api }
+  ports:
+    - port: 80
+      targetPort: 8000

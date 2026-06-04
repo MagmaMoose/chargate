@@ -80,6 +80,21 @@ jobs:
           assert all({"path", "start_line", "end_line", "annotation_level", "message"} <= a.keys() for a in d["annotations"])
           print("annotations:", len(d["annotations"]))
           PY
-          # Worker unit tests (signature verification + event routing).
-          ( cd app/worker && node --test )
-          echo "annotations + worker ok"
+          echo "annotations ok"
+
+  backend:
+    name: Backend tests (app/api)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Install + test
+        working-directory: app/api
+        run: |
+          python -m pip install --quiet -e '.[dev]'
+          ruff check chargate_api
+          pytest -q

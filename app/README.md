@@ -1,128 +1,98 @@
-# Chargate as a GitHub App
+# Chargate — GitHub App + centralised Security tab
 
-Install Chargate once on an org and **every repository is scanned on every pull
-request — with no workflow file in any repo.** New repos are covered the moment
-they're created. The Marketplace action still exists for teams who want to wire a
-scan step into their own pipelines; the App is the zero-config option for rolling
-coverage across a whole org without a PR per repo.
+Install the Chargate App once on an org and every repository is scanned on every
+pull request, with **no workflow file in any repo**. Findings stream into a
+multi-tenant store and a centralised web UI — a "Security tab" that works across
+your whole fleet, on private repos, **without GitHub Advanced Security**.
 
-## How it works
+This directory is the product:
+
+| Path | What it is |
+|------|------------|
+| [`api/`](api/) | FastAPI + Postgres backend — webhooks, GitHub App auth, Check Runs, findings store, query API |
+| [`web/`](web/) | React + Vite + TypeScript frontend — the centralised Security tab |
+| [`../.github/workflows/app-scan.yaml`](../.github/workflows/app-scan.yaml) | the scan engine (GitHub Actions, runs `magmamoose/chargate@v1`) |
+| [`deploy/`](deploy/) | k8s manifests + Cloudflare guide; [`docker-compose.yml`](docker-compose.yml) for local |
+
+## Architecture
 
 ```
-  PR opened/updated
-        │
-        ▼
-  GitHub App webhook ──────► Cloudflare Worker (app/worker)
-                                   │  verify HMAC signature
-                                   │  repository_dispatch ──► engine repo
-                                   ▼
-                       .github/workflows/app-scan.yaml (in magmamoose/chargate)
-                                   │  mint App token (scoped to the target repo)
-                                   │  open Check Run "Chargate"  (in progress)
-                                   │  checkout target @ PR head
-                                   │  run magmamoose/chargate@v1  (report mode)
-                                   │  SARIF → annotations
-                                   ▼
-                       Check Run completed on the PR  +  HTML dashboard artifact
+ PR opened/updated
+      │  webhook (HMAC verified)
+      ▼
+ FastAPI backend (api/) ──── owns the App private key ────────────────┐
+      │  create Check Run (in_progress)                               │
+      │  repository_dispatch  ──►  app-scan.yaml (GitHub Actions)      │
+      │     payload: scan_id, read-only repo_token, one-time ingest_token
+      │                              │  checkout target @ PR head      │
+      │                              │  run magmamoose/chargate@v1     │
+      │                              ▼                                 │
+      │◄──── POST SARIF /scans/{id}/results (ingest_token) ────────────┘
+      │  parse → findings (Postgres, tenant = installation)
+      │  complete Check Run (conclusion + annotations)
+      ▼
+ React UI (web/)  ◄── GitHub OAuth ── shows findings for the installations you can access
 ```
 
-Two moving parts you deploy:
+The backend holds **all** GitHub credentials. The Actions runner gets only two
+short-lived, single-purpose tokens per scan (a read-only checkout token and a
+one-time ingest token) and stores nothing.
 
-1. **The webhook worker** (`app/worker`) — a tiny Cloudflare Worker. It verifies
-   the webhook is genuinely from GitHub, then fires a `repository_dispatch` at the
-   engine repo. It is **keyless**: it never holds the App's private key.
-2. **The scan engine** (`.github/workflows/app-scan.yaml`, already in this repo) —
-   does the real work on GitHub-hosted runners and reports a Check Run.
+## Multi-tenant + access control
 
-### Least privilege
-
-The customer-facing App is **read-only on code**: `Checks: write`, `Contents:
-read`, `Pull requests: read`, `Metadata: read`. The engine mints an installation
-token scoped to a **single** target repo per scan. The only write-capable
-credential in the system is a fine-grained token that can do exactly one thing —
-`repository_dispatch` to the engine repo.
-
----
+- **Tenant** = the GitHub account (org/user) that installed the App. Every
+  finding row carries its `account_id`.
+- Users **sign in with GitHub**; the backend reads `/user/installations` and
+  scopes every query to the installations that user can access. One deployment
+  serves many orgs without cross-tenant leakage.
 
 ## Setup
 
 ### 1. Create the GitHub App
+- **Permissions**: Checks → *Read & write*; Contents → *Read-only*; Pull
+  requests → *Read-only*; Metadata → *Read-only*.
+- **Subscribe to events**: Pull request, Check run, Installation,
+  Installation repositories.
+- **Webhook URL**: `https://<your-backend>/api/v1/webhooks/github`; set a
+  **webhook secret**.
+- **OAuth**: set the callback URL to `https://<your-backend>/api/v1/auth/callback`;
+  note the **client ID/secret** (used for user login).
+- Generate a **private key** and note the **App ID**.
+- See [`app-manifest.json`](app-manifest.json) to bootstrap most of this.
 
-Either import [`app-manifest.json`](./app-manifest.json) via
-`https://github.com/organizations/<org>/settings/apps/new?manifest` (edit the
-webhook URL first), or create it by hand with these settings:
+### 2. Deploy the backend + frontend
+Pick a target — all use the same images:
+- **Local / testing**: `cp api/.env.example api/.env` (fill in the App + OAuth
+  values), then `docker compose up --build` → UI on `:8080`, API on `:8000`.
+- **Kubernetes**: `kubectl apply -k deploy/k8s` (edit the Secret + Ingress host).
+- **Cloudflare** (first-class): see [`deploy/cloudflare/`](deploy/cloudflare/).
 
-- **Webhook URL**: your Worker URL (from step 2 — set a placeholder for now).
-- **Webhook secret**: generate a strong random string; keep it for step 2.
-- **Repository permissions**: Checks → *Read & write*; Contents → *Read-only*;
-  Pull requests → *Read-only*; Metadata → *Read-only*.
-- **Subscribe to events**: *Pull request*, *Check run*.
-- After creating: note the **App ID**, and **generate a private key** (downloads a
-  `.pem`).
+Map `/api/*` to the backend and everything else to the frontend on one hostname
+so the session cookie stays first-party.
 
-### 2. Deploy the webhook worker
+### 3. Install the App
+Install on your org (all repos or a selection). Open a PR → the **Chargate**
+check appears, and findings show up in the UI.
 
-```sh
-cd app/worker
-npm install
-
-# Repo that hosts app-scan.yaml — edit [vars] in wrangler.toml if not this repo.
-npx wrangler secret put GITHUB_WEBHOOK_SECRET   # the secret from step 1
-npx wrangler secret put ENGINE_DISPATCH_TOKEN   # see below
-npx wrangler deploy
-```
-
-`ENGINE_DISPATCH_TOKEN` is a **fine-grained personal access token** scoped to the
-engine repo (`magmamoose/chargate`) only, with **Contents: read and write**
-(required to send a repository dispatch). Nothing else.
-
-Copy the deployed Worker URL (`https://chargate-app.<subdomain>.workers.dev`) back
-into the App's **Webhook URL** (step 1).
-
-### 3. Give the engine the App credentials
-
-In the engine repo (`magmamoose/chargate`) → Settings → Secrets and variables →
-Actions, add:
-
-- `CHARGATE_APP_ID` — the App ID from step 1.
-- `CHARGATE_APP_PRIVATE_KEY` — the full contents of the `.pem` private key.
-
-> The engine workflow needs a chargate release that supports the App (the action
-> must accept `enable_dashboard`). Pin `uses: magmamoose/chargate@v1` to such a
-> release.
-
-### 4. Install the App
-
-Install the App on the org and choose **All repositories** (or a selection).
-That's it — open a PR and the **Chargate** check appears.
-
-### 5. (Optional) Make it blocking
-
-By default the check is **advisory** (report-only): findings show as annotations
-and a neutral check, but don't block merges.
-
-- To fail the check on critical/high findings, set repository variable
-  `CHARGATE_BLOCKING=true` in the engine repo.
-- To enforce on a target repo, add **Chargate** as a required status check in its
-  branch protection / ruleset.
-
----
-
-## Notes & limits
-
-- **Forked PRs** are skipped in v1 (the App isn't installed on the fork, so its
-  head can't be fetched). PRs from branches in the same repo are scanned.
-- **Re-runs**: clicking *Re-run* on the Chargate check re-dispatches a fresh scan.
-- **Findings detail**: inline annotations are capped at 50 by the GitHub API; the
-  full set is always in the **chargate-security-dashboard** artifact on the run.
-- **Private repos**: no GitHub Advanced Security needed — SARIF upload is off and
-  findings surface via the Check Run + dashboard artifact instead.
+By default the check is **advisory** (neutral on findings). Set
+`CHARGATE_DEFAULT_BLOCKING=true` to fail on critical/high, and add **Chargate**
+as a required check to enforce.
 
 ## Local development
 
 ```sh
-cd app/worker
-npm install
-npm test            # unit tests for signature verification + event routing
-npx wrangler dev    # local worker; POST signed sample webhooks to it
+# Backend
+cd app/api && pip install -e '.[dev]' && pytest
+uvicorn chargate_api.main:app --reload         # needs a local Postgres + .env
+
+# Frontend
+cd app/web && npm install && npm run dev        # http://localhost:5173
+
+# Or the whole stack
+cd app && docker compose up --build
 ```
+
+## Limits (v1)
+- Forked-PR heads are skipped (the App isn't installed on the fork).
+- Inline Check Run annotations are capped at 50 by GitHub; the full set lives in
+  the UI and the per-run dashboard artifact.

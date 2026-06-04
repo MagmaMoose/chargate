@@ -1,0 +1,31 @@
+# Cloudflare Containers config for the Chargate backend.
+# Builds app/api/Dockerfile and runs it as a container, fronted by a Worker.
+# Postgres is reached through Hyperdrive. Secrets are set via `wrangler secret`
+# or the dashboard — never in this file.
+name = "chargate-api"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[[containers]]
+class_name = "ChargateBackend"
+image = "../../api/Dockerfile"
+instances = 2
+port = 8000
+
+[[durable_objects.bindings]]
+name = "BACKEND"
+class_name = "ChargateBackend"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChargateBackend"]
+
+# Pooled Postgres. Create with:
+#   wrangler hyperdrive create chargate-db --connection-string "postgres://…"
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_HYPERDRIVE_ID"
+
+[vars]
+CHARGATE_ENGINE_REPO = "magmamoose/chargate"
+CHARGATE_ENVIRONMENT = "production"

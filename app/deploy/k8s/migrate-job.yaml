@@ -1,0 +1,18 @@
+# Runs alembic migrations once per deploy. The API Deployment skips migrations
+# (CHARGATE_SKIP_MIGRATE=1) so replicas don't race.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chargate-migrate
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: chargate-api
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef:
+                name: chargate-secrets

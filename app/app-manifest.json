@@ -4,9 +4,11 @@
   "url": "https://github.com/magmamoose/chargate",
   "public": false,
   "hook_attributes": {
-    "url": "https://REPLACE-WITH-YOUR-WORKER-URL.workers.dev",
+    "url": "https://REPLACE-WITH-YOUR-BACKEND/api/v1/webhooks/github",
     "active": true
   },
+  "callback_urls": ["https://REPLACE-WITH-YOUR-BACKEND/api/v1/auth/callback"],
+  "request_oauth_on_install": false,
   "default_permissions": {
     "checks": "write",
     "contents": "read",
@@ -15,6 +17,8 @@
   },
   "default_events": [
     "pull_request",
-    "check_run"
+    "check_run",
+    "installation",
+    "installation_repositories"
   ]
 }

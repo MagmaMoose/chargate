@@ -1,0 +1,35 @@
+# Routes the API under /api and /healthz to the backend, everything else to the
+# SPA. Adjust host + ingress class + TLS for your cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chargate
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [chargate.example.com]
+      secretName: chargate-tls
+  rules:
+    - host: chargate.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: chargate-api
+                port: { number: 80 }
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: chargate-api
+                port: { number: 80 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chargate-web
+                port: { number: 80 }

@@ -48,10 +48,13 @@ once on the org and every repository is scanned on every pull request, **with no
 workflow file in any repo**, new repos included automatically. Results land as a
 **Check Run** on the PR (plus the HTML dashboard artifact below).
 
-Under the hood it reuses everything here: a tiny Cloudflare Worker verifies the
-webhook and dispatches to a workflow that runs `magmamoose/chargate@v1` against
-the target repo and reports back. The App is **read-only on your code** (Checks:
-write, Contents/Pull requests: read). Full setup in [`app/README.md`](app/README.md).
+Under the hood it reuses everything here: a FastAPI backend verifies the webhook,
+dispatches to a workflow that runs `magmamoose/chargate@v1` against the target
+repo, and ingests the SARIF into Postgres. Findings land on the PR as a **Check
+Run** and in a centralised **React "Security tab"** (GitHub OAuth, multi-tenant)
+that works across every repo without GitHub Advanced Security. The App is
+**read-only on your code** (Checks: write, Contents/Pull requests: read). Full
+architecture and setup in [`app/README.md`](app/README.md).
 
 ## What runs
 

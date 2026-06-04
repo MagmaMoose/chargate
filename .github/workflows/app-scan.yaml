@@ -1,84 +1,47 @@
-# Chargate GitHub App — central scan engine.
+# Chargate GitHub App — scan engine.
 #
-# Fired by repository_dispatch from the Chargate webhook worker (app/worker) when
-# a pull request opens or updates in an installed repo. This runs the published
-# Chargate action against the *target* repo and reports the result as a Check Run
-# on the PR — so installed repos get scanned with no workflow file of their own.
+# Fired by repository_dispatch from the Chargate backend (app/api) when a PR opens
+# or updates in an installed repo. Runs the published Chargate action against the
+# target repo and POSTs the SARIF back to the backend, which stores the findings
+# and completes the Check Run.
 #
-# Auth model: the customer-facing GitHub App is read-only (Checks: write,
-# Contents: read, Pull requests: read). We mint a short-lived installation token
-# scoped to the single target repo for checkout + the Check Run; nothing here can
-# write to customer code.
-#
-# Requires repo secrets CHARGATE_APP_ID and CHARGATE_APP_PRIVATE_KEY (the App's
-# credentials), and a chargate release that supports the App (the action must set
-# CHARGATE_SARIF_DIR for the dashboard — i.e. the version that added
-# `enable_dashboard`). See app/README.md.
+# This workflow holds NO standing credentials. The backend passes, per scan:
+#   • repo_token   — a read-only token scoped to just the target repo (checkout)
+#   • ingest_token — a one-time bearer to POST results for this scan only
+# Both are short-lived and never logged.
 name: Chargate App Scan
 
 on:
   repository_dispatch:
     types: [chargate-scan]
 
-# We act entirely through the minted App token, never the workflow's own
-# GITHUB_TOKEN — so drop its permissions to nothing.
 permissions: {}
 
-# One scan per target commit; a new push supersedes the in-flight run.
 concurrency:
-  group: chargate-${{ github.event.client_payload.owner }}-${{ github.event.client_payload.repo }}-${{ github.event.client_payload.head_sha }}
+  group: chargate-${{ github.event.client_payload.full_name }}-${{ github.event.client_payload.head_sha }}
   cancel-in-progress: true
 
 jobs:
   scan:
-    name: Scan ${{ github.event.client_payload.owner }}/${{ github.event.client_payload.repo }}
+    name: Scan ${{ github.event.client_payload.full_name }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      OWNER: ${{ github.event.client_payload.owner }}
-      REPO: ${{ github.event.client_payload.repo }}
+      FULL_NAME: ${{ github.event.client_payload.full_name }}
       HEAD_SHA: ${{ github.event.client_payload.head_sha }}
-      PULL_NUMBER: ${{ github.event.client_payload.pull_number }}
-      # Report-only by default. Set repository variable CHARGATE_BLOCKING=true to
-      # fail the check (and block, if it's a required check) on critical/high.
-      BLOCKING: ${{ vars.CHARGATE_BLOCKING || 'false' }}
     steps:
-      - name: Mint installation token (scoped to target repo)
-        id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.CHARGATE_APP_ID }}
-          private-key: ${{ secrets.CHARGATE_APP_PRIVATE_KEY }}
-          owner: ${{ env.OWNER }}
-          repositories: ${{ env.REPO }}
-
-      - name: Open check run
-        id: check
-        env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-        run: |
-          id=$(gh api "repos/$OWNER/$REPO/check-runs" \
-            -f name='Chargate' \
-            -f head_sha="$HEAD_SHA" \
-            -f status='in_progress' \
-            --jq '.id')
-          echo "id=$id" >> "$GITHUB_OUTPUT"
-          echo "Opened check run $id on $OWNER/$REPO@$HEAD_SHA"
-
       - name: Checkout target repo
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
-          repository: ${{ env.OWNER }}/${{ env.REPO }}
-          ref: ${{ env.HEAD_SHA }}
-          token: ${{ steps.token.outputs.token }}
+          repository: ${{ github.event.client_payload.full_name }}
+          ref: ${{ github.event.client_payload.head_sha }}
+          token: ${{ github.event.client_payload.repo_token }}
           fetch-depth: 0
           persist-credentials: false
 
-      # Scans the checked-out target at the workspace root. checkout:false because
-      # we already have the code; enable_sarif_upload:false (no GHAS / no perms),
-      # enable_dashboard:true so the action still emits SARIF (→ CHARGATE_SARIF_DIR)
-      # and the HTML dashboard artifact. security_fail:false — the *check
-      # conclusion* below decides blocking, not the action's exit code.
+      # Scans the checked-out target at the workspace root. enable_dashboard:true so
+      # the action still emits SARIF (→ CHARGATE_SARIF_DIR); we never block here —
+      # the backend decides the check conclusion from the stored findings.
       - name: Run Chargate
         id: scan
         continue-on-error: true
@@ -90,55 +53,32 @@ jobs:
           enable_sarif_upload: false
           enable_dashboard: true
 
-      # Engine scripts come from this repo, checked out *after* the scan so they
-      # never pollute what was scanned. RUNNER_TEMP holds the SARIF the action wrote.
-      - name: Checkout engine scripts
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          path: .chargate-engine
-          persist-credentials: false
-
-      - name: Build check output from SARIF
-        id: annotate
-        run: |
-          python3 .chargate-engine/scripts/sarif-to-annotations.py \
-            --sarif-dir "${CHARGATE_SARIF_DIR:-$RUNNER_TEMP/chargate-sarif}" \
-            --out "$RUNNER_TEMP/check-output.json"
-
-      - name: Complete check run
-        if: ${{ always() && steps.check.outputs.id != '' }}
+      - name: Post results to Chargate backend
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-          SCAN_OUTCOME: ${{ steps.scan.outcome }}
-          SEC_RESULT: ${{ steps.scan.outputs.security_result }}
-          LINT_RESULT: ${{ steps.scan.outputs.lint_result }}
-          HAS_FINDINGS: ${{ steps.annotate.outputs.has_findings }}
-          HAS_BLOCKING: ${{ steps.annotate.outputs.has_blocking }}
+          INGEST_URL: ${{ github.event.client_payload.ingest_url }}
+          INGEST_TOKEN: ${{ github.event.client_payload.ingest_token }}
+          SEC: ${{ steps.scan.outputs.security_result }}
+          LINT: ${{ steps.scan.outputs.lint_result }}
         run: |
-          # Conclusion policy:
-          #   scanner error / no output  → neutral (fail-safe: never block on a broken scan)
-          #   blocking mode + crit/high  → failure
-          #   findings (advisory)        → neutral
-          #   clean                      → success
-          out="$RUNNER_TEMP/check-output.json"
-          if [ ! -s "$out" ] || [ "$SEC_RESULT" = "error" ] || [ "$LINT_RESULT" = "error" ]; then
-            conclusion=neutral
-            [ -s "$out" ] || out=""
-          elif [ "$HAS_FINDINGS" = "true" ]; then
-            if [ "$BLOCKING" = "true" ] && [ "$HAS_BLOCKING" = "true" ]; then
-              conclusion=failure
-            else
-              conclusion=neutral
-            fi
-          else
-            conclusion=success
-          fi
-          echo "Concluding check ${{ steps.check.outputs.id }} → $conclusion"
-          if [ -n "$out" ]; then
-            jq -n --slurpfile o "$out" --arg c "$conclusion" \
-              '{status:"completed", conclusion:$c, output:$o[0]}'
-          else
-            jq -n --arg c "$conclusion" \
-              '{status:"completed", conclusion:$c,
-                output:{title:"Chargate", summary:"Scan could not produce a report — see the run log."}}'
-          fi | gh api --method PATCH "repos/$OWNER/$REPO/check-runs/${{ steps.check.outputs.id }}" --input -
+          python3 - <<'PY'
+          import glob, json, os, urllib.request
+          d = os.environ.get("CHARGATE_SARIF_DIR") or f"{os.environ['RUNNER_TEMP']}/chargate-sarif"
+          docs = []
+          for p in sorted(glob.glob(f"{d}/*.sarif")):
+              try:
+                  with open(p) as fh:
+                      docs.append(json.load(fh))
+              except Exception as exc:  # noqa: BLE001
+                  print(f"skip {p}: {exc}")
+          body = json.dumps({
+              "security_result": os.environ.get("SEC") or None,
+              "lint_result": os.environ.get("LINT") or None,
+              "sarif": docs,
+          }).encode()
+          req = urllib.request.Request(
+              os.environ["INGEST_URL"], data=body, method="POST",
+              headers={"Content-Type": "application/json",
+                       "Authorization": "Bearer " + os.environ["INGEST_TOKEN"]})
+          with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310 — backend URL from trusted dispatch
+              print("ingest:", r.status, r.read(300).decode())
+          PY
