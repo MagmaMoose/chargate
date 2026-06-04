@@ -19,126 +19,15 @@ skipped, and an empty scan renders a clean "no findings" page. It always exits 0
 unless its arguments are unusable.
 """
 import argparse
-import glob
 import html
-import json
 import os
 import sys
 from datetime import datetime, timezone
 
-# ── Severity model ───────────────────────────────────────────────────────────
-# GHAS ranks findings with a numeric `security-severity` (0.0–10.0, CVSS-like)
-# carried in the rule's properties. We bucket that the same way the Security tab
-# does, and fall back to the SARIF `level` when no score is present.
-SEVERITIES = ["critical", "high", "medium", "low", "note"]
-_LEVEL_TO_SEV = {"error": "high", "warning": "medium", "note": "note", "none": "note"}
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import sarif  # noqa: E402 — local module, path set just above
 
-
-def _bucket_score(score):
-    """CVSS-style score (float) → GHAS severity bucket, or None if unparseable."""
-    try:
-        s = float(score)
-    except (TypeError, ValueError):
-        return None
-    if s >= 9.0:
-        return "critical"
-    if s >= 7.0:
-        return "high"
-    if s >= 4.0:
-        return "medium"
-    if s > 0.0:
-        return "low"
-    return "note"
-
-
-def _severity(result, rule):
-    """Resolve a finding's severity from security-severity (preferred) or level."""
-    for src in (result.get("properties"), rule.get("properties")):
-        if isinstance(src, dict) and "security-severity" in src:
-            bucket = _bucket_score(src.get("security-severity"))
-            if bucket:
-                return bucket
-    level = result.get("level") or rule.get("defaultConfiguration", {}).get("level")
-    return _LEVEL_TO_SEV.get(level, "note")
-
-
-# ── SARIF parsing ────────────────────────────────────────────────────────────
-def _text(node):
-    """Pull human text out of a SARIF multiformatMessageString-ish node."""
-    if isinstance(node, dict):
-        return node.get("text") or node.get("markdown") or ""
-    return node if isinstance(node, str) else ""
-
-
-def _location(result):
-    """First physical location as (uri, line) — best effort, never raises."""
-    try:
-        phys = result["locations"][0]["physicalLocation"]
-        uri = phys.get("artifactLocation", {}).get("uri") or ""
-        line = phys.get("region", {}).get("startLine")
-        return uri, line
-    except (KeyError, IndexError, TypeError):
-        return "", None
-
-
-def _rule_index(run):
-    """Map ruleId → rule object for the run's driver (+ any extension)."""
-    index = {}
-    tool = run.get("tool", {}) if isinstance(run.get("tool"), dict) else {}
-    components = [tool.get("driver", {})] + list(tool.get("extensions", []) or [])
-    for comp in components:
-        for rule in (comp or {}).get("rules", []) or []:
-            if isinstance(rule, dict) and rule.get("id"):
-                index[rule["id"]] = rule
-    return index
-
-
-def _tool_name(run):
-    try:
-        return run["tool"]["driver"]["name"] or "unknown"
-    except (KeyError, TypeError):
-        return "unknown"
-
-
-def parse_sarif_file(path):
-    """Yield finding dicts from one SARIF file. Bad data is skipped, not fatal."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            doc = json.load(fh)
-    except (OSError, ValueError) as exc:
-        print(f"chargate: skipping unreadable SARIF {path}: {exc}", file=sys.stderr)
-        return
-    for run in doc.get("runs", []) or []:
-        if not isinstance(run, dict):
-            continue
-        tool = _tool_name(run)
-        rules = _rule_index(run)
-        for result in run.get("results", []) or []:
-            if not isinstance(result, dict):
-                continue
-            try:
-                rule_id = result.get("ruleId") or ""
-                rule = rules.get(rule_id, {})
-                uri, line = _location(result)
-                yield {
-                    "tool": tool,
-                    "rule_id": rule_id,
-                    "rule_name": _text(rule.get("shortDescription")) or rule_id,
-                    "severity": _severity(result, rule),
-                    "message": _text(result.get("message")).strip(),
-                    "uri": uri,
-                    "line": line,
-                    "help_uri": rule.get("helpUri") or "",
-                }
-            except Exception as exc:  # noqa: BLE001 — a single bad result must never abort the report
-                print(f"chargate: skipping malformed result in {path}: {exc}", file=sys.stderr)
-
-
-def collect(sarif_dir):
-    findings = []
-    for path in sorted(glob.glob(os.path.join(sarif_dir, "*.sarif"))):
-        findings.extend(parse_sarif_file(path))
-    return findings
+SEVERITIES = sarif.SEVERITIES
 
 
 # ── HTML rendering ───────────────────────────────────────────────────────────
@@ -205,12 +94,8 @@ JS = """
 
 
 def render_html(findings, meta):
-    counts = {sev: 0 for sev in SEVERITIES}
-    for f in findings:
-        counts[f["severity"]] = counts.get(f["severity"], 0) + 1
+    counts = sarif.counts(findings)
     tools = sorted({f["tool"] for f in findings})
-    order = {sev: i for i, sev in enumerate(SEVERITIES)}
-    findings = sorted(findings, key=lambda f: (order.get(f["severity"], 99), f["tool"], f["uri"]))
 
     cards = "".join(
         f'<div class="card {sev}"><div class="n">{counts[sev]}</div>'
@@ -304,14 +189,8 @@ def main(argv=None):
     p.add_argument("--run-url", default="", help="Link target for the commit (e.g. the run URL).")
     args = p.parse_args(argv)
 
-    if not os.path.isdir(args.sarif_dir):
-        # Not an error: no SARIF dir means nothing was scanned. Emit an empty
-        # dashboard so the artifact/page is always present and self-explaining.
-        print(f"chargate: no SARIF directory at {args.sarif_dir} — rendering empty dashboard",
-              file=sys.stderr)
-        findings = []
-    else:
-        findings = collect(args.sarif_dir)
+    # collect() tolerates a missing dir (nothing scanned) → empty, self-explaining page.
+    findings = sarif.collect(args.sarif_dir)
 
     out_dir = os.path.dirname(os.path.abspath(args.out))
     os.makedirs(out_dir, exist_ok=True)

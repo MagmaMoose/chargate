@@ -66,3 +66,20 @@ jobs:
           python3 scripts/render-dashboard.py --sarif-dir "$RUNNER_TEMP/none" --out "$RUNNER_TEMP/empty.html"
           grep -q 'No findings' "$RUNNER_TEMP/empty.html"
           echo "dashboard renderer ok"
+      - name: SARIF → check annotations
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/check.json"
+          python3 scripts/sarif-to-annotations.py --sarif-dir tests/fixtures/dashboard --out "$out"
+          # Valid JSON with the Checks output shape, mapped severities, escaped paths.
+          python3 - "$out" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          assert d["annotations"], "expected annotations"
+          assert any(a["annotation_level"] == "failure" for a in d["annotations"]), "expected a failure-level annotation"
+          assert all({"path", "start_line", "end_line", "annotation_level", "message"} <= a.keys() for a in d["annotations"])
+          print("annotations:", len(d["annotations"]))
+          PY
+          # Worker unit tests (signature verification + event routing).
+          ( cd app/worker && node --test )
+          echo "annotations + worker ok"

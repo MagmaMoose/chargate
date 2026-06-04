@@ -33,11 +33,25 @@ That's it — the action checks out your code, detects what changed, installs th
 
 | Surface | Use it when | How |
 |---|---|---|
+| **GitHub App** | You want every repo in an org scanned automatically, with no workflow file anywhere | install once — see [`app/`](app/) |
 | **Composite action** | You want a scan step inside an existing job, or full control over inputs | `uses: magmamoose/chargate@v1` |
 | **Reusable workflow** | You want an isolated job with permissions baked in, as a standalone required check | `uses: magmamoose/chargate/.github/workflows/chargate.yaml@v1` |
 | **pre-commit** | You want the same checks locally before you push | add the repo to `.pre-commit-config.yaml` (see [below](#local-pre-commit)) |
 
-See [`examples/`](examples/) for ready-to-paste files for each.
+See [`examples/`](examples/) for ready-to-paste files, and [`app/`](app/) for the App.
+
+## Run it as a GitHub App (zero config, org-wide)
+
+Dropping a workflow into every repo doesn't scale — drift, a review cycle per
+repo, and every new repo needs another PR. The **GitHub App** flips it: install
+once on the org and every repository is scanned on every pull request, **with no
+workflow file in any repo**, new repos included automatically. Results land as a
+**Check Run** on the PR (plus the HTML dashboard artifact below).
+
+Under the hood it reuses everything here: a tiny Cloudflare Worker verifies the
+webhook and dispatches to a workflow that runs `magmamoose/chargate@v1` against
+the target repo and reports back. The App is **read-only on your code** (Checks:
+write, Contents/Pull requests: read). Full setup in [`app/README.md`](app/README.md).
 
 ## What runs
 

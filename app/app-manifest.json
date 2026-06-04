@@ -1,0 +1,20 @@
+{
+  "name": "Chargate",
+  "description": "Security + lint gate for pull requests — Trivy, Semgrep, Checkov, ShellCheck and more, reported as a Check Run. Install once; every repo is scanned with no workflow file.",
+  "url": "https://github.com/magmamoose/chargate",
+  "public": false,
+  "hook_attributes": {
+    "url": "https://REPLACE-WITH-YOUR-WORKER-URL.workers.dev",
+    "active": true
+  },
+  "default_permissions": {
+    "checks": "write",
+    "contents": "read",
+    "pull_requests": "read",
+    "metadata": "read"
+  },
+  "default_events": [
+    "pull_request",
+    "check_run"
+  ]
+}

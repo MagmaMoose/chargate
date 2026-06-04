@@ -4,6 +4,7 @@
 !tests/fixtures/**/*.sarif
 *.log
 node_modules/
+.wrangler/
 .DS_Store
 .venv/
 __pycache__/

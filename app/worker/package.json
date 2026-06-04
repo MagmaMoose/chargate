@@ -1,0 +1,15 @@
+{
+  "name": "chargate-app-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chargate GitHub App webhook receiver (Cloudflare Worker).",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}
