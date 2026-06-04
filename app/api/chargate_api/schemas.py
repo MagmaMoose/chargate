@@ -1,7 +1,6 @@
 """API contract (Pydantic v2). This is the source of truth the SPA types mirror."""
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 from typing import Generic, TypeVar
 
@@ -21,7 +20,7 @@ class Me(BaseModel):
 
 
 class AccountOut(ORMModel):
-    id: uuid.UUID
+    id: str
     login: str
     account_type: str
     avatar_url: str | None = None
@@ -29,7 +28,7 @@ class AccountOut(ORMModel):
 
 # ── Repos / findings / scans ─────────────────────────────────────────────────
 class RepoOut(ORMModel):
-    id: uuid.UUID
+    id: str
     full_name: str
     name: str
     private: bool
@@ -38,7 +37,7 @@ class RepoOut(ORMModel):
 
 
 class FindingOut(ORMModel):
-    id: uuid.UUID
+    id: str
     tool: str
     rule_id: str
     rule_name: str | None
@@ -47,12 +46,12 @@ class FindingOut(ORMModel):
     path: str | None
     line: int | None
     help_uri: str | None
-    repository_id: uuid.UUID
+    repository_id: str
 
 
 class ScanOut(ORMModel):
-    id: uuid.UUID
-    repository_id: uuid.UUID
+    id: str
+    repository_id: str
     head_sha: str
     head_ref: str | None
     pull_number: int | None
@@ -98,7 +97,7 @@ class IngestIn(BaseModel):
 
 
 class IngestOut(BaseModel):
-    scan_id: uuid.UUID
+    scan_id: str
     findings: int
     totals: dict[str, int]
     conclusion: str

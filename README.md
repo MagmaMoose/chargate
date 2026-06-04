@@ -50,10 +50,11 @@ workflow file in any repo**, new repos included automatically. Results land as a
 
 Under the hood it reuses everything here: a FastAPI backend verifies the webhook,
 dispatches to a workflow that runs `magmamoose/chargate@v1` against the target
-repo, and ingests the SARIF into Postgres. Findings land on the PR as a **Check
-Run** and in a centralised **React "Security tab"** (GitHub OAuth, multi-tenant)
-that works across every repo without GitHub Advanced Security. The App is
-**read-only on your code** (Checks: write, Contents/Pull requests: read). Full
+repo, and ingests the SARIF. Findings land on the PR as a **Check Run** and in a
+centralised **React "Security tab"** (GitHub OAuth, multi-tenant) that works
+across every repo without GitHub Advanced Security. First-class hosting is
+**Cloudflare Python Workers + D1**, with the same code portable to Postgres
+(Docker/k8s) and SQLite (local). The App is **read-only on your code**. Full
 architecture and setup in [`app/README.md`](app/README.md).
 
 ## What runs

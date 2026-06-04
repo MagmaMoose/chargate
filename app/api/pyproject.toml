@@ -8,18 +8,16 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
-    "sqlalchemy[asyncio]>=2.0.36",
-    "asyncpg>=0.30",
-    "psycopg[binary]>=3.2",          # sync driver for alembic migrations
-    "alembic>=1.14",
     "httpx>=0.27",
     "pyjwt[crypto]>=2.9",
     "itsdangerous>=2.2",             # SessionMiddleware cookie signing
     "python-multipart>=0.0.12",
+    "aiosqlite>=0.20",               # SQLite driver (local/test; same dialect as D1)
+    "asyncpg>=0.30",                 # Postgres driver (Docker/k8s)
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "aiosqlite>=0.20"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -27,6 +25,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["chargate_api*"]
+
+[tool.setuptools.package-data]
+"chargate_api.db" = ["*.sql"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

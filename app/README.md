@@ -9,10 +9,20 @@ This directory is the product:
 
 | Path | What it is |
 |------|------------|
-| [`api/`](api/) | FastAPI + Postgres backend — webhooks, GitHub App auth, Check Runs, findings store, query API |
+| [`api/`](api/) | FastAPI backend — webhooks, GitHub App auth, Check Runs, findings store, query API |
+| [`api/worker/`](api/worker/) | Cloudflare Python Worker entrypoint + D1 migrations (first-class hosting) |
 | [`web/`](web/) | React + Vite + TypeScript frontend — the centralised Security tab |
 | [`../.github/workflows/app-scan.yaml`](../.github/workflows/app-scan.yaml) | the scan engine (GitHub Actions, runs `magmamoose/chargate@v1`) |
 | [`deploy/`](deploy/) | k8s manifests + Cloudflare guide; [`docker-compose.yml`](docker-compose.yml) for local |
+
+### One backend, three databases
+
+First-class hosting is **FastAPI on Cloudflare Python Workers backed by D1**. The
+data layer is a small driver abstraction over **portable SQL**, so the same code
+runs on **D1** (Workers), **Postgres** (Docker/k8s) and **SQLite** (local/tests)
+— picked from `CHARGATE_DATABASE_URL` (or the D1 binding). Because D1 is SQLite,
+the local test suite exercises the exact dialect D1 runs. See
+[`deploy/cloudflare/`](deploy/cloudflare/).
 
 ## Architecture
 
@@ -81,14 +91,14 @@ as a required check to enforce.
 ## Local development
 
 ```sh
-# Backend
+# Backend — tests run on in-memory SQLite, no services needed
 cd app/api && pip install -e '.[dev]' && pytest
-uvicorn chargate_api.main:app --reload         # needs a local Postgres + .env
+CHARGATE_DATABASE_URL='sqlite:///chargate.db' uvicorn chargate_api.main:app --reload
 
 # Frontend
 cd app/web && npm install && npm run dev        # http://localhost:5173
 
-# Or the whole stack
+# Or the whole stack on Postgres
 cd app && docker compose up --build
 ```
 

@@ -7,14 +7,11 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings
-from ..db import get_session
-from ..deps import current_user, settings_dep, get_github
+from ..deps import current_user, get_github, get_repo, settings_dep
 from ..github import GitHubApp, GitHubError
-from ..models import Account
+from ..repository import Repository
 from ..schemas import AccountOut, Me
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -67,14 +64,9 @@ def logout(request: Request):
 
 @router.get("/me", response_model=Me)
 async def me(
-    request: Request,
     user: dict = Depends(current_user),
-    db: AsyncSession = Depends(get_session),
+    repo: Repository = Depends(get_repo),
 ):
-    inst_ids = user.get("installation_ids") or []
-    accounts = []
-    if inst_ids:
-        rows = await db.execute(select(Account).where(Account.installation_id.in_(inst_ids)))
-        accounts = [AccountOut.model_validate(a) for a in rows.scalars().all()]
-    return Me(login=user["login"], name=user.get("name"),
-              avatar_url=user.get("avatar_url"), accounts=accounts)
+    accounts = await repo.accounts_for_installations(user.get("installation_ids") or [])
+    return Me(login=user["login"], name=user.get("name"), avatar_url=user.get("avatar_url"),
+              accounts=[AccountOut.model_validate(a) for a in accounts])

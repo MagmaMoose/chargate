@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CHARGATE_", env_file=".env", extra="ignore")
 
     # ── Database ─────────────────────────────────────────────────────────────
-    # async SQLAlchemy URL, e.g. postgresql+asyncpg://user:pass@host:5432/chargate
-    database_url: str = "postgresql+asyncpg://chargate:chargate@localhost:5432/chargate"
-    db_echo: bool = False
+    # Driver chosen from the URL scheme: sqlite:// (local/test), postgresql://
+    # (Docker/k8s). On Cloudflare the D1 binding is used instead of a URL.
+    database_url: str = "sqlite:///chargate.db"
 
     # ── GitHub App ───────────────────────────────────────────────────────────
     github_app_id: str = ""

@@ -1,0 +1,33 @@
+# Chargate backend on Cloudflare Python Workers + D1 (first-class deployment).
+#   wrangler d1 create chargate              # then paste database_id below
+#   wrangler d1 migrations apply chargate    # applies migrations/*.sql
+#   wrangler deploy
+# Secrets (wrangler secret put …): CHARGATE_GITHUB_APP_ID,
+#   CHARGATE_GITHUB_APP_PRIVATE_KEY, CHARGATE_GITHUB_WEBHOOK_SECRET,
+#   CHARGATE_GITHUB_OAUTH_CLIENT_ID, CHARGATE_GITHUB_OAUTH_CLIENT_SECRET,
+#   CHARGATE_SESSION_SECRET, CHARGATE_INGEST_SECRET.
+name = "chargate-api"
+main = "worker/entry.py"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["python_workers"]
+
+# Pyodide packages for the FastAPI app.
+[[python_packages]]
+package = "fastapi"
+[[python_packages]]
+package = "pydantic"
+[[python_packages]]
+package = "pyjwt"
+[[python_packages]]
+package = "httpx"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "chargate"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "worker/migrations"
+
+[vars]
+CHARGATE_DATABASE_URL = "d1"            # the binding provides the DB; skip URL init
+CHARGATE_ENGINE_REPO = "magmamoose/chargate"
+CHARGATE_ENVIRONMENT = "production"

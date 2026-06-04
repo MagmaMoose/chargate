@@ -12,7 +12,7 @@ spec:
       containers:
         - name: migrate
           image: chargate-api
-          command: ["alembic", "upgrade", "head"]
+          command: ["python", "-m", "chargate_api.migrate"]
           envFrom:
             - secretRef:
                 name: chargate-secrets

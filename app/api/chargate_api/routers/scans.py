@@ -1,31 +1,24 @@
 """Results ingest: the Actions engine POSTs SARIF here when a scan finishes."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings
-from ..db import get_session
-from ..deps import get_github, settings_dep
+from ..deps import get_github, get_repo, settings_dep
 from ..github import GitHubApp
-from ..models import Account, Finding, Repository, Scan, ScanStatus, Severity
+from ..repository import Repository
 from ..sarif import SEVERITIES, findings_from_docs, tally
 from ..schemas import IngestIn, IngestOut
 from ..security import verify_ingest_token
 
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 
-_BLOCKING_SEV = {"critical", "high"}
-
 
 def _conclusion(totals: dict[str, int], blocking: bool, errored: bool) -> str:
     if errored:
         return "neutral"                       # never block on a broken scanner
-    total = sum(totals.values())
-    if total == 0:
+    if sum(totals.values()) == 0:
         return "success"
     if blocking and (totals.get("critical", 0) + totals.get("high", 0)) > 0:
         return "failure"
@@ -62,7 +55,7 @@ async def ingest_results(
     scan_id: str = Path(...),
     authorization: str = Header(default=""),
     settings: Settings = Depends(settings_dep),
-    db: AsyncSession = Depends(get_session),
+    repo: Repository = Depends(get_repo),
     gh: GitHubApp = Depends(get_github),
 ):
     token = authorization.removeprefix("Bearer ").strip()
@@ -72,38 +65,27 @@ async def ingest_results(
     except (jwt.InvalidTokenError, ValueError) as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid ingest token") from exc
 
-    scan = await db.get(Scan, scan_id)
+    scan = await repo.get_scan(scan_id)
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown scan")
 
     parsed = findings_from_docs(payload.sarif)
     totals = tally(parsed)
     errored = (payload.security_result == "error") or (payload.lint_result == "error")
-
-    for f in parsed:
-        db.add(Finding(
-            scan_id=scan.id, account_id=scan.account_id, repository_id=scan.repository_id,
-            tool=f["tool"], rule_id=f["rule_id"], rule_name=f["rule_name"],
-            severity=Severity(f["severity"]), message=f["message"], path=f["path"],
-            line=f["line"], help_uri=f["help_uri"], fingerprint=f["fingerprint"],
-        ))
-
     conclusion = _conclusion(totals, settings.default_blocking, errored)
-    scan.status = ScanStatus.error if errored else ScanStatus.completed
-    scan.conclusion = conclusion
-    scan.security_result = payload.security_result
-    scan.lint_result = payload.lint_result
-    scan.totals = totals
-    scan.completed_at = datetime.now(timezone.utc)
-    await db.flush()
 
-    if scan.check_run_id:
-        repo = await db.get(Repository, scan.repository_id)
-        account = await db.get(Account, scan.account_id)
+    await repo.insert_findings(scan, parsed)
+    await repo.complete_scan(scan_id, status="error" if errored else "completed",
+                             conclusion=conclusion, security_result=payload.security_result,
+                             lint_result=payload.lint_result, totals=totals)
+
+    if scan.get("check_run_id"):
+        account = await repo.get_account(scan["account_id"])
+        repository = await repo.get_repository(scan["repository_id"])
         try:
-            await gh.complete_check_run(account.installation_id, repo.full_name,
-                                        scan.check_run_id, conclusion, _check_output(totals, parsed))
+            await gh.complete_check_run(account["installation_id"], repository["full_name"],
+                                        scan["check_run_id"], conclusion, _check_output(totals, parsed))
         except Exception:  # noqa: BLE001 — reporting failure mustn't lose the stored results
             pass
 
-    return IngestOut(scan_id=scan.id, findings=sum(totals.values()), totals=totals, conclusion=conclusion)
+    return IngestOut(scan_id=scan_id, findings=sum(totals.values()), totals=totals, conclusion=conclusion)

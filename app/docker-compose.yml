@@ -21,7 +21,7 @@ services:
     build: ./api
     env_file: ./api/.env
     environment:
-      CHARGATE_DATABASE_URL: postgresql+asyncpg://chargate:chargate@db:5432/chargate
+      CHARGATE_DATABASE_URL: postgresql://chargate:chargate@db:5432/chargate
     ports: ["8000:8000"]
     depends_on:
       db:
