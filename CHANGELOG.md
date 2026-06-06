@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.3 (2026-06-06)
+
+### Bug Fixes
+
+- Bump the actions group with 3 updates ([#1](https://github.com/MagmaMoose/chargate/pull/1),
+  [`aada2cd`](https://github.com/MagmaMoose/chargate/commit/aada2cde582eee659cfb704cf9d27eb3e3664298))
+
+
 ## v1.1.2 (2026-06-03)
 
 ### Bug Fixes
