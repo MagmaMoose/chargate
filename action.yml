@@ -229,22 +229,29 @@ runs:
         CHARGATE_PLATFORM_SHA: 0acafb2cb991d84e772be412a60c08b7dda3a44e
       run: |
         set -euo pipefail
-        base="${RUNNER_TEMP:-/tmp}/chargate-platform"
+        tmp_repo="${RUNNER_TEMP:-/tmp}/chargate-platform-repo"
         runtime="${RUNNER_TEMP:-/tmp}/chargate-runtime"
-        rm -rf "$base" "$runtime"
-        mkdir -p "$base" "$runtime"
+        rm -rf "$tmp_repo" "$runtime"
+        mkdir -p "$tmp_repo" "$runtime"
 
-        platform_archive="https://codeload.github.com/MagmaMoose/platform/tar.gz/$CHARGATE_PLATFORM_SHA"
-        curl -fsSL --retry 3 --retry-delay 2 "$platform_archive" -o "$base/platform.tgz"
-        tar -xzf "$base/platform.tgz" -C "$base"
+        # Sparse fetch: only materialise apps/chargate at the pinned SHA.
+        # --filter=blob:none avoids downloading blobs for unneeded paths;
+        # --depth=1 limits history to a single commit.
+        git -C "$tmp_repo" init -q
+        git -C "$tmp_repo" remote add origin "https://github.com/MagmaMoose/platform.git"
+        git -C "$tmp_repo" sparse-checkout init --cone
+        git -C "$tmp_repo" sparse-checkout set apps/chargate
+        git -C "$tmp_repo" fetch --filter=blob:none --depth=1 origin "$CHARGATE_PLATFORM_SHA"
+        git -C "$tmp_repo" -c advice.detachedHead=false checkout FETCH_HEAD
 
-        src="$(find "$base" -type d -path '*/apps/chargate' -print -quit)"
-        if [ -z "$src" ] || [ ! -d "$src/scripts" ]; then
-          echo "::error title=Chargate::platform runtime not found in pinned archive"
+        src="$tmp_repo/apps/chargate"
+        if [ ! -d "$src/scripts" ]; then
+          echo "::error title=Chargate::platform runtime not found at pinned SHA"
           exit 1
         fi
 
         cp -R "$src"/. "$runtime"/
+        rm -rf "$tmp_repo"   # free disk space; runtime copy is all that is needed
         find "$runtime/scripts" -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
         echo "CHARGATE_RUNTIME=$runtime" >> "$GITHUB_ENV"
         echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
