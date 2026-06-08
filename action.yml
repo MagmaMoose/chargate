@@ -227,7 +227,6 @@ runs:
       shell: bash
       env:
         CHARGATE_PLATFORM_SHA: 0acafb2cb991d84e772be412a60c08b7dda3a44e
-        CHARGATE_PLATFORM_ARCHIVE: https://codeload.github.com/MagmaMoose/platform/tar.gz/0acafb2cb991d84e772be412a60c08b7dda3a44e
       run: |
         set -euo pipefail
         base="${RUNNER_TEMP:-/tmp}/chargate-platform"
@@ -235,7 +234,8 @@ runs:
         rm -rf "$base" "$runtime"
         mkdir -p "$base" "$runtime"
 
-        curl -fsSL --retry 3 --retry-delay 2 "$CHARGATE_PLATFORM_ARCHIVE" -o "$base/platform.tgz"
+        platform_archive="https://codeload.github.com/MagmaMoose/platform/tar.gz/$CHARGATE_PLATFORM_SHA"
+        curl -fsSL --retry 3 --retry-delay 2 "$platform_archive" -o "$base/platform.tgz"
         tar -xzf "$base/platform.tgz" -C "$base"
 
         src="$(find "$base" -type d -path '*/apps/chargate' -print -quit)"
