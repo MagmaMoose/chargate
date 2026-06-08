@@ -1,25 +1,32 @@
 # Chargate
 
-[![CI](https://github.com/magmamoose/chargate/actions/workflows/ci.yaml/badge.svg)](https://github.com/magmamoose/chargate/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/github/license/magmamoose/chargate)](LICENSE)
 
-One security + lint gate for your repos. Trivy, TruffleHog, Semgrep, dependency audits, Checkov, ESLint, Kustomize, Hadolint, ShellCheck and actionlint — behind a single composite action with dynamic language detection, so each run does only the work the diff calls for.
+Chargate is a GitHub Marketplace composite action that runs a security and lint
+gate for pull requests. It detects what changed, installs the scanners needed for
+that change set, uploads SARIF when enabled, and reports normalized action
+outputs for security and lint results.
 
-The same scanners run **three ways from one source of truth**: as a composite **action**, as a reusable **workflow**, and as **pre-commit** hooks on your own machine. Write the scan logic once (`scripts/`), run it everywhere.
+The scanner implementation lives in
+[MagmaMoose/platform apps/chargate](https://github.com/MagmaMoose/platform/tree/0acafb2cb991d84e772be412a60c08b7dda3a44e/apps/chargate).
+This repository intentionally keeps only the Marketplace action metadata and
+user-facing release material. `action.yml` fetches the platform runtime from that
+pinned commit SHA; it does not fetch from `main`.
 
-> Sibling to [diatreme](https://github.com/magmamoose/diatreme) (release management). Diatreme ships your releases; chargate guards what goes into them.
-
-## Quickstart
+## Usage
 
 ```yaml
-name: Security & Lint
+name: Security and lint
+
 on:
   pull_request:
     branches: [main]
+
 permissions:
   contents: read
   pull-requests: read
   security-events: write
+
 jobs:
   chargate:
     runs-on: ubuntu-latest
@@ -27,136 +34,101 @@ jobs:
       - uses: magmamoose/chargate@v1
 ```
 
-That's it — the action checks out your code, detects what changed, installs the scanners it needs, and runs them. Security findings **block**; lint is **advisory** by default.
+By default, Chargate checks out the repository, runs security scanners as a
+blocking gate, runs lint checks as advisory, and uploads SARIF.
 
-## Three ways to run
-
-| Surface | Use it when | How |
-|---|---|---|
-| **Composite action** | You want a scan step inside an existing job, or full control over inputs | `uses: magmamoose/chargate@v1` |
-| **Reusable workflow** | You want an isolated job with permissions baked in, as a standalone required check | `uses: magmamoose/chargate/.github/workflows/chargate.yaml@v1` |
-| **pre-commit** | You want the same checks locally before you push | add the repo to `.pre-commit-config.yaml` (see [below](#local-pre-commit)) |
-
-See [`examples/`](examples/) for ready-to-paste files for each.
-
-## What runs
-
-Each check fires only when the relevant files change (detected with `dorny/paths-filter` in CI, and per-hook `files:` patterns locally).
-
-**Security** (blocks by default)
-
-| Check | Tool | Triggers on |
-|---|---|---|
-| Vulnerabilities | Trivy (`fs`) | always |
-| Secrets | TruffleHog (verified only) | always |
-| SAST | Semgrep | always (`enable_sast`) |
-| Python deps | pip-audit | `*.py`, `requirements*.txt`, `pyproject.toml` |
-| JS deps | npm / yarn / pnpm audit | lockfile present |
-| Go deps | govulncheck | `*.go`, `go.mod` |
-| IaC | Checkov (Terraform/K8s/Dockerfile) | `*.tf`, `k8s/**`, … |
-| Licenses | Trivy (`license`) | opt-in (`enable_license_scan`) |
-
-**Lint** (advisory by default — set `lint_fail: true` to block)
-
-| Check | Tool | Triggers on |
-|---|---|---|
-| Shell | ShellCheck | `*.sh`, `*.bash`, `*.zsh` |
-| Workflows | actionlint | `.github/workflows/**` |
-| Dockerfiles | Hadolint | `Dockerfile*` |
-| JS/TS | ESLint (`npm run lint`) | `*.js`, `*.ts`, … |
-| Kubernetes | Kustomize build + kubeconform + kube-score | `k8s/**`, `kustomization.yaml` |
-
-## Why it won't fail when it shouldn't
-
-Every scanner reports one of three things, and chargate treats them differently:
-
-| Exit | Meaning | Effect |
-|---|---|---|
-| `0` | clean | pass |
-| `1` | **real findings** | blocks (security) / advisory (lint) |
-| `2` | **the tool itself crashed or is missing** | reported as a **warning**, never as a finding |
-
-A flaky network, a missing binary, or a scanner that segfaults shows up as a *tool error* in the summary — it does **not** turn into a phantom security failure. Security fails *closed* (ambiguous results count as findings); lint fails *open*. This is the single biggest difference from hand-rolled scan workflows that pipe everything through `|| true` and conflate the two.
-
-## Key inputs
-
-| Input | Default | Description |
-|---|---|---|
-| `security` / `lint` | `true` | Toggle each domain. |
-| `security_fail` | `true` | Fail the job on security findings. |
-| `lint_fail` | `false` | Fail the job on lint findings (advisory otherwise). |
-| `checkout` | `true` | Run `actions/checkout` first; set `false` if the job already checked out. |
-| `enable_sast` | `true` | Run Semgrep. |
-| `enable_license_scan` | `false` | Run the Trivy license scan. |
-| `enable_sarif_upload` | `true` | Upload SARIF to the Security tab (needs GitHub Advanced Security on private repos). |
-| `trivy_severity` | `CRITICAL,HIGH` | Severities Trivy flags. |
-| `semgrep_config` | `p/default p/security-audit p/secrets` | Semgrep rulesets. |
-| `checkov_skip_checks` | — | Comma-separated Checkov IDs to skip. |
-| `k8s_directory` | `./k8s` | Where Kustomize lives. |
-
-Tool versions (`trivy_version`, `semgrep_version`, `hadolint_version`, `actionlint_version`, `kustomize_version`, …) are pinned inputs too. See [`action.yml`](action.yml) for the full list.
-
-**Outputs:** `scan_skipped`, `security_result`, `lint_result` (`pass | findings | error | disabled | skipped`).
-
-## Ignoring known findings
-
-All optional — chargate checks for each file before using it.
-
-| Scanner | How |
-|---|---|
-| Trivy | `.trivyignore` (CVE IDs) |
-| TruffleHog | a paths file via `trufflehog_exclude` |
-| Semgrep | `.semgrepignore` (auto-detected) or `semgrep_baseline` |
-| Checkov | `checkov_skip_checks` input, or inline `# checkov:skip=…` |
-
-## Local pre-commit
+If your job already checked out the repository:
 
 ```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/magmamoose/chargate
-    rev: v1
-    hooks:
-      - id: shellcheck
-      - id: actionlint
-      - id: trivy
-      - id: trufflehog
-      - id: semgrep
-      - id: checkov
+steps:
+  - uses: actions/checkout@v6
+    with:
+      fetch-depth: 0
+  - uses: magmamoose/chargate@v1
+    with:
+      checkout: 'false'
+      lint_fail: 'true'
 ```
 
-```sh
-pre-commit install --hook-type pre-commit --hook-type pre-push
+To disable SARIF upload, set `enable_sarif_upload: 'false'` and omit
+`security-events: write`.
+
+## Permissions
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
 ```
 
-Tools auto-detect: whatever you don't have installed is skipped locally, so a missing scanner never blocks your commit — CI still enforces it. Fast linters run on `commit`, heavier security scans on `push`. Full hook list in [`.pre-commit-hooks.yaml`](.pre-commit-hooks.yaml).
+`contents: read` and `pull-requests: read` support checkout and changed-file
+detection. `security-events: write` is required only when
+`enable_sarif_upload` is `true`.
 
-## Enforcing it
+## Inputs
 
-Local git hooks can't be truly *forced* — `.git/hooks` isn't cloned and `git commit --no-verify` always bypasses them. So treat local hooks as fast feedback and enforce **server-side**:
+| Input | Default | Description |
+| --- | --- | --- |
+| `checkout` | `true` | Run `actions/checkout` with `fetch-depth: 0` before scanning. |
+| `security` | `true` | Run security scanners. |
+| `lint` | `true` | Run lint checks. |
+| `security_fail` | `true` | Fail the job on security findings. |
+| `lint_fail` | `false` | Fail the job on lint findings. |
+| `strict` | `false` | Treat scanner tool errors as failures. |
+| `enable_sarif_upload` | `true` | Upload SARIF to the GitHub Security tab. |
+| `github_token` | `${{ github.token }}` | Token used for SARIF upload and API access. |
+| `trivy_severity` | `CRITICAL,HIGH` | Trivy vulnerability severities to flag. |
+| `trivy_ignore_unfixed` | `true` | Ignore vulnerabilities with no fix available. |
+| `trivyignore_file` | `.trivyignore` | Path to a Trivy ignore file, used only if it exists. |
+| `trufflehog_exclude` | empty | Optional TruffleHog exclude-paths file. |
+| `enable_sast` | `true` | Run Semgrep SAST. |
+| `semgrep_config` | `p/default p/security-audit p/secrets` | Space-separated Semgrep rulesets. |
+| `semgrep_baseline` | empty | Optional Semgrep ignore file. If blank, `.semgrepignore` is auto-detected. |
+| `npm_audit_level` | `high` | Minimum severity for npm, yarn, or pnpm audit. |
+| `checkov_skip_checks` | empty | Comma-separated Checkov check IDs to skip. |
+| `enable_license_scan` | `false` | Run the Trivy license-compliance scan. |
+| `eslint_script` | `lint` | Package script to run for ESLint. |
+| `k8s_directory` | `./k8s` | Directory containing Kustomize files. |
+| `kubernetes_version` | `1.32.0` | Kubernetes version for manifest validation. |
+| `skip_kubeconform` | `false` | Skip kubeconform validation. |
+| `skip_kubescore` | `false` | Skip kube-score advisory validation. |
 
-- **Required status check — the real gate.** Run chargate on PRs (action or reusable workflow), then mark it required under **Settings → Branches → Branch protection**. Nothing merges unless chargate passes: zero developer setup, unbypassable.
-- **[pre-commit.ci](https://pre-commit.ci)** (optional). Hosted app runs your `.pre-commit-config.yaml` on every PR and auto-fixes — also server-side, no dev action.
+All boolean inputs are strings, as expected by GitHub composite actions.
 
-To make the *local* hooks install themselves (pre-push feedback without per-repo `pre-commit install`):
+## Outputs
 
-- **Auto-install on every future clone** (one-time per machine):
-  ```sh
-  pre-commit init-templatedir ~/.git-template
-  git config --global init.templateDir ~/.git-template
-  ```
-- **Dev Containers / Codespaces** (zero-touch) — in `.devcontainer/devcontainer.json`:
-  ```json
-  "postCreateCommand": "pre-commit install -t pre-commit -t pre-push"
-  ```
-- **Node repos** (runs on `npm install`) — add to `package.json`: `"prepare": "pre-commit install -t pre-commit -t pre-push"`
+| Output | Description |
+| --- | --- |
+| `scan_skipped` | `true` when no relevant files changed and the scan was skipped. |
+| `security_result` | `pass`, `findings`, `error`, `disabled`, or `skipped`. |
+| `lint_result` | `pass`, `findings`, `error`, `disabled`, or `skipped`. |
 
-**Bottom line:** the CI required check is the enforcement; local hooks are convenience.
+## What Runs
 
-## How it's built
+Chargate runs tools only when the changed files call for them:
 
-`scripts/*.sh` hold the scan logic and obey the exit-code contract above. `action.yml` is the CI layer: detect → install pinned tools → run the scripts → upload SARIF → render the summary and enforce the gate. `.pre-commit-hooks.yaml` maps each hook to the same scripts. Nothing is implemented twice.
+| Area | Tools |
+| --- | --- |
+| Vulnerabilities | Trivy filesystem scan, pip-audit, npm/yarn/pnpm audit, govulncheck |
+| Secrets and SAST | TruffleHog verified-secret scan, Semgrep |
+| IaC and containers | Checkov, Hadolint |
+| Lint | ShellCheck, actionlint, ESLint, Kustomize, kubeconform, kube-score |
+| Licenses | Trivy license scan, opt-in with `enable_license_scan` |
+
+Scanner versions are pinned in the platform runtime, not as action inputs.
+
+## Versioning and Releases
+
+Use a major tag such as `magmamoose/chargate@v1` for normal adoption, or pin a
+full action commit SHA for maximum reproducibility. Updating Chargate's scanner
+logic requires updating the pinned platform SHA in `action.yml`, validating the
+action, and publishing a new GitHub Release for the Marketplace listing.
+
+This repository does not contain workflow files by design. GitHub Marketplace
+requires a public action repository to contain one root `action.yml` or
+`action.yaml` metadata file and no workflow files.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
