@@ -222,6 +222,41 @@ runs:
           o shell "${D_SHELL:-false}"; o workflows "${D_WF:-false}"; o kustomize "${D_KUST:-false}"
         fi
 
+    - name: Fetch Chargate runtime
+      id: runtime
+      shell: bash
+      env:
+        CHARGATE_PLATFORM_SHA: 0acafb2cb991d84e772be412a60c08b7dda3a44e
+      run: |
+        set -euo pipefail
+        tmp_repo="${RUNNER_TEMP:-/tmp}/chargate-platform-repo"
+        runtime="${RUNNER_TEMP:-/tmp}/chargate-runtime"
+        rm -rf "$tmp_repo" "$runtime"
+        mkdir -p "$tmp_repo" "$runtime"
+
+        # Sparse fetch: only materialise apps/chargate at the pinned SHA.
+        # --filter=blob:none avoids downloading blobs for unneeded paths;
+        # --depth=1 limits history to a single commit.
+        git -C "$tmp_repo" init -q
+        git -C "$tmp_repo" remote add origin "https://github.com/MagmaMoose/platform.git"
+        git -C "$tmp_repo" sparse-checkout init --cone
+        git -C "$tmp_repo" sparse-checkout set apps/chargate
+        git -C "$tmp_repo" fetch --filter=blob:none --depth=1 origin "$CHARGATE_PLATFORM_SHA"
+        git -C "$tmp_repo" -c advice.detachedHead=false checkout FETCH_HEAD
+
+        src="$tmp_repo/apps/chargate"
+        if [ ! -d "$src/scripts" ]; then
+          echo "::error title=Chargate::platform runtime not found at pinned SHA"
+          exit 1
+        fi
+
+        cp -R "$src"/. "$runtime"/
+        rm -rf "$tmp_repo"   # free disk space; runtime copy is all that is needed
+        find "$runtime/scripts" -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
+        echo "CHARGATE_RUNTIME=$runtime" >> "$GITHUB_ENV"
+        echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
+        echo "platform_sha=$CHARGATE_PLATFORM_SHA" >> "$GITHUB_OUTPUT"
+
     - name: Chargate setup
       if: ${{ steps.scope.outputs.any_changed == 'true' }}
       shell: bash
@@ -262,7 +297,7 @@ runs:
         DET_WORKFLOWS: ${{ steps.scope.outputs.workflows }}
         DET_KUSTOMIZE: ${{ steps.scope.outputs.kustomize }}
         ESLINT_SCRIPT: ${{ inputs.eslint_script }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/ci-install-tools.sh"
+      run: bash "$CHARGATE_RUNTIME/scripts/ci-install-tools.sh"
 
     # ── Security ──────────────────────────────────────────────────────────────
     - name: 'Security · Trivy vulnerabilities'
@@ -275,7 +310,7 @@ runs:
         TRIVY_IGNORE_UNFIXED: ${{ inputs.trivy_ignore_unfixed }}
         TRIVY_IGNOREFILE: ${{ inputs.trivyignore_file }}
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-trivy-vuln.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-trivy-vuln.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Security · TruffleHog secrets'
@@ -285,7 +320,7 @@ runs:
       env:
         TRUFFLEHOG_EXCLUDE: ${{ inputs.trufflehog_exclude }}
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-trufflehog.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-trufflehog.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Security · Semgrep SAST'
@@ -296,7 +331,7 @@ runs:
         SEMGREP_CONFIG: ${{ inputs.semgrep_config }}
         SEMGREP_BASELINE: ${{ inputs.semgrep_baseline }}
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-semgrep.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-semgrep.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Security · pip-audit (Python)'
@@ -304,7 +339,7 @@ runs:
       if: ${{ inputs.security == 'true' && steps.scope.outputs.python == 'true' }}
       shell: bash
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-pip-audit.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-pip-audit.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Security · npm/yarn/pnpm audit (JS)'
@@ -314,7 +349,7 @@ runs:
       env:
         NPM_AUDIT_LEVEL: ${{ inputs.npm_audit_level }}
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-npm-audit.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-npm-audit.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Security · govulncheck (Go)'
@@ -322,7 +357,7 @@ runs:
       if: ${{ inputs.security == 'true' && steps.scope.outputs.go == 'true' }}
       shell: bash
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-govulncheck.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-govulncheck.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Security · Checkov (IaC)'
@@ -332,7 +367,7 @@ runs:
       env:
         CHECKOV_SKIP_CHECKS: ${{ inputs.checkov_skip_checks }}
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-checkov.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-checkov.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Security · Trivy licenses'
@@ -340,7 +375,7 @@ runs:
       if: ${{ inputs.security == 'true' && inputs.enable_license_scan == 'true' && steps.scope.outputs.any_changed == 'true' }}
       shell: bash
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/security-trivy-license.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-trivy-license.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     # ── Lint ──────────────────────────────────────────────────────────────────
@@ -351,7 +386,7 @@ runs:
       env:
         ESLINT_SCRIPT: ${{ inputs.eslint_script }}
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-eslint.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-eslint.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Lint · Kustomize'
@@ -364,7 +399,7 @@ runs:
         SKIP_KUBECONFORM: ${{ inputs.skip_kubeconform }}
         SKIP_KUBESCORE: ${{ inputs.skip_kubescore }}
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-kustomize.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-kustomize.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Lint · Hadolint (Dockerfile)'
@@ -372,7 +407,7 @@ runs:
       if: ${{ inputs.lint == 'true' && steps.scope.outputs.dockerfile == 'true' }}
       shell: bash
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-hadolint.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-hadolint.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Lint · ShellCheck'
@@ -380,7 +415,7 @@ runs:
       if: ${{ inputs.lint == 'true' && steps.scope.outputs.shell == 'true' }}
       shell: bash
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-shellcheck.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-shellcheck.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     - name: 'Lint · actionlint'
@@ -388,7 +423,7 @@ runs:
       if: ${{ inputs.lint == 'true' && steps.scope.outputs.workflows == 'true' }}
       shell: bash
       run: |
-        rc=0; bash "$GITHUB_ACTION_PATH/scripts/lint-actionlint.sh" || rc=$?
+        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-actionlint.sh" || rc=$?
         echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
     # ── SARIF upload ──────────────────────────────────────────────────────────
@@ -427,7 +462,7 @@ runs:
         RC_HADOLINT: ${{ steps.lint_hadolint.outputs.rc }}
         RC_SHELLCHECK: ${{ steps.lint_shellcheck.outputs.rc }}
         RC_ACTIONLINT: ${{ steps.lint_actionlint.outputs.rc }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/ci-report.sh"
+      run: bash "$CHARGATE_RUNTIME/scripts/ci-report.sh"
 
     - name: Gate
       if: ${{ always() && steps.scope.outputs.any_changed == 'true' }}
