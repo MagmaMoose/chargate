@@ -151,6 +151,21 @@ runs:
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GH_SHA: ${{ github.sha }}
+        # All inputs flow through env (never interpolated into the script body)
+        # so a malicious value can't break out of the shell — defense-in-depth
+        # against `${{ }}` template injection.
+        MODE_IN: ${{ inputs.mode }}
+        FAIL_ON_IN: ${{ inputs.fail_on }}
+        PRECISION_IN: ${{ inputs.precision }}
+        STRICT_IN: ${{ inputs.strict }}
+        FLAVOR_IN: ${{ inputs.flavor }}
+        ML_TAG_IN: ${{ inputs.megalinter_tag }}
+        ENABLE_LINTERS_IN: ${{ inputs.enable_linters }}
+        DISABLE_LINTERS_IN: ${{ inputs.disable_linters }}
+        DD_URL_IN: ${{ inputs.defectdojo_url }}
+        DD_PRODUCT_IN: ${{ inputs.defectdojo_product }}
+        DD_ENGAGEMENT_IN: ${{ inputs.defectdojo_engagement }}
+        DD_CLOSE_OLD_IN: ${{ inputs.defectdojo_close_old }}
       run: |
         set -euo pipefail
         # Keep the SARIF under the workspace so hashFiles() (used to guard the
@@ -164,27 +179,27 @@ runs:
         head="${HEAD_REF_IN:-${PR_HEAD_SHA:-$GH_SHA}}"
 
         args=(ci
-          --mode "${{ inputs.mode }}"
-          --fail-on "${{ inputs.fail_on }}"
-          --precision "${{ inputs.precision }}"
-          --flavor "${{ inputs.flavor }}"
-          --megalinter-tag "${{ inputs.megalinter_tag }}"
+          --mode "$MODE_IN"
+          --fail-on "$FAIL_ON_IN"
+          --precision "$PRECISION_IN"
+          --flavor "$FLAVOR_IN"
+          --megalinter-tag "$ML_TAG_IN"
           --repo "."
           --head "$head"
           --sarif-out "$sarif_abs")
         [ -n "$base" ] && args+=(--base "$base")
-        [ "${{ inputs.strict }}" = "true" ] && args+=(--strict)
+        [ "$STRICT_IN" = "true" ] && args+=(--strict)
 
-        IFS=',' read -ra _en <<< "${{ inputs.enable_linters }}"
+        IFS=',' read -ra _en <<< "$ENABLE_LINTERS_IN"
         for l in "${_en[@]}"; do [ -n "$l" ] && args+=(--enable-linter "$l"); done
-        IFS=',' read -ra _di <<< "${{ inputs.disable_linters }}"
+        IFS=',' read -ra _di <<< "$DISABLE_LINTERS_IN"
         for l in "${_di[@]}"; do [ -n "$l" ] && args+=(--disable-linter "$l"); done
 
-        if [ -n "${{ inputs.defectdojo_url }}" ]; then
-          args+=(--defectdojo-url "${{ inputs.defectdojo_url }}")
-          [ -n "${{ inputs.defectdojo_product }}" ] && args+=(--dd-product "${{ inputs.defectdojo_product }}")
-          [ -n "${{ inputs.defectdojo_engagement }}" ] && args+=(--dd-engagement "${{ inputs.defectdojo_engagement }}")
-          [ "${{ inputs.defectdojo_close_old }}" != "true" ] && args+=(--dd-no-close-old)
+        if [ -n "$DD_URL_IN" ]; then
+          args+=(--defectdojo-url "$DD_URL_IN")
+          [ -n "$DD_PRODUCT_IN" ] && args+=(--dd-product "$DD_PRODUCT_IN")
+          [ -n "$DD_ENGAGEMENT_IN" ] && args+=(--dd-engagement "$DD_ENGAGEMENT_IN")
+          [ "$DD_CLOSE_OLD_IN" != "true" ] && args+=(--dd-no-close-old)
         fi
 
         chargate "${args[@]}"
