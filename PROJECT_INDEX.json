@@ -1,0 +1,124 @@
+{
+  "generated": "2026-06-15T23:13:20Z",
+  "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact). One `chargate` CLI backs three GitHub surfaces: a composite action (action.yml), a reusable workflow (gate.yml), and a pre-commit hook. The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary.",
+  "entrypoints": [
+    "src/chargate/cli.py:main",
+    "action.yml (composite action: install CLI -> `chargate ci`)",
+    ".github/workflows/gate.yml (reusable workflow, on: workflow_call)",
+    ".pre-commit-hooks.yaml (hook id `chargate`, entry: `chargate local`)"
+  ],
+  "modules": {
+    "cli": {
+      "path": "src/chargate/cli.py",
+      "purpose": "argparse dispatch for the 4 subcommands (filter-sarif | ci | local | version); wires git -> filter -> gate -> report -> DefectDojo. The only module that touches os.environ + file writes for the CLI flow.",
+      "exports": ["main", "build_parser", "cmd_filter_sarif", "cmd_ci", "cmd_local", "cmd_version", "counts_to_dict"],
+      "depends_on": ["git", "megalinter", "defectdojo", "report", "modes", "gate", "sarif.diff", "sarif.filter", "__init__"]
+    },
+    "sarif.filter": {
+      "path": "src/chargate/sarif/filter.py",
+      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O.",
+      "exports": ["filter_sarif", "classify_results", "FilterPolicy", "FilterResult", "ResultVerdict", "Precision", "NoLocationPolicy", "normalize_sarif_uri"],
+      "depends_on": ["sarif.counts", "sarif.diff", "sarif.model"]
+    },
+    "sarif.diff": {
+      "path": "src/chargate/sarif/diff.py",
+      "purpose": "Parse `git diff --unified=0 -M -C` text into a DiffIndex: per-file status (added/modified/deleted/renamed/copied) + added line ranges on the new side, read from hunk headers only. Pure.",
+      "exports": ["parse_unified_diff", "DiffIndex", "FileDiff", "normalize_path"],
+      "depends_on": []
+    },
+    "sarif.model": {
+      "path": "src/chargate/sarif/model.py",
+      "purpose": "Defensive, typed accessors over SARIF 2.1.0 result objects (primary uri, startLine, resolved level, security-severity, severity band). Tolerates missing/None fields. Pure.",
+      "exports": ["iter_results", "primary_uri", "primary_start_line", "resolve_level", "security_severity", "severity_band", "SARIF_LEVELS"],
+      "depends_on": []
+    },
+    "sarif.counts": {
+      "path": "src/chargate/sarif/counts.py",
+      "purpose": "Tally totals + net-new + per-level + per-severity-band breakdowns. Takes net-new (run_index, result_index) keys (not verdicts) to avoid an import cycle with filter. Pure.",
+      "exports": ["count_results", "Counts"],
+      "depends_on": ["sarif.model"]
+    },
+    "git": {
+      "path": "src/chargate/git.py",
+      "purpose": "The ONLY git/subprocess boundary. Resolve merge-base(base, head), produce unified-diff text, detect shallow clones, and fail loudly with a fetch-depth hint. Keeps sarif/ pure.",
+      "exports": ["compute_changed_lines", "merge_base", "diff_text", "is_shallow", "GitError", "MergeBaseError", "ShallowCloneError"],
+      "depends_on": ["sarif.diff"]
+    },
+    "gate": {
+      "path": "src/chargate/gate.py",
+      "purpose": "Turn a FilterResult into a pass/fail GateDecision against a fail_on threshold (any|critical|high|medium|low|none). Owns the exit-code constants and effective-severity-band logic.",
+      "exports": ["decide_gate", "GateDecision", "effective_band", "EXIT_OK", "EXIT_BLOCKED", "EXIT_ERROR", "FAIL_ON_CHOICES"],
+      "depends_on": ["sarif.filter"]
+    },
+    "megalinter": {
+      "path": "src/chargate/megalinter.py",
+      "purpose": "Build the MegaLinter env (DISABLE_ERRORS=true so it never gates; SARIF/JSON reporters on; normalized URIs) + docker run command, run it (runner injectable), and locate the merged SARIF tolerating filename ambiguity. Command assembly is pure/testable.",
+      "exports": ["run", "build_env", "build_docker_command", "locate_sarif", "MegaLinterConfig", "MegaLinterRun", "MegaLinterError", "DEFAULT_TAG", "CONTAINER_WORKSPACE"],
+      "depends_on": []
+    },
+    "defectdojo": {
+      "path": "src/chargate/defectdojo.py",
+      "purpose": "Optional, first-class DefectDojo import/reimport client (urllib + multipart). Always ships the FULL SARIF. Failure-isolated: import_sarif NEVER raises, returns ok=False so a DD failure can't fail the gate.",
+      "exports": ["import_sarif", "build_request", "build_form_fields", "encode_multipart", "DefectDojoConfig", "DefectDojoResult"],
+      "depends_on": []
+    },
+    "modes": {
+      "path": "src/chargate/modes.py",
+      "purpose": "Resolve run mode from an explicit flag or GITHUB_EVENT_NAME: PR (net-new gate) vs BASELINE (full scan, no gate). Mode.gates says whether to apply the gate.",
+      "exports": ["resolve_mode", "Mode"],
+      "depends_on": []
+    },
+    "report": {
+      "path": "src/chargate/report.py",
+      "purpose": "Output helpers: render the Markdown job summary (pure, testable) + append to GITHUB_STEP_SUMMARY and write key=value GITHUB_OUTPUT (no-ops off Actions).",
+      "exports": ["render_summary", "append_step_summary", "write_outputs"],
+      "depends_on": ["gate", "modes", "sarif.counts"]
+    },
+    "local": {
+      "path": "src/chargate/local.py",
+      "purpose": "Fast pre-commit staged-file runner (gitleaks + ruff, each skipped if the tool is absent). Data-driven check registry; runner + which probes injectable. Deliberately narrower than CI.",
+      "exports": ["run_local", "staged_files", "LocalCheck", "CheckOutcome", "DEFAULT_CHECKS"],
+      "depends_on": []
+    }
+  },
+  "callgraph_highlights": [
+    {
+      "caller": "cli.cmd_ci",
+      "calls": ["modes.resolve_mode", "megalinter.run", "megalinter.locate_sarif", "git.compute_changed_lines", "sarif.filter.filter_sarif", "gate.decide_gate", "defectdojo.import_sarif", "report.render_summary", "report.append_step_summary", "report.write_outputs"],
+      "note": "The full CI flow. Baseline mode skips the diff + gate (filters against an empty DiffIndex, fail_on=none). A MegaLinter tool error only fails the job under --strict."
+    },
+    {
+      "caller": "cli.cmd_filter_sarif",
+      "calls": ["git.compute_changed_lines", "sarif.filter.filter_sarif", "gate.decide_gate", "report.write_outputs"],
+      "note": "The pure-ish filter subcommand: SARIF + base/head -> filtered SARIF + counts + gate exit code. Unit-tested in isolation from Actions."
+    },
+    {
+      "caller": "sarif.filter.filter_sarif",
+      "calls": ["sarif.filter.classify_results", "sarif.counts.count_results"],
+      "note": "classify_results -> _classify_one applies FilterPolicy per result; filter_sarif deep-copies and prunes runs[].results[] to the net-new keep-set."
+    },
+    {
+      "caller": "git.compute_changed_lines",
+      "calls": ["git.merge_base", "git.diff_text", "sarif.diff.parse_unified_diff"],
+      "note": "The handoff from the IO boundary to the pure core: diff text in, DiffIndex out."
+    },
+    {
+      "caller": "gate.decide_gate",
+      "calls": ["gate.effective_band"],
+      "note": "effective_band unifies security-severity band and SARIF level (error->high, warning->medium, note->low) for threshold comparison."
+    }
+  ],
+  "hotspots": [
+    "src/chargate/sarif/filter.py",
+    "src/chargate/sarif/diff.py",
+    "src/chargate/sarif/model.py",
+    "src/chargate/cli.py",
+    "src/chargate/gate.py",
+    "src/chargate/git.py",
+    "src/chargate/megalinter.py",
+    "tests/test_sarif_filter.py",
+    "action.yml",
+    "README.md"
+  ],
+  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: sarif/ stays pure (no subprocess/os/Actions imports) so it is unit-tested with synthetic diff text + SARIF dicts. Exit codes: 0 pass, 1 blocking net-new, 2 setup/tool error (a broken scanner is a tool error, never a finding). Tests mirror modules 1:1 under tests/ (e.g. test_sarif_filter.py, test_gate.py)."
+}
