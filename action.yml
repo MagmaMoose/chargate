@@ -1,127 +1,126 @@
 name: 'Chargate'
-description: 'Security + lint gate: Trivy, Semgrep, Checkov, ShellCheck & more, with dynamic language detection.'
+description: 'MegaLinter-backed security + lint gate with net-new (PR-diff) finding gating.'
 author: 'Caleb Sargeant'
 branding:
   icon: 'shield'
   color: 'red'
 
 inputs:
-  # ── General ────────────────────────────────────────────────────────────────
+  # ── Checkout ─────────────────────────────────────────────────────────────
   checkout:
-    description: 'Run actions/checkout (fetch-depth 0) first. Set false if the caller already checked out the code.'
+    description: 'Run actions/checkout first. Net-new gating needs full history (fetch-depth 0).'
     required: false
     default: 'true'
-  security:
-    description: 'Run the security scanners.'
+  fetch_depth:
+    description: 'Checkout fetch-depth. MUST be 0 for net-new gating (merge-base).'
     required: false
-    default: 'true'
-  lint:
-    description: 'Run the lint checks.'
+    default: '0'
+
+  # ── Gate behaviour ───────────────────────────────────────────────────────
+  mode:
+    description: 'auto | pr (net-new gate) | baseline (full scan, no gate).'
     required: false
-    default: 'true'
-  security_fail:
-    description: 'Fail the job on security findings (fail closed). Set false to report only.'
+    default: 'auto'
+  fail_on:
+    description: 'Severity that blocks: any | critical | high | medium | low | none.'
     required: false
-    default: 'true'
-  lint_fail:
-    description: 'Fail the job on lint findings. Default false = advisory.'
+    default: 'any'
+  precision:
+    description: 'Net-new precision: line | file.'
     required: false
-    default: 'false'
+    default: 'line'
+  base_ref:
+    description: 'Override the base ref/SHA (default: PR base SHA from the event).'
+    required: false
+    default: ''
+  head_ref:
+    description: 'Override the head ref/SHA (default: PR head SHA, else github.sha).'
+    required: false
+    default: ''
   strict:
-    description: 'Treat a tool that could not run (a tool error) as a failure. Used by the release gate to catch breaking upstream tool changes.'
+    description: 'Fail the job if MegaLinter itself errors (a tool error, not a finding).'
     required: false
     default: 'false'
-  enable_sarif_upload:
-    description: 'Upload SARIF to the GitHub Security tab (needs GitHub Advanced Security on private repos).'
+
+  # ── MegaLinter ───────────────────────────────────────────────────────────
+  flavor:
+    description: 'MegaLinter flavor: all (full image) | security | python | go | ...'
+    required: false
+    default: 'all'
+  megalinter_tag:
+    description: 'MegaLinter image tag or digest to pin.'
+    required: false
+    default: 'v8'
+  enable_linters:
+    description: 'Comma-separated MegaLinter linter keys to enable (others off).'
+    required: false
+    default: ''
+  disable_linters:
+    description: 'Comma-separated MegaLinter linter keys to disable.'
+    required: false
+    default: ''
+
+  # ── SARIF output ─────────────────────────────────────────────────────────
+  emit_sarif_artifact:
+    description: 'Upload the full SARIF as a build artifact.'
+    required: false
+    default: 'true'
+  sarif_artifact_name:
+    description: 'Artifact name for the full SARIF.'
+    required: false
+    default: 'chargate-sarif'
+  upload_github_sarif:
+    description: 'Upload the full SARIF to the GitHub Security tab (needs GHAS on private repos).'
     required: false
     default: 'true'
   github_token:
-    description: 'Token used for SARIF upload / API access.'
+    description: 'Token for the GitHub Security-tab SARIF upload.'
     required: false
     default: ${{ github.token }}
 
-  # ── Trivy (vulnerabilities) ──────────────────────────────────────────────────
-  trivy_severity:
-    description: 'Trivy severities to flag.'
+  # ── DefectDojo (optional, first-class) ───────────────────────────────────
+  defectdojo_url:
+    description: 'DefectDojo base URL. Set to enable import of the FULL SARIF.'
     required: false
-    default: 'CRITICAL,HIGH'
-  trivy_ignore_unfixed:
-    description: 'Ignore vulnerabilities with no fix available.'
+    default: ''
+  defectdojo_token:
+    description: 'DefectDojo API token (pass a secret). Used only if defectdojo_url is set.'
+    required: false
+    default: ''
+  defectdojo_product:
+    description: 'DefectDojo product name (auto-created if missing).'
+    required: false
+    default: ''
+  defectdojo_engagement:
+    description: 'DefectDojo engagement name (auto-created if missing).'
+    required: false
+    default: ''
+  defectdojo_close_old:
+    description: 'Close findings no longer present on reimport.'
     required: false
     default: 'true'
-  trivyignore_file:
-    description: 'Path to a .trivyignore file (used only if it exists).'
-    required: false
-    default: '.trivyignore'
 
-  # ── Secrets / SAST ───────────────────────────────────────────────────────────
-  trufflehog_exclude:
-    description: 'Path to a TruffleHog exclude-paths file (used only if it exists).'
+  python_version:
+    description: 'Python version used to run the chargate CLI.'
     required: false
-    default: ''
-  enable_sast:
-    description: 'Run Semgrep SAST.'
-    required: false
-    default: 'true'
-  semgrep_config:
-    description: 'Space-separated Semgrep rulesets.'
-    required: false
-    default: 'p/default p/security-audit p/secrets'
-  semgrep_baseline:
-    description: 'Path to a Semgrep ignore file; if blank, .semgrepignore is auto-detected.'
-    required: false
-    default: ''
-
-  # ── Dependency audits ────────────────────────────────────────────────────────
-  npm_audit_level:
-    description: 'Minimum severity for npm/yarn/pnpm audit.'
-    required: false
-    default: 'high'
-
-  # ── IaC ──────────────────────────────────────────────────────────────────────
-  checkov_skip_checks:
-    description: 'Comma-separated Checkov check IDs to skip.'
-    required: false
-    default: ''
-
-  # ── Licenses (opt-in) ─────────────────────────────────────────────────────────
-  enable_license_scan:
-    description: 'Run the Trivy license-compliance scan.'
-    required: false
-    default: 'false'
-
-  # ── Lint ───────────────────────────────────────────────────────────────────────
-  eslint_script:
-    description: 'npm script to run for ESLint.'
-    required: false
-    default: 'lint'
-  k8s_directory:
-    description: 'Directory containing Kustomize files.'
-    required: false
-    default: './k8s'
-  kubernetes_version:
-    description: 'Kubernetes version for manifest validation.'
-    required: false
-    default: '1.32.0'
-  skip_kubeconform:
-    description: 'Skip kubeconform validation.'
-    required: false
-    default: 'false'
-  skip_kubescore:
-    description: 'Skip kube-score (advisory) validation.'
-    required: false
-    default: 'false'
+    default: '3.12'
 
 outputs:
-  scan_skipped:
-    description: 'true when no relevant files changed and the scan was skipped.'
-    value: ${{ steps.report.outputs.scan_skipped }}
-  security_result:
-    description: 'pass | findings | error | disabled | skipped'
-    value: ${{ steps.report.outputs.security_result }}
-  lint_result:
-    description: 'pass | findings | error | disabled | skipped'
-    value: ${{ steps.report.outputs.lint_result }}
+  mode:
+    description: 'Resolved run mode (pr | baseline).'
+    value: ${{ steps.chargate.outputs.mode }}
+  gate_result:
+    description: 'pass | fail.'
+    value: ${{ steps.chargate.outputs.gate_result }}
+  net_new_count:
+    description: 'Number of net-new (PR-introduced) findings.'
+    value: ${{ steps.chargate.outputs.net_new_count }}
+  total_count:
+    description: 'Total findings in the full SARIF (net-new + pre-existing).'
+    value: ${{ steps.chargate.outputs.total_count }}
+  sarif_path:
+    description: 'Path to the full (unfiltered) SARIF report.'
+    value: ${{ steps.chargate.outputs.sarif_path }}
 
 runs:
   using: composite
@@ -130,363 +129,93 @@ runs:
       if: ${{ inputs.checkout == 'true' }}
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
-        fetch-depth: 0
+        fetch-depth: ${{ inputs.fetch_depth }}
 
-    - name: Detect changed files
-      id: detect
-      continue-on-error: true
-      uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
-        filters: |
-          any_changed:
-            - '**/*'
-          python:
-            - '**/*.py'
-            - 'requirements*.txt'
-            - 'requirements/**'
-            - 'pyproject.toml'
-            - 'poetry.lock'
-            - 'Pipfile'
-            - 'Pipfile.lock'
-            - 'setup.py'
-            - 'setup.cfg'
-          go:
-            - '**/*.go'
-            - 'go.mod'
-            - 'go.sum'
-          javascript:
-            - '**/*.js'
-            - '**/*.jsx'
-            - '**/*.ts'
-            - '**/*.tsx'
-            - '**/*.mjs'
-            - '**/*.cjs'
-            - 'package.json'
-            - 'package-lock.json'
-            - 'yarn.lock'
-            - 'pnpm-lock.yaml'
-            - 'eslint.config.*'
-            - '.eslintrc*'
-          iac:
-            - '**/*.tf'
-            - '**/*.tfvars'
-            - '**/*.hcl'
-            - '**/k8s/**'
-            - '**/kubernetes/**'
-            - '**/kustomize/**'
-            - '**/helm/**'
-            - '**/*.yaml'
-            - '**/*.yml'
-            - '!.github/workflows/**'
-          dockerfile:
-            - '**/Dockerfile'
-            - '**/Dockerfile.*'
-            - '**/*.dockerfile'
-            - 'docker-compose*.yml'
-            - 'docker-compose*.yaml'
-          shell:
-            - '**/*.sh'
-            - '**/*.bash'
-            - '**/*.zsh'
-          workflows:
-            - '.github/workflows/**'
-          kustomize:
-            - '**/k8s/**'
-            - '**/kubernetes/**'
-            - '**/kustomize/**'
-            - '**/kustomization.yaml'
-            - '**/kustomization.yml'
+        python-version: ${{ inputs.python_version }}
 
-    - name: Resolve scan scope
-      id: scope
+    - name: Install chargate
+      shell: bash
+      run: python -m pip install --disable-pip-version-check --quiet "$GITHUB_ACTION_PATH"
+
+    - name: Chargate gate
+      id: chargate
       shell: bash
       env:
-        DETECT_OK: ${{ steps.detect.outcome }}
-        D_ANY: ${{ steps.detect.outputs.any_changed }}
-        D_PY: ${{ steps.detect.outputs.python }}
-        D_GO: ${{ steps.detect.outputs.go }}
-        D_JS: ${{ steps.detect.outputs.javascript }}
-        D_IAC: ${{ steps.detect.outputs.iac }}
-        D_DOCKER: ${{ steps.detect.outputs.dockerfile }}
-        D_SHELL: ${{ steps.detect.outputs.shell }}
-        D_WF: ${{ steps.detect.outputs.workflows }}
-        D_KUST: ${{ steps.detect.outputs.kustomize }}
-      run: |
-        o() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
-        if [ "$DETECT_OK" != "success" ]; then
-          echo "::warning title=Chargate::change detection unavailable — scanning everything (fail-safe)"
-          for k in any_changed python go javascript iac dockerfile shell workflows kustomize; do o "$k" true; done
-        else
-          o any_changed "${D_ANY:-false}"; o python "${D_PY:-false}"; o go "${D_GO:-false}"
-          o javascript "${D_JS:-false}"; o iac "${D_IAC:-false}"; o dockerfile "${D_DOCKER:-false}"
-          o shell "${D_SHELL:-false}"; o workflows "${D_WF:-false}"; o kustomize "${D_KUST:-false}"
-        fi
-
-    - name: Fetch Chargate runtime
-      id: runtime
-      shell: bash
-      env:
-        CHARGATE_PLATFORM_SHA: 0acafb2cb991d84e772be412a60c08b7dda3a44e
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        DEFECTDOJO_TOKEN: ${{ inputs.defectdojo_token }}
+        BASE_REF_IN: ${{ inputs.base_ref }}
+        HEAD_REF_IN: ${{ inputs.head_ref }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        GH_SHA: ${{ github.sha }}
+        # All inputs flow through env (never interpolated into the script body)
+        # so a malicious value can't break out of the shell — defense-in-depth
+        # against `${{ }}` template injection.
+        MODE_IN: ${{ inputs.mode }}
+        FAIL_ON_IN: ${{ inputs.fail_on }}
+        PRECISION_IN: ${{ inputs.precision }}
+        STRICT_IN: ${{ inputs.strict }}
+        FLAVOR_IN: ${{ inputs.flavor }}
+        ML_TAG_IN: ${{ inputs.megalinter_tag }}
+        ENABLE_LINTERS_IN: ${{ inputs.enable_linters }}
+        DISABLE_LINTERS_IN: ${{ inputs.disable_linters }}
+        DD_URL_IN: ${{ inputs.defectdojo_url }}
+        DD_PRODUCT_IN: ${{ inputs.defectdojo_product }}
+        DD_ENGAGEMENT_IN: ${{ inputs.defectdojo_engagement }}
+        DD_CLOSE_OLD_IN: ${{ inputs.defectdojo_close_old }}
       run: |
         set -euo pipefail
-        tmp_repo="${RUNNER_TEMP:-/tmp}/chargate-platform-repo"
-        runtime="${RUNNER_TEMP:-/tmp}/chargate-runtime"
-        rm -rf "$tmp_repo" "$runtime"
-        mkdir -p "$tmp_repo" "$runtime"
+        # Keep the SARIF under the workspace so hashFiles() (used to guard the
+        # upload steps) can see it; emit a workspace-relative output path.
+        sarif_rel="chargate-reports/full.sarif"
+        sarif_abs="${GITHUB_WORKSPACE:-$PWD}/$sarif_rel"
+        mkdir -p "$(dirname "$sarif_abs")"
+        echo "sarif_path=$sarif_rel" >> "$GITHUB_OUTPUT"
 
-        # Sparse fetch: only materialise apps/chargate at the pinned SHA.
-        # --filter=blob:none avoids downloading blobs for unneeded paths;
-        # --depth=1 limits history to a single commit.
-        git -C "$tmp_repo" init -q
-        git -C "$tmp_repo" remote add origin "https://github.com/MagmaMoose/platform.git"
-        git -C "$tmp_repo" sparse-checkout init --cone
-        git -C "$tmp_repo" sparse-checkout set apps/chargate
-        git -C "$tmp_repo" fetch --filter=blob:none --depth=1 origin "$CHARGATE_PLATFORM_SHA"
-        git -C "$tmp_repo" -c advice.detachedHead=false checkout FETCH_HEAD
+        base="${BASE_REF_IN:-$PR_BASE_SHA}"
+        head="${HEAD_REF_IN:-${PR_HEAD_SHA:-$GH_SHA}}"
 
-        src="$tmp_repo/apps/chargate"
-        if [ ! -d "$src/scripts" ]; then
-          echo "::error title=Chargate::platform runtime not found at pinned SHA"
-          exit 1
+        args=(ci
+          --mode "$MODE_IN"
+          --fail-on "$FAIL_ON_IN"
+          --precision "$PRECISION_IN"
+          --flavor "$FLAVOR_IN"
+          --megalinter-tag "$ML_TAG_IN"
+          --repo "."
+          --head "$head"
+          --sarif-out "$sarif_abs")
+        [ -n "$base" ] && args+=(--base "$base")
+        [ "$STRICT_IN" = "true" ] && args+=(--strict)
+
+        IFS=',' read -ra _en <<< "$ENABLE_LINTERS_IN"
+        for l in "${_en[@]}"; do [ -n "$l" ] && args+=(--enable-linter "$l"); done
+        IFS=',' read -ra _di <<< "$DISABLE_LINTERS_IN"
+        for l in "${_di[@]}"; do [ -n "$l" ] && args+=(--disable-linter "$l"); done
+
+        if [ -n "$DD_URL_IN" ]; then
+          args+=(--defectdojo-url "$DD_URL_IN")
+          [ -n "$DD_PRODUCT_IN" ] && args+=(--dd-product "$DD_PRODUCT_IN")
+          [ -n "$DD_ENGAGEMENT_IN" ] && args+=(--dd-engagement "$DD_ENGAGEMENT_IN")
+          [ "$DD_CLOSE_OLD_IN" != "true" ] && args+=(--dd-no-close-old)
         fi
 
-        cp -R "$src"/. "$runtime"/
-        rm -rf "$tmp_repo"   # free disk space; runtime copy is all that is needed
-        find "$runtime/scripts" -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
-        echo "CHARGATE_RUNTIME=$runtime" >> "$GITHUB_ENV"
-        echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
-        echo "platform_sha=$CHARGATE_PLATFORM_SHA" >> "$GITHUB_OUTPUT"
+        chargate "${args[@]}"
 
-    - name: Chargate setup
-      if: ${{ steps.scope.outputs.any_changed == 'true' }}
-      shell: bash
-      run: |
-        echo "## 🔴 Chargate — detected changes" >> "$GITHUB_STEP_SUMMARY"
-        {
-          echo ""
-          echo "| Type | Changed |"
-          echo "|------|---------|"
-          echo "| Python | ${{ steps.scope.outputs.python }} |"
-          echo "| Go | ${{ steps.scope.outputs.go }} |"
-          echo "| JavaScript/TypeScript | ${{ steps.scope.outputs.javascript }} |"
-          echo "| IaC | ${{ steps.scope.outputs.iac }} |"
-          echo "| Dockerfile | ${{ steps.scope.outputs.dockerfile }} |"
-          echo "| Shell | ${{ steps.scope.outputs.shell }} |"
-          echo "| Workflows | ${{ steps.scope.outputs.workflows }} |"
-          echo "| Kustomize | ${{ steps.scope.outputs.kustomize }} |"
-          echo ""
-        } >> "$GITHUB_STEP_SUMMARY"
-        if [ "${{ inputs.enable_sarif_upload }}" = "true" ]; then
-          d="$RUNNER_TEMP/chargate-sarif"; mkdir -p "$d"
-          echo "CHARGATE_SARIF_DIR=$d" >> "$GITHUB_ENV"
-        fi
-
-    - name: Install tools
-      if: ${{ steps.scope.outputs.any_changed == 'true' }}
-      shell: bash
-      env:
-        SECURITY: ${{ inputs.security }}
-        LINT: ${{ inputs.lint }}
-        ENABLE_SAST: ${{ inputs.enable_sast }}
-        DET_PYTHON: ${{ steps.scope.outputs.python }}
-        DET_GO: ${{ steps.scope.outputs.go }}
-        DET_JS: ${{ steps.scope.outputs.javascript }}
-        DET_IAC: ${{ steps.scope.outputs.iac }}
-        DET_DOCKERFILE: ${{ steps.scope.outputs.dockerfile }}
-        DET_SHELL: ${{ steps.scope.outputs.shell }}
-        DET_WORKFLOWS: ${{ steps.scope.outputs.workflows }}
-        DET_KUSTOMIZE: ${{ steps.scope.outputs.kustomize }}
-        ESLINT_SCRIPT: ${{ inputs.eslint_script }}
-      run: bash "$CHARGATE_RUNTIME/scripts/ci-install-tools.sh"
-
-    # ── Security ──────────────────────────────────────────────────────────────
-    - name: 'Security · Trivy vulnerabilities'
-      id: sec_trivy
-      if: ${{ inputs.security == 'true' && steps.scope.outputs.any_changed == 'true' }}
-      shell: bash
-      env:
-        TRIVY_SEVERITY: ${{ inputs.trivy_severity }}
-        TRIVY_EXIT_CODE: ${{ inputs.security_fail == 'true' && '1' || '0' }}
-        TRIVY_IGNORE_UNFIXED: ${{ inputs.trivy_ignore_unfixed }}
-        TRIVY_IGNOREFILE: ${{ inputs.trivyignore_file }}
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-trivy-vuln.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Security · TruffleHog secrets'
-      id: sec_trufflehog
-      if: ${{ inputs.security == 'true' && steps.scope.outputs.any_changed == 'true' }}
-      shell: bash
-      env:
-        TRUFFLEHOG_EXCLUDE: ${{ inputs.trufflehog_exclude }}
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-trufflehog.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Security · Semgrep SAST'
-      id: sec_semgrep
-      if: ${{ inputs.security == 'true' && inputs.enable_sast == 'true' && steps.scope.outputs.any_changed == 'true' }}
-      shell: bash
-      env:
-        SEMGREP_CONFIG: ${{ inputs.semgrep_config }}
-        SEMGREP_BASELINE: ${{ inputs.semgrep_baseline }}
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-semgrep.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Security · pip-audit (Python)'
-      id: sec_pip_audit
-      if: ${{ inputs.security == 'true' && steps.scope.outputs.python == 'true' }}
-      shell: bash
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-pip-audit.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Security · npm/yarn/pnpm audit (JS)'
-      id: sec_npm_audit
-      if: ${{ inputs.security == 'true' && steps.scope.outputs.javascript == 'true' }}
-      shell: bash
-      env:
-        NPM_AUDIT_LEVEL: ${{ inputs.npm_audit_level }}
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-npm-audit.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Security · govulncheck (Go)'
-      id: sec_govulncheck
-      if: ${{ inputs.security == 'true' && steps.scope.outputs.go == 'true' }}
-      shell: bash
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-govulncheck.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Security · Checkov (IaC)'
-      id: sec_checkov
-      if: ${{ inputs.security == 'true' && steps.scope.outputs.iac == 'true' }}
-      shell: bash
-      env:
-        CHECKOV_SKIP_CHECKS: ${{ inputs.checkov_skip_checks }}
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-checkov.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Security · Trivy licenses'
-      id: sec_trivy_license
-      if: ${{ inputs.security == 'true' && inputs.enable_license_scan == 'true' && steps.scope.outputs.any_changed == 'true' }}
-      shell: bash
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/security-trivy-license.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    # ── Lint ──────────────────────────────────────────────────────────────────
-    - name: 'Lint · ESLint (JS)'
-      id: lint_eslint
-      if: ${{ inputs.lint == 'true' && steps.scope.outputs.javascript == 'true' }}
-      shell: bash
-      env:
-        ESLINT_SCRIPT: ${{ inputs.eslint_script }}
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-eslint.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Lint · Kustomize'
-      id: lint_kustomize
-      if: ${{ inputs.lint == 'true' && steps.scope.outputs.kustomize == 'true' }}
-      shell: bash
-      env:
-        K8S_DIRECTORY: ${{ inputs.k8s_directory }}
-        KUBERNETES_VERSION: ${{ inputs.kubernetes_version }}
-        SKIP_KUBECONFORM: ${{ inputs.skip_kubeconform }}
-        SKIP_KUBESCORE: ${{ inputs.skip_kubescore }}
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-kustomize.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Lint · Hadolint (Dockerfile)'
-      id: lint_hadolint
-      if: ${{ inputs.lint == 'true' && steps.scope.outputs.dockerfile == 'true' }}
-      shell: bash
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-hadolint.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Lint · ShellCheck'
-      id: lint_shellcheck
-      if: ${{ inputs.lint == 'true' && steps.scope.outputs.shell == 'true' }}
-      shell: bash
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-shellcheck.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    - name: 'Lint · actionlint'
-      id: lint_actionlint
-      if: ${{ inputs.lint == 'true' && steps.scope.outputs.workflows == 'true' }}
-      shell: bash
-      run: |
-        rc=0; bash "$CHARGATE_RUNTIME/scripts/lint-actionlint.sh" || rc=$?
-        echo "rc=$rc" >> "$GITHUB_OUTPUT"
-
-    # ── SARIF upload ──────────────────────────────────────────────────────────
-    - name: Upload SARIF
-      if: ${{ always() && inputs.enable_sarif_upload == 'true' && steps.scope.outputs.any_changed == 'true' && env.CHARGATE_SARIF_DIR != '' }}
+    - name: Upload SARIF to GitHub Security tab
+      if: ${{ always() && inputs.upload_github_sarif == 'true' && steps.chargate.outputs.sarif_path != '' && hashFiles(steps.chargate.outputs.sarif_path) != '' }}
       continue-on-error: true
       uses: github/codeql-action/upload-sarif@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4.36.1
       with:
-        sarif_file: ${{ env.CHARGATE_SARIF_DIR }}
+        sarif_file: ${{ steps.chargate.outputs.sarif_path }}
         token: ${{ inputs.github_token }}
 
-    # ── Report + gate ─────────────────────────────────────────────────────────
-    - name: Report
-      id: report
-      if: ${{ always() }}
-      shell: bash
-      env:
-        DET_ANY: ${{ steps.scope.outputs.any_changed }}
-        SECURITY: ${{ inputs.security }}
-        LINT: ${{ inputs.lint }}
-        SECURITY_FAIL: ${{ inputs.security_fail }}
-        LINT_FAIL: ${{ inputs.lint_fail }}
-        TRIVY_SEVERITY: ${{ inputs.trivy_severity }}
-        SEMGREP_CONFIG: ${{ inputs.semgrep_config }}
-        ESLINT_SCRIPT: ${{ inputs.eslint_script }}
-        RC_TRIVY: ${{ steps.sec_trivy.outputs.rc }}
-        RC_TRUFFLEHOG: ${{ steps.sec_trufflehog.outputs.rc }}
-        RC_SEMGREP: ${{ steps.sec_semgrep.outputs.rc }}
-        RC_PIP_AUDIT: ${{ steps.sec_pip_audit.outputs.rc }}
-        RC_NPM_AUDIT: ${{ steps.sec_npm_audit.outputs.rc }}
-        RC_GOVULNCHECK: ${{ steps.sec_govulncheck.outputs.rc }}
-        RC_CHECKOV: ${{ steps.sec_checkov.outputs.rc }}
-        RC_TRIVY_LICENSE: ${{ steps.sec_trivy_license.outputs.rc }}
-        RC_ESLINT: ${{ steps.lint_eslint.outputs.rc }}
-        RC_KUSTOMIZE: ${{ steps.lint_kustomize.outputs.rc }}
-        RC_HADOLINT: ${{ steps.lint_hadolint.outputs.rc }}
-        RC_SHELLCHECK: ${{ steps.lint_shellcheck.outputs.rc }}
-        RC_ACTIONLINT: ${{ steps.lint_actionlint.outputs.rc }}
-      run: bash "$CHARGATE_RUNTIME/scripts/ci-report.sh"
-
-    - name: Gate
-      if: ${{ always() && steps.scope.outputs.any_changed == 'true' }}
-      shell: bash
-      env:
-        SEC_BLOCK: ${{ steps.report.outputs.security_blocking }}
-        LINT_BLOCK: ${{ steps.report.outputs.lint_blocking }}
-        SEC_RESULT: ${{ steps.report.outputs.security_result }}
-        LINT_RESULT: ${{ steps.report.outputs.lint_result }}
-        STRICT: ${{ inputs.strict }}
-      run: |
-        set +e
-        fail=0
-        if [ "${STRICT:-false}" = "true" ] && { [ "$SEC_RESULT" = "error" ] || [ "$LINT_RESULT" = "error" ]; }; then
-          echo "::error title=Chargate::strict mode — a scanner failed to run (security=$SEC_RESULT, lint=$LINT_RESULT)"
-          fail=1
-        fi
-        if [ "${SEC_BLOCK:-false}" = "true" ]; then
-          echo "::error title=Chargate::Security scan found blocking issues (security_result=$SEC_RESULT)"
-          fail=1
-        fi
-        if [ "${LINT_BLOCK:-false}" = "true" ]; then
-          echo "::error title=Chargate::Lint scan found blocking issues (lint_result=$LINT_RESULT)"
-          fail=1
-        fi
-        if [ "$fail" = "1" ]; then exit 1; fi
-        echo "Chargate: no blocking findings (security=$SEC_RESULT, lint=$LINT_RESULT)"
+    - name: Upload SARIF artifact
+      if: ${{ always() && inputs.emit_sarif_artifact == 'true' && steps.chargate.outputs.sarif_path != '' && hashFiles(steps.chargate.outputs.sarif_path) != '' }}
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.sarif_artifact_name }}
+        path: ${{ steps.chargate.outputs.sarif_path }}

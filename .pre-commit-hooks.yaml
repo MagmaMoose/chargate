@@ -1,0 +1,23 @@
+# Chargate pre-commit hook — the fast, local first line.
+#
+# Add to a consumer .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/MagmaMoose/chargate
+#       rev: v2.0.0            # pin to a tag/SHA
+#       hooks:
+#         - id: chargate
+#
+# language: python — pre-commit builds an isolated venv and installs the chargate
+# CLI from this repo (no Docker required locally). It runs a FAST staged-file
+# subset (gitleaks for secrets, ruff for Python — each skipped if not installed),
+# NOT the full MegaLinter net. CI is the authoritative broad scan; this is the
+# fast first line. Local/CI disparity is intended.
+- id: chargate
+  name: Chargate (fast staged-file security + lint)
+  description: Fast first-line security/lint checks on staged files.
+  entry: chargate local
+  language: python
+  pass_filenames: true
+  require_serial: true
+  stages: [pre-commit]

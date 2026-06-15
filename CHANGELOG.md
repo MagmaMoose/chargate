@@ -2,6 +2,40 @@
 
 <!-- version list -->
 
+## v2.0.0 (unreleased)
+
+### BREAKING CHANGES
+
+- Re-platformed onto **MegaLinter**: the hand-rolled 12-tool scanner orchestration
+  (and its `MagmaMoose/platform` runtime fetch) is retired. MegaLinter does all
+  scanning; Chargate adds **net-new (PR-diff) finding gating** as the differentiator.
+- Inputs/outputs changed. Per-tool inputs (`trivy_severity`, `semgrep_config`,
+  `enable_sast`, …) and `security`/`lint`/`security_fail`/`lint_fail` are replaced
+  by MegaLinter config (`.mega-linter.yml`, `flavor`, `enable_linters`,
+  `disable_linters`) plus `fail_on` (severity threshold over net-new findings).
+  Outputs are now `gate_result`, `net_new_count`, `total_count`, `sarif_path`,
+  `mode` (was `security_result`/`lint_result`/`scan_skipped`).
+- Secrets scanning moved from TruffleHog to MegaLinter-native gitleaks /
+  secretlint / kingfisher.
+- The `v1` tag is frozen on the old runtime; existing pins keep working until
+  migration. See the README "Migrating from v1" section.
+
+### Features
+
+- **Net-new SARIF filter** — a pure, deterministic, heavily unit-tested module
+  (`chargate filter-sarif`): SARIF + base/head → filtered SARIF (net-new only) +
+  the untouched full SARIF + counts. Line- or file-level precision; documented
+  policies for new/renamed/deleted files, project-level findings, and shallow
+  clones (fails loudly, needs `fetch-depth: 0`).
+- **`chargate` Python CLI** (uv + Ruff): `ci`, `filter-sarif`, `local`, `version`.
+- **DefectDojo** import of the full SARIF (reimport by default, `close_old_findings`,
+  auto-create context). Failure-isolated — never fails the gate.
+- **Three surfaces**: composite `action.yml`, reusable workflow
+  `.github/workflows/gate.yml`, and a `chargate` pre-commit hook.
+- **Modes**: PR (whole-repo scan → net-new gate) and baseline (full scan → DD, no
+  gate) resolved from the event.
+
+
 ## v1.1.3 (2026-06-06)
 
 ### Bug Fixes

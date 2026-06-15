@@ -1,0 +1,100 @@
+name: Chargate gate
+
+# Reusable workflow — a consumer's whole config is ~one job block:
+#
+#   jobs:
+#     security:
+#       uses: magmamoose/chargate/.github/workflows/gate.yml@v2
+#       secrets:
+#         defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}   # optional
+#
+# Consumed by path, so it is independent of the Marketplace listing.
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'auto | pr | baseline'
+        type: string
+        default: 'auto'
+      flavor:
+        description: 'MegaLinter flavor (all = full image).'
+        type: string
+        default: 'all'
+      fail_on:
+        description: 'Severity that blocks: any | critical | high | medium | low | none.'
+        type: string
+        default: 'any'
+      precision:
+        description: 'Net-new precision: line | file.'
+        type: string
+        default: 'line'
+      megalinter_tag:
+        description: 'MegaLinter image tag/digest.'
+        type: string
+        default: 'v8'
+      strict:
+        description: 'Fail if MegaLinter itself errors.'
+        type: boolean
+        default: false
+      upload_github_sarif:
+        description: 'Upload the full SARIF to the GitHub Security tab.'
+        type: boolean
+        default: true
+      defectdojo_url:
+        description: 'DefectDojo base URL (enables import of the full SARIF).'
+        type: string
+        default: ''
+      defectdojo_product:
+        type: string
+        default: ''
+      defectdojo_engagement:
+        type: string
+        default: ''
+      runs_on:
+        type: string
+        default: 'ubuntu-latest'
+    secrets:
+      defectdojo_token:
+        description: 'DefectDojo API token (only needed if defectdojo_url is set).'
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+jobs:
+  chargate:
+    runs-on: ${{ inputs.runs_on }}
+    steps:
+      # Check out the CONSUMER repo with full history (net-new needs the merge-base).
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+      # Check out the chargate action at THIS workflow's exact commit, then call it
+      # by local path. This avoids pinning a self-reference (the action version
+      # always matches the gate.yml version a consumer pinned) and is unaffected by
+      # SHA-pinning hooks.
+      - name: Fetch chargate action
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: MagmaMoose/chargate
+          ref: ${{ github.job_workflow_sha }}
+          path: ._chargate_action
+      - name: Chargate
+        uses: ./._chargate_action
+        with:
+          checkout: 'false'
+          mode: ${{ inputs.mode }}
+          flavor: ${{ inputs.flavor }}
+          fail_on: ${{ inputs.fail_on }}
+          precision: ${{ inputs.precision }}
+          megalinter_tag: ${{ inputs.megalinter_tag }}
+          strict: ${{ inputs.strict }}
+          upload_github_sarif: ${{ inputs.upload_github_sarif }}
+          defectdojo_url: ${{ inputs.defectdojo_url }}
+          defectdojo_product: ${{ inputs.defectdojo_product }}
+          defectdojo_engagement: ${{ inputs.defectdojo_engagement }}
+          defectdojo_token: ${{ secrets.defectdojo_token }}

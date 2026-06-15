@@ -3,3 +3,16 @@
 .DS_Store
 .env*
 /tmp/
+
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# MegaLinter
+megalinter-reports/
