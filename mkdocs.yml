@@ -1,0 +1,44 @@
+site_name: Chargate
+site_description: >-
+  Security + lint gate — a thin MegaLinter wrapper with net-new (PR-diff)
+  finding gating.
+repo_url: https://github.com/MagmaMoose/chargate
+repo_name: MagmaMoose/chargate
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: red
+      accent: red
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: red
+      accent: red
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Net-new gating: net-new.md
+  - Setup & usage: setup.md
+  - CLI reference: cli.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - toc:
+      permalink: true

@@ -16,3 +16,9 @@ build/
 
 # MegaLinter
 megalinter-reports/
+
+# Docs (MkDocs)
+/site/
+
+# Claude Code (scratch flood-output target from the [tooling] block)
+.claude/last_output.txt

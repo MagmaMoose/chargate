@@ -27,6 +27,8 @@ packages = ["src/chargate"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# Docs tooling (non-default group): `uv run --group docs mkdocs serve|build`.
+docs = ["mkdocs-material>=9.5"]
 
 [tool.ruff]
 line-length = 100
