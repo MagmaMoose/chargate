@@ -1,0 +1,38 @@
+# MegaLinter config — a documented DEFAULT/TEMPLATE.
+#
+# Chargate runs MegaLinter with these critical settings injected as env vars
+# (they take effect regardless of this file), so the GATE is always chargate's:
+#   DISABLE_ERRORS=true                       # MegaLinter never sets the exit code
+#   SARIF_REPORTER=true  JSON_REPORTER=true   # emit the reports chargate consumes
+#   SARIF_REPORTER_NORMALIZE_LINTERS_OUTPUT=true   # repo-relative URIs for net-new
+#   REPORT_OUTPUT_FOLDER=megalinter-reports
+#
+# This file is MegaLinter's config for the repo being scanned. Drop it at a
+# consumer repo root to tune which linters run. Anything here is additive to the
+# chargate-injected env above. Below is the chargate-recommended baseline.
+
+APPLY_FIXES: none
+SHOW_ELAPSED_TIME: true
+FLAVOR_SUGGESTIONS: false
+
+# Whole-repo scan on every run; chargate decides net-new from the git diff, not
+# MegaLinter's incremental mode, so the full SARIF is always complete for DD.
+VALIDATE_ALL_CODEBASE: true
+
+# Security / repository scanners worth enabling (verify availability per flavor):
+#   REPOSITORY_TRIVY, REPOSITORY_SEMGREP, REPOSITORY_CHECKOV,
+#   REPOSITORY_GITLEAKS, REPOSITORY_SECRETLINT, REPOSITORY_KINGFISHER (secrets),
+#   REPOSITORY_OSV_SCANNER, REPOSITORY_GRYPE (SCA: pip/npm/go lockfiles).
+#
+# Example: run security + Python + common lint only (uncomment to use a subset):
+# ENABLE:
+#   - REPOSITORY
+#   - PYTHON
+#   - BASH
+#   - DOCKERFILE
+#   - ACTION
+
+# Speed: skip noisy or irrelevant linters here, e.g.:
+# DISABLE_LINTERS:
+#   - SPELL_CSPELL
+#   - COPYPASTE_JSCPD

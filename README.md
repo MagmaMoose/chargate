@@ -2,25 +2,65 @@
 
 [![License](https://img.shields.io/github/license/magmamoose/chargate)](LICENSE)
 
-Chargate is a GitHub Marketplace composite action that runs a security and lint
-gate for pull requests. It detects what changed, installs the scanners needed for
-that change set, uploads SARIF when enabled, and reports normalized action
-outputs for security and lint results.
+Chargate is a security + lint gate built on [MegaLinter](https://megalinter.io).
+MegaLinter does **all** the scanning; Chargate adds the one thing that matters for
+day-to-day developer flow: **net-new finding gating**. On a pull request the gate
+passes or fails based *only* on findings the PR introduces relative to the
+merge-base. Pre-existing findings never block. The full, unfiltered SARIF is
+always emitted and shippable (first-class DefectDojo) so your security system
+still sees everything, including inherited debt.
 
-The scanner implementation lives in
-[MagmaMoose/platform apps/chargate](https://github.com/MagmaMoose/platform/tree/0acafb2cb991d84e772be412a60c08b7dda3a44e/apps/chargate).
-This repository intentionally keeps only the Marketplace action metadata and
-user-facing release material. `action.yml` fetches the platform runtime from that
-pinned commit SHA; it does not fetch from `main`.
+> **v2 is a ground-up re-platform.** Chargate no longer hand-rolls a 12-tool
+> scanner orchestration — MegaLinter does that. If you used `magmamoose/chargate@v1`,
+> see [Migrating from v1](#migrating-from-v1).
 
-## Usage
+## Why net-new?
+
+A whole-repo security scan on a large codebase reports hundreds of pre-existing
+findings. Blocking PRs on all of them is noise; ignoring them loses signal.
+Chargate splits the difference:
+
+- **Gate** on what *this PR* introduced (net-new) → actionable, low-noise.
+- **Ship** the *complete* SARIF to DefectDojo / the Security tab → full visibility,
+  including inherited debt and trends.
+
+## Three surfaces
+
+| Surface | What it is | When to use |
+| --- | --- | --- |
+| **Reusable workflow** | `.github/workflows/gate.yml` (`on: workflow_call`) | Easiest — a consumer's whole config is ~one job block. |
+| **Composite action** | `action.yml` | When you compose your own steps. |
+| **pre-commit hook** | `.pre-commit-hooks.yaml` (`chargate` hook) | Fast local first line on staged files. |
+
+All three drive the same `chargate` Python CLI.
+
+### 1. Reusable workflow (recommended)
 
 ```yaml
-name: Security and lint
-
+# .github/workflows/security.yml
+name: Security
 on:
   pull_request:
+  push:
     branches: [main]
+
+jobs:
+  chargate:
+    uses: magmamoose/chargate/.github/workflows/gate.yml@v2
+    secrets:
+      defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}   # optional
+```
+
+That's it. On PRs it runs MegaLinter whole-repo, gates on net-new findings, and
+ships the full SARIF. On push to the default branch it runs a non-gating baseline
+scan. (Reusable workflows are consumed by path, independent of the Marketplace
+listing.)
+
+### 2. Composite action
+
+```yaml
+name: Security
+on: [pull_request]
 
 permissions:
   contents: read
@@ -31,103 +71,137 @@ jobs:
   chargate:
     runs-on: ubuntu-latest
     steps:
-      - uses: magmamoose/chargate@v1
+      - uses: magmamoose/chargate@v2
+        with:
+          fail_on: high          # block only on net-new high/critical (default: any)
+          # defectdojo_url: https://dd.example.com
+          # defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
 ```
 
-By default, Chargate checks out the repository, runs security scanners as a
-blocking gate, runs lint checks as advisory, and uploads SARIF.
+The action checks out with `fetch-depth: 0` by default (net-new needs the
+merge-base). Set `checkout: 'false'` if you already checked out with full history.
 
-If your job already checked out the repository:
+### 3. pre-commit hook
 
 ```yaml
-steps:
-  - uses: actions/checkout@v6
-    with:
-      fetch-depth: 0
-  - uses: magmamoose/chargate@v1
-    with:
-      checkout: 'false'
-      lint_fail: 'true'
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/MagmaMoose/chargate
+    rev: v2.0.0
+    hooks:
+      - id: chargate
 ```
 
-To disable SARIF upload, set `enable_sarif_upload: 'false'` and omit
-`security-events: write`.
-
-## Permissions
-
-```yaml
-permissions:
-  contents: read
-  pull-requests: read
-  security-events: write
+```sh
+pre-commit install
+pre-commit run -a
 ```
 
-`contents: read` and `pull-requests: read` support checkout and changed-file
-detection. `security-events: write` is required only when
-`enable_sarif_upload` is `true`.
+The hook (`language: python`, no Docker) runs a **fast staged-file subset**
+(gitleaks for secrets, ruff for Python — each skipped if not installed). It is a
+first line, deliberately narrower than the CI whole-repo net. Local/CI disparity
+is intended.
 
-## Inputs
+**Global auto-install** across all your repos:
 
-| Input | Default | Description |
+```sh
+git config --global init.templateDir ~/.git-template
+pre-commit init-templatedir ~/.git-template
+```
+
+New clones then pick up the hook automatically.
+
+## Net-new semantics
+
+A SARIF result is **net-new** iff its primary location's file is in the PR diff
+**and** (at line precision) its `startLine` falls inside an added/modified hunk.
+The diff is computed against `merge-base(base, head)`, which is robust to base-branch
+rebases and force-pushes.
+
+| Case | Policy (default) | Configurable |
 | --- | --- | --- |
-| `checkout` | `true` | Run `actions/checkout` with `fetch-depth: 0` before scanning. |
-| `security` | `true` | Run security scanners. |
-| `lint` | `true` | Run lint checks. |
-| `security_fail` | `true` | Fail the job on security findings. |
-| `lint_fail` | `false` | Fail the job on lint findings. |
-| `strict` | `false` | Treat scanner tool errors as failures. |
-| `enable_sarif_upload` | `true` | Upload SARIF to the GitHub Security tab. |
-| `github_token` | `${{ github.token }}` | Token used for SARIF upload and API access. |
-| `trivy_severity` | `CRITICAL,HIGH` | Trivy vulnerability severities to flag. |
-| `trivy_ignore_unfixed` | `true` | Ignore vulnerabilities with no fix available. |
-| `trivyignore_file` | `.trivyignore` | Path to a Trivy ignore file, used only if it exists. |
-| `trufflehog_exclude` | empty | Optional TruffleHog exclude-paths file. |
-| `enable_sast` | `true` | Run Semgrep SAST. |
-| `semgrep_config` | `p/default p/security-audit p/secrets` | Space-separated Semgrep rulesets. |
-| `semgrep_baseline` | empty | Optional Semgrep ignore file. If blank, `.semgrepignore` is auto-detected. |
-| `npm_audit_level` | `high` | Minimum severity for npm, yarn, or pnpm audit. |
-| `checkov_skip_checks` | empty | Comma-separated Checkov check IDs to skip. |
-| `enable_license_scan` | `false` | Run the Trivy license-compliance scan. |
-| `eslint_script` | `lint` | Package script to run for ESLint. |
-| `k8s_directory` | `./k8s` | Directory containing Kustomize files. |
-| `kubernetes_version` | `1.32.0` | Kubernetes version for manifest validation. |
-| `skip_kubeconform` | `false` | Skip kubeconform validation. |
-| `skip_kubescore` | `false` | Skip kube-score advisory validation. |
+| Brand-new file | all results net-new | — |
+| Modified hunk | net-new iff `startLine` in an added range | `precision: line\|file` |
+| Unchanged line in a changed file | pre-existing → never blocks | `precision: file` to flip |
+| Renamed / copied file | matched by head path; content changes line-matched | — |
+| Deleted file | dropped | — |
+| Result with **no** file location (project-level: SBOM/license/some Trivy) | **not** net-new | `--no-location-policy block` |
+| Changed file, result with no `startLine` (common for SCA on a lockfile) | net-new (file-level fallback) | `--no-region-fallback` to disable |
+| Multiple locations | uses the **primary** (`locations[0]`) | documented |
+| Missing merge-base / shallow clone | **fails loudly** — needs `fetch-depth: 0` | — |
 
-All boolean inputs are strings, as expected by GitHub composite actions.
+`fail_on` controls the gate: `any` (default — any net-new blocks), `critical`,
+`high`, `medium`, `low`, or `none` (report-only). Severity uses the SARIF
+`security-severity` band when present, else the SARIF `level`
+(error→high, warning→medium, note→low).
 
-## Outputs
+## DefectDojo
 
-| Output | Description |
+DefectDojo import is optional and first-class. Chargate always uploads the
+**full** SARIF (never the filtered one) via DefectDojo's API:
+
+```yaml
+- uses: magmamoose/chargate@v2
+  with:
+    defectdojo_url: https://defectdojo.example.com
+    defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
+    defectdojo_product: my-service
+    defectdojo_engagement: ci
+```
+
+- Uses `reimport-scan` by default (one Test per engagement; `close_old_findings`
+  mitigates findings that disappear). Auto-creates the product/engagement.
+- **A DefectDojo failure never fails the gate** — it is logged and the run
+  continues.
+- Prefer "emit artifact only" / "write to path"? Use the CLI's `--sarif-out` and
+  skip `defectdojo_url`.
+
+## Modes
+
+- **PR events** → whole-repo MegaLinter → net-new gate → full SARIF to DD/artifact.
+- **Push to default branch / scheduled** → full scan → full SARIF to DD as the
+  authoritative baseline → **no** net-new gate.
+
+`mode: auto` (default) picks this from the event; force with `mode: pr|baseline`.
+
+## CLI
+
+```sh
+chargate filter-sarif --sarif report.sarif --base "$BASE" --head "$HEAD" \
+    --out net-new.sarif --counts-json counts.json --fail-on any
+chargate ci --mode auto --flavor all --sarif-out full.sarif
+chargate local path/to/file.py        # what the pre-commit hook runs
+```
+
+Exit codes: `0` pass · `1` blocking net-new findings · `2` setup/usage error.
+
+## What MegaLinter covers (vs the old hand-rolled set)
+
+Trivy, Semgrep, Checkov, Hadolint, ShellCheck, actionlint, ESLint, kubeconform/
+kube-score all map to MegaLinter linters. Dependency/SCA scanning (formerly
+pip-audit / npm audit / govulncheck) is covered by `REPOSITORY_OSV_SCANNER` +
+`REPOSITORY_TRIVY` + `REPOSITORY_GRYPE`. Secrets scanning moved from TruffleHog to
+MegaLinter's native `gitleaks` / `secretlint` / `kingfisher`.
+
+## Migrating from v1
+
+v1 was a composite action that fetched a hand-rolled scanner runtime from
+`MagmaMoose/platform`. v2 is a MegaLinter wrapper with net-new gating, in-repo.
+
+| v1 | v2 |
 | --- | --- |
-| `scan_skipped` | `true` when no relevant files changed and the scan was skipped. |
-| `security_result` | `pass`, `findings`, `error`, `disabled`, or `skipped`. |
-| `lint_result` | `pass`, `findings`, `error`, `disabled`, or `skipped`. |
+| `security` / `lint` / `enable_sast` toggles, per-tool inputs (`trivy_severity`, `semgrep_config`, …) | Configure MegaLinter via `.mega-linter.yml` + `flavor` / `enable_linters` / `disable_linters`. |
+| `security_fail` / `lint_fail` | `fail_on` (severity threshold over net-new). |
+| `strict` | `strict` (MegaLinter tool error fails the job). |
+| Outputs `security_result` / `lint_result` / `scan_skipped` | Outputs `gate_result`, `net_new_count`, `total_count`, `sarif_path`, `mode`. |
+| Blocks on all findings | Blocks only on **net-new** findings. |
 
-## What Runs
+The **`v1` tag is frozen** on the old runtime, so existing pins keep working until
+you migrate. Move to the reusable workflow (one job block) when ready.
 
-Chargate runs tools only when the changed files call for them:
+## Conventions
 
-| Area | Tools |
-| --- | --- |
-| Vulnerabilities | Trivy filesystem scan, pip-audit, npm/yarn/pnpm audit, govulncheck |
-| Secrets and SAST | TruffleHog verified-secret scan, Semgrep |
-| IaC and containers | Checkov, Hadolint |
-| Lint | ShellCheck, actionlint, ESLint, Kustomize, kubeconform, kube-score |
-| Licenses | Trivy license scan, opt-in with `enable_license_scan` |
-
-Scanner versions are pinned in the platform runtime, not as action inputs.
-
-## Versioning and Releases
-
-Use a major tag such as `magmamoose/chargate@v1` for normal adoption, or pin a
-full action commit SHA for maximum reproducibility. Updating Chargate's scanner
-logic requires updating the pinned platform SHA in `action.yml`, validating the
-action, and publishing a new GitHub Release for the Marketplace listing.
-
-This repository does not contain workflow files by design. GitHub Marketplace
-requires a public action repository to contain one root `action.yml` or
-`action.yaml` metadata file and no workflow files.
+Python (uv + Ruff + pytest, type-hinted). External actions are SHA-pinned. MIT.
 
 ## License
 
