@@ -2,6 +2,9 @@
 
 <!-- version list -->
 
+## v2.0.1 (2026-06-16)
+
+
 ## v2.0.0 (unreleased)
 
 ### BREAKING CHANGES
