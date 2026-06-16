@@ -5,8 +5,10 @@ Subcommands:
 * ``chargate filter-sarif`` — the pure net-new filter (SARIF + base/head →
   filtered SARIF + counts + gate exit code). Decoupled from GitHub Actions and
   unit-tested in isolation.
-* ``chargate ci`` — the full CI flow (run MegaLinter, filter, gate, ship). Added
-  in a later increment.
+* ``chargate ci`` — the full CI flow (run MegaLinter, filter, gate, ship).
+* ``chargate local`` — fast staged-file checks for the pre-commit framework.
+* ``chargate install-hooks`` / ``uninstall-hooks`` — wire chargate's hooks into
+  git globally (via pre-commit), or revert that.
 * ``chargate version`` — print the version.
 
 Exit codes: ``0`` pass · ``1`` blocking net-new findings · ``2`` setup/usage error.
@@ -28,6 +30,7 @@ from chargate import local as local_mod
 from chargate import megalinter as ml
 from chargate import report as report_mod
 from chargate.gate import EXIT_ERROR, EXIT_OK, FAIL_ON_CHOICES, decide_gate, effective_band
+from chargate.install_hooks import HookInstallError, install_hooks, uninstall_hooks
 from chargate.modes import Mode, resolve_mode
 from chargate.sarif.diff import DiffIndex
 from chargate.sarif.filter import (
@@ -294,6 +297,26 @@ def cmd_local(args: argparse.Namespace) -> int:
     return code
 
 
+def cmd_install_hooks(args: argparse.Namespace) -> int:
+    try:
+        messages = install_hooks(force=args.force)
+    except HookInstallError as exc:
+        return _fail(str(exc))
+    for message in messages:
+        _eprint(f"chargate: {message}")
+    return EXIT_OK
+
+
+def cmd_uninstall_hooks(_args: argparse.Namespace) -> int:
+    try:
+        messages = uninstall_hooks()
+    except HookInstallError as exc:
+        return _fail(str(exc))
+    for message in messages:
+        _eprint(f"chargate: {message}")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chargate",
@@ -450,6 +473,29 @@ def build_parser() -> argparse.ArgumentParser:
     local.add_argument("--repo", default=".", help="Path to the git repository (default: .).")
     local.add_argument("--quiet", action="store_true", help="Suppress per-check output.")
     local.set_defaults(func=cmd_local)
+
+    install = sub.add_parser(
+        "install-hooks",
+        help="Install chargate's git hooks globally for all repos (via pre-commit).",
+        description=(
+            "Wire chargate's hooks into git globally using the pre-commit framework: "
+            "generate pre-commit + pre-push dispatchers, point core.hooksPath at them "
+            "(retroactive across existing repos) and set init.templateDir (for new "
+            "clones), backed by a managed ~/.pre-commit-config.yaml. Requires pre-commit."
+        ),
+    )
+    install.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing, non-chargate ~/.pre-commit-config.yaml.",
+    )
+    install.set_defaults(func=cmd_install_hooks)
+
+    uninstall = sub.add_parser(
+        "uninstall-hooks",
+        help="Revert `install-hooks`, restoring the prior global git config.",
+    )
+    uninstall.set_defaults(func=cmd_uninstall_hooks)
 
     version = sub.add_parser("version", help="Print the chargate version.")
     version.set_defaults(func=cmd_version)
