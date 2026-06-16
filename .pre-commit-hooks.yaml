@@ -21,3 +21,32 @@
   pass_filenames: true
   require_serial: true
   stages: [pre-commit]
+
+# File-hygiene / repo-policy hooks (bash, no Docker). These are the "keepers"
+# consolidated from the older CalebSargeant/pre-commit-hooks library — the
+# formatting / Actions-SHA-pinning / branch-naming first line that coexists with
+# the security `chargate` hook above.
+- id: actions-pin-sha
+  name: GitHub Actions SHA pinning
+  description: >-
+    Pin `uses: owner/repo@ref` to a full commit SHA and annotate with the
+    resolved semver tag; falls back to the latest matching tag when a ref cannot
+    be resolved. Auto-fixes and re-stages, so the first run fails — re-commit to
+    proceed (standard pre-commit auto-fixer behaviour).
+  entry: hooks/github-actions-pin-sha.sh
+  language: script
+  files: '^\.github/workflows/.*\.ya?ml$'
+  stages: [pre-commit]
+  require_serial: true
+
+- id: conventional-branch-name
+  name: Enforce conventional branch naming
+  description: >-
+    Block pushes from branches not matching `<type>/<description>` (allowed
+    types: feat, fix, docs, style, refactor, perf, test, build, ci, chore,
+    revert; main/master/develop and dependabot/renovate branches are exempt).
+  entry: hooks/enforce-conventional-branch-name.sh
+  language: script
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]

@@ -102,14 +102,47 @@ The hook (`language: python`, no Docker) runs a **fast staged-file subset**
 first line, deliberately narrower than the CI whole-repo net. Local/CI disparity
 is intended.
 
-**Global auto-install** across all your repos:
+Chargate also ships **file-hygiene hooks** (bash, no Docker) that coexist with the
+security `chargate` hook above:
 
-```sh
-git config --global init.templateDir ~/.git-template
-pre-commit init-templatedir ~/.git-template
+```yaml
+  - repo: https://github.com/MagmaMoose/chargate
+    rev: v2.0.0
+    hooks:
+      - id: actions-pin-sha            # pin GitHub Actions uses: to SHAs (+semver comment)
+      - id: conventional-branch-name   # enforce <type>/<desc> branch names (pre-push)
 ```
 
-New clones then pick up the hook automatically.
+**Global auto-install** across all your repos — one command via Homebrew:
+
+```sh
+brew install calebsargeant/tap/chargate   # brings pre-commit along as a dependency
+chargate install-hooks
+```
+
+`chargate install-hooks` generates pre-commit + pre-push dispatchers, points
+`core.hooksPath` at them (so the hooks apply to **every existing repo immediately**)
+and sets `init.templateDir` (so new clones inherit them), backed by a managed
+`~/.pre-commit-config.yaml` pinned to the installed chargate version. It refuses to
+clobber a hand-maintained config unless you pass `--force`, and `chargate
+uninstall-hooks` reverts everything (restoring any prior `core.hooksPath`).
+
+> Two delivery paths, by design: the **CLI** ships via Homebrew, while the **hook
+> scripts** are fetched by pre-commit from this repo at the pinned `rev` — they are
+> not in the installed wheel.
+>
+> ⚠️ `install-hooks` repoints your global `core.hooksPath`. If you already have global
+> hooks at another path, they stop running (intended — that is how chargate takes
+> over); the prior path is saved and restored on `uninstall-hooks`.
+
+Prefer to wire it by hand instead? The equivalent manual setup:
+
+```sh
+pre-commit init-templatedir ~/.config/chargate/git-template \
+  --hook-type pre-commit --hook-type pre-push
+git config --global core.hooksPath  ~/.config/chargate/git-template/hooks
+git config --global init.templateDir ~/.config/chargate/git-template
+```
 
 ## Net-new semantics
 
