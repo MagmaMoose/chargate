@@ -18,6 +18,11 @@ Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only core (no
 runtime deps — the DefectDojo client uses `urllib`). SHA-pin external GitHub
 Actions with a `# vX.Y.Z` comment. MIT. Tests mirror modules 1:1 under `tests/`.
 
+**Releases** are automated: pushing to `main` runs Diatreme + python-semantic-release
+(single-env TBD, `.github/workflows/release.yaml`), which cuts the next stable
+`vX.Y.Z` from conventional commits and bumps `project.version` + `__init__.__version__`
+— never bump those by hand.
+
 ## Finding code & context
 
 - Before locating unfamiliar code, read `./PROJECT_INDEX.json` first (module map,

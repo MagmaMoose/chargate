@@ -1,0 +1,84 @@
+# Diatreme release — single-environment Trunk-Based Development (mono-env).
+#
+# Flow (one long-lived branch: main):
+#   push to main → python-semantic-release computes the next STABLE version from
+#                  conventional commits since the last tag, bumps pyproject.toml +
+#                  src/chargate/__init__.py, updates CHANGELOG.md, tags vX.Y.Z, and
+#                  publishes the GitHub Release.
+#   then         → the floating major action tag (v2, v1, ...) is force-moved onto
+#                  the new release, so consumers pinning magmamoose/chargate@v2 (or
+#                  `rev: v2` in .pre-commit-config) track the latest stable v2.x.
+#
+# chargate is a composite action + Python CLI (no Docker image), so this is a
+# version-only release — it mirrors how Diatreme self-releases.
+#
+# First cut: main already carries a breaking change since v1.1.3, so PSR computes
+# 2.0.0 as the next version (verified with `semantic-release version --print`). The
+# first push that runs this workflow cuts v2.0.0 automatically; version-override
+# (manual dispatch) is only needed to force a specific version or to release when
+# there are no feat/fix/perf commits. This v2.0.0 is what the homebrew-tap chargate
+# formula pins to.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', '.gitignore', 'LICENSE', 'CHANGELOG.md']
+  workflow_dispatch:
+    inputs:
+      version-override:
+        description: 'Explicit version e.g. 2.0.0. Blank = auto-compute from commits; required to force a release when there are no feat/fix/perf commits.'
+        required: false
+        default: ''
+
+# Serialize releases per ref so two pushes to main can't race the tag write.
+# Never cancel a release mid-flight.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # PSR commits the version bump + the major-tag step force-pushes
+      id-token: write   # OIDC for the Diatreme public-app token broker
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - id: release
+        uses: magmamoose/diatreme@c45671a0de1a88fa33db635fb8dbb67cb43fe227 # v1.30.0
+        with:
+          mode: release
+          versioning-tool: semantic-release-python
+          environment: prod
+          environments: '["prod"]'
+          prerelease-identifiers: '{}'
+          version-override: ${{ github.event_name == 'workflow_dispatch' && inputs.version-override || '' }}
+
+      # chargate is consumed by floating major tag (magmamoose/chargate@v2); move it
+      # onto each stable release. Uses GITHUB_TOKEN — if a tag ruleset blocks it,
+      # grant the token bypass or swap in a Diatreme/PAT token here.
+      - name: Update floating major action tag
+        if: steps.release.outputs.released == 'true' && !contains(steps.release.outputs.version, '-')
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          prefix="${RELEASE_TAG%"${RELEASE_VERSION}"}"
+          major="${RELEASE_VERSION%%.*}"
+          major_tag="${prefix}${major}"
+          target_commit="$(git rev-list -n 1 "${RELEASE_TAG}")"
+
+          git config user.name "semantic-release"
+          git config user.email "semantic-release@users.noreply.github.com"
+          git tag -f "${major_tag}" "${target_commit}"
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/tags/${major_tag}" \
+            --force
