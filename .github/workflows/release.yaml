@@ -8,6 +8,9 @@
 #   then         → the floating major action tag (v2, v1, ...) is force-moved onto
 #                  the new release, so consumers pinning magmamoose/chargate@v2 (or
 #                  `rev: v2` in .pre-commit-config) track the latest stable v2.x.
+#   finally      → the bump-homebrew job opens a PR on CalebSargeant/homebrew-tap
+#                  bumping the chargate formula to the new tag — event-driven, so the
+#                  tap no longer needs to poll for new versions on a cron.
 #
 # chargate is a composite action + Python CLI (no Docker image), so this is a
 # version-only release — it mirrors how Diatreme self-releases.
@@ -43,6 +46,10 @@ jobs:
     permissions:
       contents: write   # PSR commits the version bump + the major-tag step force-pushes
       id-token: write   # OIDC for the Diatreme public-app token broker
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -82,3 +89,23 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "refs/tags/${major_tag}" \
             --force
+
+  # Event-driven Homebrew bump: when a stable release is cut, open a PR on the tap
+  # bumping the chargate formula to the new tag (url + sha256 recomputed). This
+  # replaces polling the tap on a cron. Requires HOMEBREW_TAP_TOKEN — a fine-grained
+  # PAT on CalebSargeant/homebrew-tap with Contents + Pull requests: write.
+  bump-homebrew:
+    needs: release
+    if: needs.release.outputs.released == 'true' && !contains(needs.release.outputs.version, '-')
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Bump chargate formula in the tap
+        uses: dawidd6/action-homebrew-bump-formula@1446dca236b0440c6f02723a3f14f13be2c04ab0 # v7
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tap: CalebSargeant/homebrew-tap
+          formula: chargate
+          tag: ${{ needs.release.outputs.tag }}
+          no_fork: true   # push the bump branch straight to the tap (don't fork)
