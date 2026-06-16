@@ -8,7 +8,7 @@
 #   then         → the floating major action tag (v2, v1, ...) is force-moved onto
 #                  the new release, so consumers pinning magmamoose/chargate@v2 (or
 #                  `rev: v2` in .pre-commit-config) track the latest stable v2.x.
-#   finally      → the bump-homebrew job opens a PR on CalebSargeant/homebrew-tap
+#   finally      → the bump-homebrew job opens a PR on MagmaMoose/homebrew-tap
 #                  bumping the chargate formula to the new tag — event-driven, so the
 #                  tap no longer needs to poll for new versions on a cron.
 #
@@ -93,7 +93,7 @@ jobs:
   # Event-driven Homebrew bump: when a stable release is cut, open a PR on the tap
   # bumping the chargate formula to the new tag (url + sha256 recomputed). This
   # replaces polling the tap on a cron. Requires HOMEBREW_TAP_TOKEN — a fine-grained
-  # PAT on CalebSargeant/homebrew-tap with Contents + Pull requests: write.
+  # PAT on MagmaMoose/homebrew-tap with Contents + Pull requests: write.
   bump-homebrew:
     needs: release
     if: needs.release.outputs.released == 'true' && !contains(needs.release.outputs.version, '-')
@@ -105,7 +105,7 @@ jobs:
         uses: dawidd6/action-homebrew-bump-formula@1446dca236b0440c6f02723a3f14f13be2c04ab0 # v7
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: CalebSargeant/homebrew-tap
+          tap: MagmaMoose/homebrew-tap
           formula: chargate
           tag: ${{ needs.release.outputs.tag }}
           no_fork: true   # push the bump branch straight to the tap (don't fork)
