@@ -100,6 +100,8 @@ def test_writes_managed_config_pinned_to_version(tmp_path: Path) -> None:
     install_hooks(home=tmp_path, runner=FakeGit(), which=_which({"git", "pre-commit"}))
     text = config.read_text(encoding="utf-8")
     assert text.startswith(SENTINEL)
+    assert "default_install_hook_types: [pre-commit, pre-push, commit-msg]" in text
+    assert ">>> chargate-managed" in text and "<<< chargate-managed" in text
     assert f"rev: v{__version__}" in text
     assert "id: actions-pin-sha" in text
     assert "id: conventional-branch-name" in text
@@ -116,8 +118,44 @@ def test_wires_global_config_and_templatedir(tmp_path: Path) -> None:
     init_calls = [c for c in git.calls if c[:2] == ["pre-commit", "init-templatedir"]]
     assert len(init_calls) == 1
     assert str(template_dir) in init_calls[0]
-    assert "--hook-type" in init_calls[0]
-    assert "pre-commit" in init_calls[0] and "pre-push" in init_calls[0]
+    for stage in ("pre-commit", "pre-push", "commit-msg"):
+        assert stage in init_calls[0]
+
+
+def test_points_dispatchers_at_global_config(tmp_path: Path) -> None:
+    config, _, _, hooks_dir = _paths(tmp_path)
+    hooks_dir.mkdir(parents=True)
+    for stage in ("pre-commit", "pre-push", "commit-msg"):
+        (hooks_dir / stage).write_text(
+            "ARGS=(hook-impl --config=.pre-commit-config.yaml --hook-type=x)\n", encoding="utf-8"
+        )
+    install_hooks(home=tmp_path, runner=FakeGit(), which=_which({"git", "pre-commit"}))
+    for stage in ("pre-commit", "pre-push", "commit-msg"):
+        text = (hooks_dir / stage).read_text(encoding="utf-8")
+        assert f"--config={config}" in text
+        assert "--config=.pre-commit-config.yaml" not in text
+
+
+def test_preserves_user_section_on_rerun(tmp_path: Path) -> None:
+    config, *_ = _paths(tmp_path)
+    install_hooks(home=tmp_path, runner=FakeGit(), which=_which({"git", "pre-commit"}))
+    # Tamper the managed rev and add a user hook OUTSIDE the managed block.
+    text = config.read_text(encoding="utf-8").replace(f"rev: v{__version__}", "rev: vSTALE")
+    text += (
+        "  - repo: local\n"
+        "    hooks:\n"
+        "      - id: my-hook\n"
+        "        entry: /bin/true\n"
+        "        language: system\n"
+    )
+    config.write_text(text, encoding="utf-8")
+
+    install_hooks(home=tmp_path, runner=FakeGit(), which=_which({"git", "pre-commit"}))
+    rerun = config.read_text(encoding="utf-8")
+    assert "id: my-hook" in rerun  # user section preserved
+    assert "vSTALE" not in rerun  # managed block regenerated
+    assert f"rev: v{__version__}" in rerun
+    assert rerun.count(">>> chargate-managed") == 1  # block not duplicated
 
 
 def test_init_templatedir_failure_raises(tmp_path: Path) -> None:
