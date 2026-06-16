@@ -120,12 +120,27 @@ brew install calebsargeant/tap/chargate   # brings pre-commit along as a depende
 chargate install-hooks
 ```
 
-`chargate install-hooks` generates pre-commit + pre-push dispatchers, points
-`core.hooksPath` at them (so the hooks apply to **every existing repo immediately**)
-and sets `init.templateDir` (so new clones inherit them), backed by a managed
-`~/.pre-commit-config.yaml` pinned to the installed chargate version. It refuses to
-clobber a hand-maintained config unless you pass `--force`, and `chargate
-uninstall-hooks` reverts everything (restoring any prior `core.hooksPath`).
+`chargate install-hooks` generates pre-commit + pre-push + commit-msg dispatchers
+(repointed at the **global** `~/.pre-commit-config.yaml`), sets `core.hooksPath` so
+the hooks apply to **every existing repo immediately**, and sets `init.templateDir`
+so new clones inherit them. It refuses to clobber a hand-maintained config unless you
+pass `--force`, and `chargate uninstall-hooks` reverts everything (restoring any
+prior `core.hooksPath`).
+
+The managed config keeps chargate's hooks inside a `>>> chargate-managed >>>` block.
+**Add your own repos/hooks outside that block and they're preserved** every time you
+rerun `install-hooks` (only the block is regenerated):
+
+```yaml
+repos:
+  # >>> chargate-managed (regenerated; edits here are overwritten) >>>
+  - repo: https://github.com/MagmaMoose/chargate
+    rev: v2.0.0
+    hooks: [{ id: actions-pin-sha }, { id: conventional-branch-name }]
+  # <<< chargate-managed <<<
+  - repo: local            # ← your hooks live here, untouched on reinstall
+    hooks: [...]
+```
 
 > Two delivery paths, by design: the **CLI** ships via Homebrew, while the **hook
 > scripts** are fetched by pre-commit from this repo at the pinned `rev` — they are
@@ -138,10 +153,15 @@ uninstall-hooks` reverts everything (restoring any prior `core.hooksPath`).
 Prefer to wire it by hand instead? The equivalent manual setup:
 
 ```sh
-pre-commit init-templatedir ~/.config/chargate/git-template \
-  --hook-type pre-commit --hook-type pre-push
-git config --global core.hooksPath  ~/.config/chargate/git-template/hooks
-git config --global init.templateDir ~/.config/chargate/git-template
+tpl=~/.config/chargate/git-template
+pre-commit init-templatedir "$tpl" \
+  --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
+# init-templatedir bakes in a per-repo `--config=.pre-commit-config.yaml`; repoint
+# it at the global file so the hooks apply in every repo:
+sed -i '' "s#--config=.pre-commit-config.yaml#--config=$HOME/.pre-commit-config.yaml#" \
+  "$tpl"/hooks/pre-commit "$tpl"/hooks/pre-push "$tpl"/hooks/commit-msg
+git config --global core.hooksPath  "$tpl/hooks"
+git config --global init.templateDir "$tpl"
 ```
 
 ## Net-new semantics
