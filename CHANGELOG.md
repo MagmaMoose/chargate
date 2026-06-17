@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v2.1.0 (2026-06-17)
+
+### Bug Fixes
+
+- Pass product_type_name to DefectDojo so auto-create works
+  ([`c625a5b`](https://github.com/MagmaMoose/chargate/commit/c625a5b92981d3fdc7ff71428441dc7268f5c188))
+
+- Send an identifying User-Agent on sink uploads (Cloudflare 1010)
+  ([`696865b`](https://github.com/MagmaMoose/chargate/commit/696865b7253198823acf72e4d76bd651e00c6384))
+
+- Upload BOM to Dependency-Track via POST multipart (proxy-friendly)
+  ([`2c5017a`](https://github.com/MagmaMoose/chargate/commit/2c5017a2a4d4f20665f6ff57817c28ab9bca6488))
+
+### Continuous Integration
+
+- Trust the MagmaMoose tap before the Homebrew bump
+  ([`af960c6`](https://github.com/MagmaMoose/chargate/commit/af960c6024ee5722dd4997f363be34c73a919a11))
+
+### Features
+
+- Optional Dependency-Track BOM sink, mirroring the DefectDojo sink
+  ([`9ca11d6`](https://github.com/MagmaMoose/chargate/commit/9ca11d6385093788619fe1024b262844ea853908))
+
+
 ## v2.0.1 (2026-06-16)
 
 

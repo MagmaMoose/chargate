@@ -6,4 +6,4 @@ lines a pull request introduced, decides which findings are *net-new* (and thus
 gate-blocking) versus pre-existing (never blocking).
 """
 
-__version__ = "2.0.1"
+__version__ = "2.1.0"
