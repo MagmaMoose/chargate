@@ -6,10 +6,11 @@ continuously — the supply-chain analog of the DefectDojo SARIF sink. Like that
 sink, the upload NEVER blocks the gate: a failure returns a result with
 ``ok=False`` so the caller can log-and-continue.
 
-Uses the ``PUT /api/v1/bom`` JSON endpoint (BOM base64-encoded in the body),
-which needs no multipart handling — stdlib ``urllib`` only, no third-party HTTP.
-The project is addressed either by ``project`` UUID or by ``projectName`` +
-``projectVersion`` (with ``autoCreate`` to create it on first upload).
+Uses the ``POST /api/v1/bom`` multipart/form-data endpoint — Dependency-Track's
+documented primary upload method. The BOM is sent as a raw file part (no base64),
+which is friendlier to reverse proxies than the PUT-JSON variant. The project is
+addressed either by ``project`` UUID or by ``projectName`` + ``projectVersion``
+(with ``autoCreate`` to create it on first upload).
 
 Mirrors :mod:`chargate.defectdojo`; see also :mod:`chargate.sarif` for the pure
 gate core. Dependency-Track auth is the ``X-Api-Key`` header; the key needs
@@ -18,7 +19,6 @@ gate core. Dependency-Track auth is the ``X-Api-Key`` header; the key needs
 
 from __future__ import annotations
 
-import base64
 import json
 import ssl
 import urllib.error
@@ -29,9 +29,9 @@ from typing import Any
 
 from chargate import __version__
 
-# A UTF-8 byte-order mark on the BOM makes Dependency-Track's parser reject the
-# upload ("77u/" once base64-encoded). Strip it before encoding, mirroring what
-# the official gh-upload-sbom action does.
+_BOUNDARY = "----chargateDependencyTrackBoundary7MA4YWxkTrZu0gW"
+# A UTF-8 byte-order mark on the BOM can trip Dependency-Track's parser; strip it
+# before upload, mirroring what the official gh-upload-sbom action does.
 _UTF8_BOM = b"\xef\xbb\xbf"
 # Identify ourselves instead of the default "Python-urllib/X.Y", which edge WAFs
 # (e.g. Cloudflare Bot Fight Mode / error 1010) commonly ban by client signature.
@@ -67,43 +67,72 @@ class DependencyTrackResult:
     response: dict[str, Any] | None = None
 
 
-def encode_bom(bom_bytes: bytes) -> str:
-    """Base64-encode the BOM, dropping a leading UTF-8 BOM marker if present."""
+def strip_bom_marker(bom_bytes: bytes) -> bytes:
+    """Drop a leading UTF-8 BOM marker if present."""
     if bom_bytes.startswith(_UTF8_BOM):
-        bom_bytes = bom_bytes[len(_UTF8_BOM) :]
-    return base64.b64encode(bom_bytes).decode("ascii")
+        return bom_bytes[len(_UTF8_BOM) :]
+    return bom_bytes
 
 
-def build_payload(config: DependencyTrackConfig, bom_bytes: bytes) -> dict[str, Any]:
-    """The JSON body for ``PUT /api/v1/bom``.
+def build_form_fields(config: DependencyTrackConfig) -> dict[str, str]:
+    """The non-file multipart fields for ``POST /api/v1/bom``.
 
     Identifies the project by UUID when given, otherwise by name + version with
     ``autoCreate`` (the common CI case). ``autoCreate`` is meaningless for an
     existing-UUID upload, so it is only emitted on the name/version path.
     """
-    payload: dict[str, Any] = {"bom": encode_bom(bom_bytes)}
+    fields: dict[str, str] = {}
     if config.project_uuid:
-        payload["project"] = config.project_uuid
+        fields["project"] = config.project_uuid
     else:
-        payload["projectName"] = config.project_name or ""
-        payload["projectVersion"] = config.project_version or ""
-        payload["autoCreate"] = config.auto_create
+        fields["projectName"] = config.project_name or ""
+        fields["projectVersion"] = config.project_version or ""
+        fields["autoCreate"] = "true" if config.auto_create else "false"
     if config.parent_uuid:
-        payload["parentUUID"] = config.parent_uuid
+        fields["parentUUID"] = config.parent_uuid
     elif config.parent_name:
-        payload["parentName"] = config.parent_name
+        fields["parentName"] = config.parent_name
         if config.parent_version:
-            payload["parentVersion"] = config.parent_version
+            fields["parentVersion"] = config.parent_version
     if config.is_latest:
-        payload["isLatest"] = True
-    return payload
+        fields["isLatest"] = "true"
+    return fields
+
+
+def encode_multipart(
+    fields: dict[str, str],
+    file_field: str,
+    filename: str,
+    file_bytes: bytes,
+    boundary: str = _BOUNDARY,
+) -> bytes:
+    """Encode ``fields`` plus one file as a multipart/form-data body."""
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+        parts.append(f"{value}\r\n".encode())
+    parts.append(f"--{boundary}\r\n".encode())
+    parts.append(
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode()
+    )
+    parts.append(b"Content-Type: application/json\r\n\r\n")
+    parts.append(file_bytes)
+    parts.append(b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts)
 
 
 def build_request(config: DependencyTrackConfig, bom_path: Path) -> urllib.request.Request:
-    body = json.dumps(build_payload(config, bom_path.read_bytes())).encode("utf-8")
-    request = urllib.request.Request(config.endpoint_url(), data=body, method="PUT")
+    body = encode_multipart(
+        build_form_fields(config),
+        file_field="bom",
+        filename=bom_path.name,
+        file_bytes=strip_bom_marker(bom_path.read_bytes()),
+    )
+    request = urllib.request.Request(config.endpoint_url(), data=body, method="POST")
     request.add_header("X-Api-Key", config.api_key)
-    request.add_header("Content-Type", "application/json")
+    request.add_header("Content-Type", f"multipart/form-data; boundary={_BOUNDARY}")
     request.add_header("Accept", "application/json")
     request.add_header("User-Agent", _USER_AGENT)
     return request

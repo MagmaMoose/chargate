@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import base64
 import io
-import json
 import urllib.error
 from pathlib import Path
 
@@ -64,54 +62,55 @@ def _config(**kw) -> dt.DependencyTrackConfig:
     return dt.DependencyTrackConfig(**base)
 
 
-def _payload(opener: _FakeOpener) -> dict:
-    return json.loads(opener.request.data.decode("utf-8"))
-
-
 def test_endpoint_url():
     assert _config().endpoint_url() == "https://dtrack.example.com/api/v1/bom"
 
 
-def test_build_payload_name_version_autocreate():
-    payload = dt.build_payload(_config(), b'{"bomFormat":"CycloneDX"}')
-    assert payload["projectName"] == "P"
-    assert payload["projectVersion"] == "1.0.0"
-    assert payload["autoCreate"] is True
-    # BOM is base64-encoded in the body.
-    assert base64.b64decode(payload["bom"]) == b'{"bomFormat":"CycloneDX"}'
-    assert "project" not in payload  # no UUID path
+def test_build_form_fields_name_version_autocreate():
+    fields = dt.build_form_fields(_config())
+    assert fields["projectName"] == "P"
+    assert fields["projectVersion"] == "1.0.0"
+    assert fields["autoCreate"] == "true"
+    assert "project" not in fields  # no UUID path
 
 
-def test_build_payload_uuid_omits_name_and_autocreate():
-    payload = dt.build_payload(
-        _config(project_uuid="abc-uuid", project_name=None, project_version=None),
-        b"{}",
+def test_build_form_fields_uuid_omits_name_and_autocreate():
+    fields = dt.build_form_fields(
+        _config(project_uuid="abc-uuid", project_name=None, project_version=None)
     )
-    assert payload["project"] == "abc-uuid"
-    assert "projectName" not in payload
-    assert "autoCreate" not in payload  # meaningless for an existing-UUID upload
+    assert fields["project"] == "abc-uuid"
+    assert "projectName" not in fields
+    assert "autoCreate" not in fields  # meaningless for an existing-UUID upload
 
 
-def test_build_payload_parent_and_is_latest():
-    payload = dt.build_payload(
-        _config(parent_name="root", parent_version="2.0", is_latest=True), b"{}"
+def test_build_form_fields_parent_and_is_latest():
+    fields = dt.build_form_fields(_config(parent_name="root", parent_version="2.0", is_latest=True))
+    assert fields["parentName"] == "root"
+    assert fields["parentVersion"] == "2.0"
+    assert fields["isLatest"] == "true"
+
+
+def test_strip_bom_marker():
+    assert dt.strip_bom_marker(b"\xef\xbb\xbf{}") == b"{}"
+    assert dt.strip_bom_marker(b"{}") == b"{}"
+
+
+def test_encode_multipart_sends_raw_bom_not_base64():
+    body = dt.encode_multipart(
+        {"projectName": "P"}, "bom", "sbom.json", b'{"bomFormat":"CycloneDX"}', boundary="B"
     )
-    assert payload["parentName"] == "root"
-    assert payload["parentVersion"] == "2.0"
-    assert payload["isLatest"] is True
+    text = body.decode("utf-8")
+    assert "--B" in text
+    assert 'name="projectName"' in text
+    assert 'name="bom"; filename="sbom.json"' in text
+    assert '{"bomFormat":"CycloneDX"}' in text  # raw bytes, not base64
 
 
-def test_encode_bom_strips_utf8_bom_marker():
-    with_marker = b"\xef\xbb\xbf" + b'{"bomFormat":"CycloneDX"}'
-    encoded = dt.encode_bom(with_marker)
-    assert not encoded.startswith("77u/")  # the base64 of the UTF-8 BOM
-    assert base64.b64decode(encoded) == b'{"bomFormat":"CycloneDX"}'
-
-
-def test_build_request_uses_put_and_api_key_header(bom_file):
+def test_build_request_uses_post_multipart_and_api_key(bom_file):
     request = dt.build_request(_config(), bom_file)
-    assert request.method == "PUT"
+    assert request.method == "POST"
     assert request.get_header("X-api-key") == "key123"
+    assert request.get_header("Content-type").startswith("multipart/form-data; boundary=")
     assert request.full_url.endswith("/api/v1/bom")
 
 
@@ -129,7 +128,9 @@ def test_upload_success(bom_file):
     assert result.token == "t-42"
     assert opener.request.get_header("X-api-key") == "key123"
     assert opener.request.full_url.endswith("/api/v1/bom")
-    assert _payload(opener)["projectName"] == "P"
+    body = opener.request.data.decode("utf-8")
+    assert 'name="projectName"' in body
+    assert "P" in body
 
 
 def test_upload_http_error_is_not_ok(bom_file):

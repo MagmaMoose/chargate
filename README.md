@@ -232,8 +232,8 @@ uploads it to your Dependency-Track server:
     dependency_track_project_version: 1.2.3            # defaults to the ref name
 ```
 
-- Generates the BOM with `anchore/sbom-action` (Syft) and `PUT`s it to
-  `/api/v1/bom`; auto-creates the project/version on first upload.
+- Generates the BOM with `anchore/sbom-action` (Syft) and `POST`s it to
+  `/api/v1/bom` (multipart); auto-creates the project/version on first upload.
 - **A Dependency-Track failure never fails the gate** — it is logged and the run
   continues.
 

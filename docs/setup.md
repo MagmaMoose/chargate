@@ -107,9 +107,9 @@ Dependency-Track server:
     dependency_track_project_version: 1.2.3            # defaults to the ref name
 ```
 
-Generates the BOM with `anchore/sbom-action` (Syft) and `PUT`s it to
-`/api/v1/bom`, auto-creating the project/version on first upload. The API key
-needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create).
+Generates the BOM with `anchore/sbom-action` (Syft) and `POST`s it to
+`/api/v1/bom` (multipart), auto-creating the project/version on first upload. The
+API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create).
 
 ## MegaLinter configuration
 
