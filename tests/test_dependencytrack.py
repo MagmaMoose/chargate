@@ -115,6 +115,12 @@ def test_build_request_uses_put_and_api_key_header(bom_file):
     assert request.full_url.endswith("/api/v1/bom")
 
 
+def test_build_request_sets_identifying_user_agent(bom_file):
+    # Not the default "Python-urllib/X.Y" — edge WAFs ban that by signature.
+    ua = dt.build_request(_config(), bom_file).get_header("User-agent")
+    assert ua and ua.startswith("chargate/")
+
+
 def test_upload_success(bom_file):
     opener = _FakeOpener(_FakeResponse(200, '{"token": "t-42"}'))
     result = dt.upload_bom(_config(), bom_file, opener=opener)

@@ -27,10 +27,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from chargate import __version__
+
 # A UTF-8 byte-order mark on the BOM makes Dependency-Track's parser reject the
 # upload ("77u/" once base64-encoded). Strip it before encoding, mirroring what
 # the official gh-upload-sbom action does.
 _UTF8_BOM = b"\xef\xbb\xbf"
+# Identify ourselves instead of the default "Python-urllib/X.Y", which edge WAFs
+# (e.g. Cloudflare Bot Fight Mode / error 1010) commonly ban by client signature.
+_USER_AGENT = f"chargate/{__version__} (+https://github.com/MagmaMoose/chargate)"
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,7 @@ def build_request(config: DependencyTrackConfig, bom_path: Path) -> urllib.reque
     request.add_header("X-Api-Key", config.api_key)
     request.add_header("Content-Type", "application/json")
     request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", _USER_AGENT)
     return request
 
 
