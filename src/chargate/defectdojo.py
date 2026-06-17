@@ -33,6 +33,7 @@ class DefectDojoConfig:
     base_url: str
     token: str
     product_name: str | None = None
+    product_type_name: str | None = None
     engagement_name: str | None = None
     engagement_id: int | None = None
     scan_type: str = "SARIF"
@@ -75,6 +76,9 @@ def build_form_fields(config: DefectDojoConfig) -> dict[str, str]:
         "auto_create_context": _bool(config.auto_create_context),
         "minimum_severity": config.minimum_severity,
     }
+    if config.product_type_name:
+        # Required for auto_create_context to create a not-yet-existing product.
+        fields["product_type_name"] = config.product_type_name
     if config.product_name:
         fields["product_name"] = config.product_name
     if config.engagement_name:

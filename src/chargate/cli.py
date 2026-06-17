@@ -281,6 +281,7 @@ def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> str 
         base_url=args.defectdojo_url,
         token=token,
         product_name=args.dd_product,
+        product_type_name=args.dd_product_type,
         engagement_name=args.dd_engagement,
         engagement_id=args.dd_engagement_id,
         reimport=not args.dd_import,
@@ -489,6 +490,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Env var holding the DD API token.",
     )
     ci.add_argument("--dd-product", help="DefectDojo product name.")
+    ci.add_argument(
+        "--dd-product-type",
+        help="DefectDojo product type name (required to auto-create a new product).",
+    )
     ci.add_argument("--dd-engagement", help="DefectDojo engagement name.")
     ci.add_argument("--dd-engagement-id", type=int, help="DefectDojo engagement id.")
     ci.add_argument("--dd-test-title", help="DefectDojo test title.")

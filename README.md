@@ -207,6 +207,7 @@ Ships the **full** SARIF (never the filtered one) via DefectDojo's API:
     defectdojo_url: https://defectdojo.example.com   # active iff this is set
     defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
     defectdojo_product: my-service
+    defectdojo_product_type: Research and Development   # needed to auto-create a new product
     defectdojo_engagement: ci
 ```
 

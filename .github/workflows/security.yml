@@ -34,6 +34,7 @@ jobs:
       # DefectDojo — the full SARIF sink (active iff defectdojo_url is set).
       defectdojo_url: ${{ vars.MM_DEFECTDOJO_URL }}
       defectdojo_product: chargate
+      defectdojo_product_type: Research and Development
       defectdojo_engagement: ci
       # Dependency-Track — the CycloneDX BOM sink (active iff dependency_track_url
       # is set). Project name/version default to the repo and ref.

@@ -77,6 +77,11 @@ def test_build_form_fields_has_sarif_and_context():
     assert fields["tags"] == "ci,chargate"
 
 
+def test_build_form_fields_includes_product_type_for_autocreate():
+    fields = dd.build_form_fields(_config(product_type_name="Research and Development"))
+    assert fields["product_type_name"] == "Research and Development"
+
+
 def test_encode_multipart_contains_fields_and_file():
     body = dd.encode_multipart(
         {"scan_type": "SARIF"}, "file", "r.sarif", b'{"runs":[]}', boundary="B"

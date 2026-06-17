@@ -48,6 +48,9 @@ on:
       defectdojo_product:
         type: string
         default: ''
+      defectdojo_product_type:
+        type: string
+        default: ''
       defectdojo_engagement:
         type: string
         default: ''
@@ -115,6 +118,7 @@ jobs:
           upload_github_sarif: ${{ inputs.upload_github_sarif }}
           defectdojo_url: ${{ inputs.defectdojo_url }}
           defectdojo_product: ${{ inputs.defectdojo_product }}
+          defectdojo_product_type: ${{ inputs.defectdojo_product_type }}
           defectdojo_engagement: ${{ inputs.defectdojo_engagement }}
           defectdojo_token: ${{ secrets.defectdojo_token }}
           dependency_track_url: ${{ inputs.dependency_track_url }}
