@@ -41,6 +41,8 @@ jobs:
           fail_on: high          # block only on net-new high/critical (default: any)
           # defectdojo_url: https://dd.example.com
           # defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
+          # dependency_track_url: https://dtrack.example.com
+          # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
 ```
 
 The action checks out with `fetch-depth: 0` by default (net-new needs the
@@ -67,23 +69,47 @@ The hook (`language: python`, no Docker) runs a **fast staged-file subset**
 first line, deliberately narrower than the CI whole-repo net. Local/CI disparity
 is intended.
 
-## DefectDojo
+## Sinks (DefectDojo & Dependency-Track)
 
-DefectDojo import is optional and first-class. Chargate always uploads the
-**full** SARIF (never the filtered one):
+Both external sinks share one enable rule: **set a Variable for the host and a
+Secret for the credential — the sink is active iff the host is set.** No separate
+on/off toggle. Both are optional, first-class, and failure-isolated (a sink outage
+is logged and never fails the gate).
+
+### DefectDojo
+
+Uploads the **full** SARIF (never the filtered one):
 
 ```yaml
 - uses: magmamoose/chargate@v2
   with:
-    defectdojo_url: https://defectdojo.example.com
+    defectdojo_url: https://defectdojo.example.com   # active iff this is set
     defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
     defectdojo_product: my-service
+    defectdojo_product_type: Research and Development   # needed to auto-create a new product
     defectdojo_engagement: ci
 ```
 
 Uses `reimport-scan` by default (one Test per engagement; `close_old_findings`
-mitigates findings that disappear) and auto-creates the product/engagement. **A
-DefectDojo failure never fails the gate** — it is logged and the run continues.
+mitigates findings that disappear) and auto-creates the product/engagement.
+
+### Dependency-Track
+
+Generates a CycloneDX BOM (Syft, any language) and uploads it to your
+Dependency-Track server:
+
+```yaml
+- uses: magmamoose/chargate@v2
+  with:
+    dependency_track_url: https://dtrack.example.com   # active iff this is set
+    dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
+    dependency_track_project_name: my-service          # defaults to the repo
+    dependency_track_project_version: 1.2.3            # defaults to the ref name
+```
+
+Generates the BOM with `anchore/sbom-action` (Syft) and `POST`s it to
+`/api/v1/bom` (multipart), auto-creating the project/version on first upload. The
+API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create).
 
 ## MegaLinter configuration
 

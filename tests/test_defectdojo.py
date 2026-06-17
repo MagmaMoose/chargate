@@ -77,6 +77,11 @@ def test_build_form_fields_has_sarif_and_context():
     assert fields["tags"] == "ci,chargate"
 
 
+def test_build_form_fields_includes_product_type_for_autocreate():
+    fields = dd.build_form_fields(_config(product_type_name="Research and Development"))
+    assert fields["product_type_name"] == "Research and Development"
+
+
 def test_encode_multipart_contains_fields_and_file():
     body = dd.encode_multipart(
         {"scan_type": "SARIF"}, "file", "r.sarif", b'{"runs":[]}', boundary="B"
@@ -128,3 +133,9 @@ def test_import_uses_import_endpoint_when_not_reimport(sarif_file):
     opener = _FakeOpener(_FakeResponse(201, "{}"))
     dd.import_sarif(_config(reimport=False), sarif_file, opener=opener)
     assert opener.request.full_url.endswith("/api/v2/import-scan/")
+
+
+def test_build_request_sets_identifying_user_agent(sarif_file):
+    # Not the default "Python-urllib/X.Y" — edge WAFs ban that by signature.
+    ua = dd.build_request(_config(), sarif_file).get_header("User-agent")
+    assert ua and ua.startswith("chargate/")

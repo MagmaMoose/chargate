@@ -20,7 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from chargate import __version__
+
 _BOUNDARY = "----chargateDefectDojoBoundary7MA4YWxkTrZu0gW"
+# Identify ourselves instead of the default "Python-urllib/X.Y", which edge WAFs
+# (e.g. Cloudflare Bot Fight Mode / error 1010) commonly ban by client signature.
+_USER_AGENT = f"chargate/{__version__} (+https://github.com/MagmaMoose/chargate)"
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,7 @@ class DefectDojoConfig:
     base_url: str
     token: str
     product_name: str | None = None
+    product_type_name: str | None = None
     engagement_name: str | None = None
     engagement_id: int | None = None
     scan_type: str = "SARIF"
@@ -70,6 +76,9 @@ def build_form_fields(config: DefectDojoConfig) -> dict[str, str]:
         "auto_create_context": _bool(config.auto_create_context),
         "minimum_severity": config.minimum_severity,
     }
+    if config.product_type_name:
+        # Required for auto_create_context to create a not-yet-existing product.
+        fields["product_type_name"] = config.product_type_name
     if config.product_name:
         fields["product_name"] = config.product_name
     if config.engagement_name:
@@ -119,6 +128,7 @@ def build_request(config: DefectDojoConfig, sarif_path: Path) -> urllib.request.
     request.add_header("Authorization", f"Token {config.token}")
     request.add_header("Content-Type", f"multipart/form-data; boundary={_BOUNDARY}")
     request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", _USER_AGENT)
     return request
 
 

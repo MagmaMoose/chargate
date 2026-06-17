@@ -22,6 +22,7 @@ def render_summary(
     *,
     megalinter_ok: bool = True,
     dd_message: str | None = None,
+    dt_message: str | None = None,
 ) -> str:
     """Render the Markdown job summary for a CI run."""
     lines: list[str] = ["## 🔴 Chargate", ""]
@@ -66,6 +67,10 @@ def render_summary(
 
     if dd_message:
         lines.append(f"**DefectDojo:** {dd_message}")
+        lines.append("")
+
+    if dt_message:
+        lines.append(f"**Dependency-Track:** {dt_message}")
         lines.append("")
 
     return "\n".join(lines)

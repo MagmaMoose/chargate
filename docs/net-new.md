@@ -40,4 +40,5 @@ Severity uses the SARIF `security-severity` band when present
 !!! tip "Full vs filtered SARIF"
     The gate only ever looks at the **net-new** subset, but the **full**,
     unfiltered SARIF is what gets shipped to DefectDojo / the Security tab /
-    artifact. The input report is never mutated.
+    artifact (and a CycloneDX BOM to Dependency-Track). The input report is never
+    mutated.

@@ -1,0 +1,44 @@
+name: Security
+
+# Chargate eats its own dog food: this caller invokes the reusable gate workflow
+# and wires both sinks to the Magma Moose org variables/secrets.
+#
+# It uses the LOCAL path (`./.github/workflows/gate.yml`) on purpose, so each run
+# exercises the gate from THIS commit — including unreleased changes. An external
+# consumer's file is identical except they pin the published workflow instead:
+#
+#   uses: magmamoose/chargate/.github/workflows/gate.yml@v2
+#
+# The arbitrary `MM_*` names live entirely here on the caller side; chargate's
+# reusable workflow only ever sees the values. Each sink is active iff its host
+# URL is set — no separate on/off toggle.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chargate:
+    uses: ./.github/workflows/gate.yml
+    with:
+      # DefectDojo — the full SARIF sink (active iff defectdojo_url is set).
+      defectdojo_url: ${{ vars.MM_DEFECTDOJO_URL }}
+      defectdojo_product: chargate
+      defectdojo_product_type: Research and Development
+      defectdojo_engagement: ci
+      # Dependency-Track — the CycloneDX BOM sink (active iff dependency_track_url
+      # is set). Project name/version default to the repo and ref.
+      dependency_track_url: ${{ vars.MM_DEPENDENCYTRACK_URL }}
+    secrets:
+      defectdojo_token: ${{ secrets.MM_DEFECTDOJO_API_KEY }}
+      dependency_track_api_key: ${{ secrets.MM_DEPENDENCYTRACK_API_KEY }}

@@ -91,12 +91,38 @@ inputs:
     description: 'DefectDojo product name (auto-created if missing).'
     required: false
     default: ''
+  defectdojo_product_type:
+    description: 'DefectDojo product type name (required to auto-create a new product).'
+    required: false
+    default: ''
   defectdojo_engagement:
     description: 'DefectDojo engagement name (auto-created if missing).'
     required: false
     default: ''
   defectdojo_close_old:
     description: 'Close findings no longer present on reimport.'
+    required: false
+    default: 'true'
+
+  # ── Dependency-Track (optional, supply-chain BOM sink) ───────────────────
+  dependency_track_url:
+    description: 'Dependency-Track base URL. Set to enable the CycloneDX BOM upload (pass a Variable).'
+    required: false
+    default: ''
+  dependency_track_api_key:
+    description: 'Dependency-Track API key (pass a Secret). Needs BOM_UPLOAD (+ PROJECT_CREATION_UPLOAD for auto-create).'
+    required: false
+    default: ''
+  dependency_track_project_name:
+    description: 'Dependency-Track project name (auto-created if missing).'
+    required: false
+    default: ${{ github.repository }}
+  dependency_track_project_version:
+    description: 'Dependency-Track project version.'
+    required: false
+    default: ${{ github.ref_name }}
+  dependency_track_auto_create:
+    description: 'Auto-create the project/version on first upload.'
     required: false
     default: 'true'
 
@@ -140,12 +166,25 @@ runs:
       shell: bash
       run: python -m pip install --disable-pip-version-check --quiet "$GITHUB_ACTION_PATH"
 
+    # Generate a language-agnostic CycloneDX BOM (Syft) for the Dependency-Track
+    # sink. Runs only when enabled; chargate then uploads the file below.
+    - name: Generate CycloneDX SBOM
+      if: ${{ inputs.dependency_track_url != '' }}
+      uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      with:
+        path: '.'
+        format: 'cyclonedx-json'
+        output-file: ${{ github.workspace }}/chargate-sbom.cdx.json
+        artifact-name: chargate-sbom
+        upload-artifact: 'true'
+
     - name: Chargate gate
       id: chargate
       shell: bash
       env:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
         DEFECTDOJO_TOKEN: ${{ inputs.defectdojo_token }}
+        DEPENDENCYTRACK_API_KEY: ${{ inputs.dependency_track_api_key }}
         BASE_REF_IN: ${{ inputs.base_ref }}
         HEAD_REF_IN: ${{ inputs.head_ref }}
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -164,14 +203,20 @@ runs:
         DISABLE_LINTERS_IN: ${{ inputs.disable_linters }}
         DD_URL_IN: ${{ inputs.defectdojo_url }}
         DD_PRODUCT_IN: ${{ inputs.defectdojo_product }}
+        DD_PRODUCT_TYPE_IN: ${{ inputs.defectdojo_product_type }}
         DD_ENGAGEMENT_IN: ${{ inputs.defectdojo_engagement }}
         DD_CLOSE_OLD_IN: ${{ inputs.defectdojo_close_old }}
+        DT_URL_IN: ${{ inputs.dependency_track_url }}
+        DT_PROJECT_NAME_IN: ${{ inputs.dependency_track_project_name }}
+        DT_PROJECT_VERSION_IN: ${{ inputs.dependency_track_project_version }}
+        DT_AUTO_CREATE_IN: ${{ inputs.dependency_track_auto_create }}
       run: |
         set -euo pipefail
         # Keep the SARIF under the workspace so hashFiles() (used to guard the
         # upload steps) can see it; emit a workspace-relative output path.
         sarif_rel="chargate-reports/full.sarif"
         sarif_abs="${GITHUB_WORKSPACE:-$PWD}/$sarif_rel"
+        bom_abs="${GITHUB_WORKSPACE:-$PWD}/chargate-sbom.cdx.json"
         mkdir -p "$(dirname "$sarif_abs")"
         echo "sarif_path=$sarif_rel" >> "$GITHUB_OUTPUT"
 
@@ -198,8 +243,16 @@ runs:
         if [ -n "$DD_URL_IN" ]; then
           args+=(--defectdojo-url "$DD_URL_IN")
           [ -n "$DD_PRODUCT_IN" ] && args+=(--dd-product "$DD_PRODUCT_IN")
+          [ -n "$DD_PRODUCT_TYPE_IN" ] && args+=(--dd-product-type "$DD_PRODUCT_TYPE_IN")
           [ -n "$DD_ENGAGEMENT_IN" ] && args+=(--dd-engagement "$DD_ENGAGEMENT_IN")
           [ "$DD_CLOSE_OLD_IN" != "true" ] && args+=(--dd-no-close-old)
+        fi
+
+        if [ -n "$DT_URL_IN" ]; then
+          args+=(--dependency-track-url "$DT_URL_IN" --bom "$bom_abs")
+          [ -n "$DT_PROJECT_NAME_IN" ] && args+=(--dt-project-name "$DT_PROJECT_NAME_IN")
+          [ -n "$DT_PROJECT_VERSION_IN" ] && args+=(--dt-project-version "$DT_PROJECT_VERSION_IN")
+          [ "$DT_AUTO_CREATE_IN" != "true" ] && args+=(--dt-no-auto-create)
         fi
 
         chargate "${args[@]}"
