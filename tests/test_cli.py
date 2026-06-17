@@ -304,6 +304,58 @@ def test_ci_defectdojo_skipped_without_token(pr_repo, capsys, monkeypatch):
     assert "skipped (no token" in capsys.readouterr().err
 
 
+def test_ci_dependency_track_skipped_without_key(pr_repo, capsys, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    monkeypatch.delenv("DEPENDENCYTRACK_API_KEY", raising=False)
+    code = main(
+        [
+            "ci",
+            "--mode",
+            "pr",
+            "--sarif",
+            str(sarif_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--repo",
+            str(repo),
+            "--dependency-track-url",
+            "https://dtrack.example.com",
+            "--dt-project-name",
+            "p",
+            "--bom",
+            str(sarif_path),  # any existing file; skip happens before reading it
+        ]
+    )
+    # DT skipped (no API key) must NOT change the gate outcome.
+    assert code == EXIT_BLOCKED
+    assert "skipped (no API key" in capsys.readouterr().err
+
+
+def test_ci_dependency_track_skipped_without_bom(pr_repo, capsys):
+    repo, base, head, sarif_path = pr_repo
+    code = main(
+        [
+            "ci",
+            "--mode",
+            "pr",
+            "--sarif",
+            str(sarif_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--repo",
+            str(repo),
+            "--dependency-track-url",
+            "https://dtrack.example.com",
+        ]
+    )
+    assert code == EXIT_BLOCKED
+    assert "skipped (no --bom path)" in capsys.readouterr().err
+
+
 def test_local_no_staged_files_passes(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

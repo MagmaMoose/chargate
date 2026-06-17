@@ -17,7 +17,8 @@ src/chargate/
   git.py          # the ONLY git/subprocess boundary (merge-base, diff, shallow detect)
   gate.py         # net-new verdicts + fail_on threshold -> pass/fail + exit code
   megalinter.py   # build env/command, run, locate the merged SARIF
-  defectdojo.py   # import/reimport client (urllib, failure-isolated, never raises)
+  defectdojo.py   # SARIF import/reimport client (urllib, failure-isolated, never raises)
+  dependencytrack.py # CycloneDX BOM upload client (urllib, failure-isolated, never raises)
   modes.py        # PR (gate) vs baseline (no gate) resolution
   report.py       # GitHub job summary + step outputs
   local.py        # pre-commit fast staged-file runner
@@ -53,8 +54,10 @@ required.
    only), per-result verdicts, and `Counts`. The input SARIF is never mutated.
 5. **`gate.decide_gate`** applies the `fail_on` threshold to the net-new set →
    a `GateDecision` and exit code.
-6. **`defectdojo.import_sarif`** (optional) ships the **full** SARIF. It is
-   failure-isolated: it never raises, so a DefectDojo outage can't fail the gate.
+6. **`defectdojo.import_sarif`** and **`dependencytrack.upload_bom`** (both
+   optional, each active iff its host/URL is set) ship the **full** SARIF and a
+   CycloneDX BOM respectively. Both are failure-isolated: they never raise, so a
+   sink outage can't fail the gate.
 7. **`report`** writes the GitHub job summary and step outputs.
 
 Baseline mode skips steps 3–5's gating: it counts everything against an empty
@@ -76,4 +79,4 @@ failure only fails the job under `--strict`.
 Tests mirror modules 1:1 under `tests/` (e.g. `test_sarif_filter.py`,
 `test_gate.py`, `test_git.py`). The pure core is tested with synthetic inputs; the
 subprocess and HTTP boundaries inject their runner/opener so they are exercised
-without Docker, git, or a live DefectDojo.
+without Docker, git, or a live DefectDojo / Dependency-Track.

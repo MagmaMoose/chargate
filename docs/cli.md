@@ -36,7 +36,8 @@ chargate filter-sarif --sarif report.sarif --base "$BASE" --head "$HEAD" \
 ## `chargate ci`
 
 The full CI flow: run MegaLinter, preserve the full SARIF, gate on net-new (PR
-events only), and optionally ship to DefectDojo.
+events only), and optionally ship to the sinks (DefectDojo / Dependency-Track).
+Each sink is active iff its host/URL flag is set.
 
 ```sh
 chargate ci --mode auto --flavor all --sarif-out full.sarif
@@ -57,6 +58,11 @@ Key flags beyond the shared filter options:
 | `--defectdojo-token-env` | `DEFECTDOJO_TOKEN` | Env var holding the DD API token. |
 | `--dd-product` / `--dd-engagement` / `--dd-engagement-id` | — | DefectDojo targeting. |
 | `--dd-import` / `--dd-no-close-old` / `--dd-insecure` | off | Use import (not reimport) / keep old findings / skip TLS verify. |
+| `--dependency-track-url` | — | Dependency-Track base URL (enables CycloneDX BOM upload). |
+| `--dt-api-key-env` | `DEPENDENCYTRACK_API_KEY` | Env var holding the DT API key. |
+| `--bom` | — | Path to the CycloneDX BOM to upload (the action generates this with Syft). |
+| `--dt-project-name` / `--dt-project-version` / `--dt-project-uuid` | — | Dependency-Track project targeting. |
+| `--dt-no-auto-create` / `--dt-is-latest` / `--dt-insecure` | off | Don't auto-create the project / mark latest / skip TLS verify. |
 
 ## `chargate local`
 

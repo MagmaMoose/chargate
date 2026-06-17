@@ -47,6 +47,19 @@ def test_render_summary_notes_megalinter_tool_error(make_sarif, make_result):
     assert "tool error" in md
 
 
+def test_render_summary_includes_sink_messages(make_sarif, make_result):
+    result, decision = _result_and_decision(make_sarif, make_result, fail_on="none")
+    md = render_summary(
+        result.counts,
+        decision,
+        Mode.PR,
+        dd_message="uploaded",
+        dt_message="uploaded",
+    )
+    assert "**DefectDojo:** uploaded" in md
+    assert "**Dependency-Track:** uploaded" in md
+
+
 def test_write_outputs_and_summary_to_files(tmp_path: Path, monkeypatch, make_sarif, make_result):
     out_file = tmp_path / "out.txt"
     sum_file = tmp_path / "sum.md"

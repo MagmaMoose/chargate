@@ -76,6 +76,8 @@ jobs:
           fail_on: high          # block only on net-new high/critical (default: any)
           # defectdojo_url: https://dd.example.com
           # defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
+          # dependency_track_url: https://dtrack.example.com
+          # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
 ```
 
 The action checks out with `fetch-depth: 0` by default (net-new needs the
@@ -188,15 +190,21 @@ rebases and force-pushes.
 `security-severity` band when present, else the SARIF `level`
 (error→high, warning→medium, note→low).
 
-## DefectDojo
+## Sinks (DefectDojo & Dependency-Track)
 
-DefectDojo import is optional and first-class. Chargate always uploads the
-**full** SARIF (never the filtered one) via DefectDojo's API:
+Both external sinks follow the **same enable rule: set a Variable for the host
+and a Secret for the credential — the sink is active iff the host is set.** There
+is no separate on/off toggle. Both are optional, first-class, and failure-isolated
+(a sink outage is logged and never fails the gate).
+
+### DefectDojo
+
+Ships the **full** SARIF (never the filtered one) via DefectDojo's API:
 
 ```yaml
 - uses: magmamoose/chargate@v2
   with:
-    defectdojo_url: https://defectdojo.example.com
+    defectdojo_url: https://defectdojo.example.com   # active iff this is set
     defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
     defectdojo_product: my-service
     defectdojo_engagement: ci
@@ -209,11 +217,31 @@ DefectDojo import is optional and first-class. Chargate always uploads the
 - Prefer "emit artifact only" / "write to path"? Use the CLI's `--sarif-out` and
   skip `defectdojo_url`.
 
+### Dependency-Track
+
+The supply-chain analog: generates a CycloneDX BOM (Syft, any language) and
+uploads it to your Dependency-Track server:
+
+```yaml
+- uses: magmamoose/chargate@v2
+  with:
+    dependency_track_url: https://dtrack.example.com   # active iff this is set
+    dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
+    dependency_track_project_name: my-service          # defaults to the repo
+    dependency_track_project_version: 1.2.3            # defaults to the ref name
+```
+
+- Generates the BOM with `anchore/sbom-action` (Syft) and `PUT`s it to
+  `/api/v1/bom`; auto-creates the project/version on first upload.
+- **A Dependency-Track failure never fails the gate** — it is logged and the run
+  continues.
+
 ## Modes
 
-- **PR events** → whole-repo MegaLinter → net-new gate → full SARIF to DD/artifact.
-- **Push to default branch / scheduled** → full scan → full SARIF to DD as the
-  authoritative baseline → **no** net-new gate.
+- **PR events** → whole-repo MegaLinter → net-new gate → full SARIF to the sinks /
+  artifact.
+- **Push to default branch / scheduled** → full scan → full SARIF to the sinks as
+  the authoritative baseline → **no** net-new gate.
 
 `mode: auto` (default) picks this from the event; force with `mode: pr|baseline`.
 

@@ -7,8 +7,9 @@ day-to-day developer flow: **net-new finding gating**.
 On a pull request the gate passes or fails based *only* on findings the PR
 introduces relative to the merge-base. **Pre-existing findings never block.** The
 full, unfiltered SARIF is always emitted and shippable (first-class DefectDojo
-import, GitHub Security tab, or build artifact) so your security system still sees
-everything, including inherited debt.
+import, GitHub Security tab, or build artifact), and a CycloneDX BOM can be shipped
+to Dependency-Track — so your security system still sees everything, including
+inherited debt.
 
 !!! note "v2 is a ground-up re-platform"
     Chargate no longer hand-rolls a 12-tool scanner orchestration — MegaLinter
@@ -22,8 +23,8 @@ findings. Blocking PRs on all of them is noise; ignoring them loses signal.
 Chargate splits the difference:
 
 - **Gate** on what *this PR* introduced (net-new) → actionable, low-noise.
-- **Ship** the *complete* SARIF to DefectDojo / the Security tab → full
-  visibility, including inherited debt and trends.
+- **Ship** the *complete* SARIF to DefectDojo / the Security tab (and a CycloneDX
+  BOM to Dependency-Track) → full visibility, including inherited debt and trends.
 
 ## Three surfaces, one CLI
 
@@ -39,9 +40,9 @@ wire one up, [Architecture](architecture.md) for how it fits together, and
 
 ## Modes
 
-- **PR events** → whole-repo MegaLinter → net-new gate → full SARIF to
-  DefectDojo / artifact.
-- **Push to default branch / scheduled** → full scan → full SARIF to DefectDojo as
+- **PR events** → whole-repo MegaLinter → net-new gate → full SARIF to the
+  sinks / artifact.
+- **Push to default branch / scheduled** → full scan → full SARIF to the sinks as
   the authoritative baseline → **no** net-new gate.
 
 `mode: auto` (default) picks this from the event; force it with `mode: pr|baseline`.

@@ -25,6 +25,7 @@ from typing import Any
 
 from chargate import __version__
 from chargate import defectdojo as dd
+from chargate import dependencytrack as dt
 from chargate import git as cgit
 from chargate import local as local_mod
 from chargate import megalinter as ml
@@ -235,15 +236,25 @@ def cmd_ci(args: argparse.Namespace) -> int:
         args, sarif_path if not args.sarif_out else Path(args.sarif_out)
     )
 
+    # 4b. Optional Dependency-Track upload of the CycloneDX BOM (never fails the gate).
+    dt_message = _maybe_upload_dependencytrack(args)
+
     # 5. Report.
     summary = report_mod.render_summary(
-        result.counts, decision, mode, megalinter_ok=megalinter_ok, dd_message=dd_message
+        result.counts,
+        decision,
+        mode,
+        megalinter_ok=megalinter_ok,
+        dd_message=dd_message,
+        dt_message=dt_message,
     )
     report_mod.append_step_summary(summary)
     if not args.quiet:
         _print_summary(result, decision)
         if dd_message:
             _eprint(f"chargate: DefectDojo: {dd_message}")
+        if dt_message:
+            _eprint(f"chargate: Dependency-Track: {dt_message}")
     report_mod.write_outputs(
         {
             "mode": mode.value,
@@ -279,6 +290,35 @@ def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> str 
         verify_ssl=not args.dd_insecure,
     )
     result = dd.import_sarif(config, sarif_path)
+    return result.message if result.ok else f"upload failed (non-blocking): {result.message}"
+
+
+def _maybe_upload_dependencytrack(args: argparse.Namespace) -> str | None:
+    if not args.dependency_track_url:
+        return None
+    if not args.bom:
+        return "skipped (no --bom path)"
+    if not args.dt_project_uuid and not args.dt_project_name:
+        return "skipped (need --dt-project-uuid or --dt-project-name)"
+    api_key = os.environ.get(args.dt_api_key_env, "")
+    if not api_key:
+        return f"skipped (no API key in ${args.dt_api_key_env})"
+    bom_path = Path(args.bom)
+    if not bom_path.is_file():
+        return f"skipped (BOM not found: {bom_path})"
+    config = dt.DependencyTrackConfig(
+        base_url=args.dependency_track_url,
+        api_key=api_key,
+        project_name=args.dt_project_name,
+        project_version=args.dt_project_version,
+        project_uuid=args.dt_project_uuid,
+        auto_create=not args.dt_no_auto_create,
+        parent_name=args.dt_parent_name,
+        parent_version=args.dt_parent_version,
+        is_latest=args.dt_is_latest,
+        verify_ssl=not args.dt_insecure,
+    )
+    result = dt.upload_bom(config, bom_path)
     return result.message if result.ok else f"upload failed (non-blocking): {result.message}"
 
 
@@ -461,6 +501,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ci.add_argument(
         "--dd-insecure", action="store_true", help="Disable TLS verification for DefectDojo."
+    )
+    ci.add_argument(
+        "--dependency-track-url",
+        help="Dependency-Track base URL (enables CycloneDX BOM upload).",
+    )
+    ci.add_argument(
+        "--dt-api-key-env",
+        default="DEPENDENCYTRACK_API_KEY",
+        help="Env var holding the Dependency-Track API key.",
+    )
+    ci.add_argument("--bom", help="Path to the CycloneDX BOM to upload to Dependency-Track.")
+    ci.add_argument("--dt-project-name", help="Dependency-Track project name.")
+    ci.add_argument("--dt-project-version", help="Dependency-Track project version.")
+    ci.add_argument(
+        "--dt-project-uuid",
+        help="Existing Dependency-Track project UUID (instead of name+version).",
+    )
+    ci.add_argument(
+        "--dt-no-auto-create",
+        action="store_true",
+        help="Do not auto-create the project/version on first upload.",
+    )
+    ci.add_argument("--dt-parent-name", help="Parent project name (for project hierarchy).")
+    ci.add_argument("--dt-parent-version", help="Parent project version.")
+    ci.add_argument(
+        "--dt-is-latest",
+        action="store_true",
+        help="Mark this version as the latest in Dependency-Track.",
+    )
+    ci.add_argument(
+        "--dt-insecure", action="store_true", help="Disable TLS verification for Dependency-Track."
     )
     ci.add_argument("--quiet", action="store_true", help="Suppress the human summary.")
     ci.set_defaults(func=cmd_ci)
