@@ -39,6 +39,10 @@ jobs:
       # Dependency-Track — the CycloneDX BOM sink (active iff dependency_track_url
       # is set). Project name/version default to the repo and ref.
       dependency_track_url: ${{ vars.MM_DEPENDENCYTRACK_URL }}
+      # SonarQube — imports the full SARIF via the scanner (active iff
+      # sonar_host_url is set). Project key defaults to <owner>_<repo>.
+      sonar_host_url: ${{ vars.MM_SONAR_HOST_URL }}
     secrets:
       defectdojo_token: ${{ secrets.MM_DEFECTDOJO_API_KEY }}
       dependency_track_api_key: ${{ secrets.MM_DEPENDENCYTRACK_API_KEY }}
+      sonar_token: ${{ secrets.MM_SONAR_TOKEN }}

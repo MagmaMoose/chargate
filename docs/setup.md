@@ -43,6 +43,8 @@ jobs:
           # defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
           # dependency_track_url: https://dtrack.example.com
           # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
+          # sonar_host_url: https://sonarqube.example.com
+          # sonar_token: ${{ secrets.SONAR_TOKEN }}
 ```
 
 The action checks out with `fetch-depth: 0` by default (net-new needs the
@@ -69,11 +71,11 @@ The hook (`language: python`, no Docker) runs a **fast staged-file subset**
 first line, deliberately narrower than the CI whole-repo net. Local/CI disparity
 is intended.
 
-## Sinks (DefectDojo & Dependency-Track)
+## Sinks (DefectDojo, Dependency-Track & SonarQube)
 
-Both external sinks share one enable rule: **set a Variable for the host and a
-Secret for the credential — the sink is active iff the host is set.** No separate
-on/off toggle. Both are optional, first-class, and failure-isolated (a sink outage
+All three external sinks share one enable rule: **set a Variable for the host and
+a Secret for the credential — the sink is active iff the host is set.** No separate
+on/off toggle. All are optional, first-class, and failure-isolated (a sink outage
 is logged and never fails the gate).
 
 ### DefectDojo
@@ -110,6 +112,25 @@ Dependency-Track server:
 Generates the BOM with `anchore/sbom-action` (Syft) and `POST`s it to
 `/api/v1/bom` (multipart), auto-creating the project/version on first upload. The
 API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create).
+
+### SonarQube
+
+Imports the **full** SARIF into your SonarQube server, alongside SonarQube's own
+analysis:
+
+```yaml
+- uses: magmamoose/chargate@v2
+  with:
+    sonar_host_url: https://sonarqube.example.com   # active iff this is set
+    sonar_token: ${{ secrets.SONAR_TOKEN }}
+    sonar_project_key: my-service                   # defaults to <owner>_<repo>
+```
+
+Runs the official `SonarSource/sonarqube-scan-action`, which imports the SARIF via
+`sonar.sarifReportPaths`. SonarQube has **no REST report-import endpoint**, so —
+unlike the other two sinks — this is the scanner action, not a urllib client. The
+scan step is `continue-on-error` and SonarQube's Quality Gate is **not** awaited,
+so a SonarQube failure never fails chargate's gate.
 
 ## MegaLinter configuration
 

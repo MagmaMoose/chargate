@@ -78,6 +78,8 @@ jobs:
           # defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
           # dependency_track_url: https://dtrack.example.com
           # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
+          # sonar_host_url: https://sonarqube.example.com
+          # sonar_token: ${{ secrets.SONAR_TOKEN }}
 ```
 
 The action checks out with `fetch-depth: 0` by default (net-new needs the
@@ -190,12 +192,12 @@ rebases and force-pushes.
 `security-severity` band when present, else the SARIF `level`
 (error→high, warning→medium, note→low).
 
-## Sinks (DefectDojo & Dependency-Track)
+## Sinks (DefectDojo, Dependency-Track & SonarQube)
 
-Both external sinks follow the **same enable rule: set a Variable for the host
-and a Secret for the credential — the sink is active iff the host is set.** There
-is no separate on/off toggle. Both are optional, first-class, and failure-isolated
-(a sink outage is logged and never fails the gate).
+All three external sinks follow the **same enable rule: set a Variable for the
+host and a Secret for the credential — the sink is active iff the host is set.**
+There is no separate on/off toggle. All are optional, first-class, and
+failure-isolated (a sink outage is logged and never fails the gate).
 
 ### DefectDojo
 
@@ -236,6 +238,27 @@ uploads it to your Dependency-Track server:
   `/api/v1/bom` (multipart); auto-creates the project/version on first upload.
 - **A Dependency-Track failure never fails the gate** — it is logged and the run
   continues.
+
+### SonarQube
+
+Imports the **full** SARIF into your SonarQube server so its findings appear
+alongside SonarQube's own analysis:
+
+```yaml
+- uses: magmamoose/chargate@v2
+  with:
+    sonar_host_url: https://sonarqube.example.com   # active iff this is set
+    sonar_token: ${{ secrets.SONAR_TOKEN }}
+    sonar_project_key: my-service                   # defaults to <owner>_<repo>
+```
+
+- Runs the official `SonarSource/sonarqube-scan-action`, which imports the full
+  SARIF via `sonar.sarifReportPaths`. SonarQube has **no REST report-import
+  endpoint**, so — unlike the DefectDojo/Dependency-Track sinks — this is the
+  scanner action rather than a urllib client.
+- **A SonarQube failure never fails the gate** — the scan step is
+  `continue-on-error` and SonarQube's own Quality Gate is **not** awaited; the
+  only gate stays chargate's net-new diff gate.
 
 ## Modes
 

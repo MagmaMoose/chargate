@@ -70,6 +70,18 @@ on:
         description: 'Auto-create the project/version on first upload.'
         type: boolean
         default: true
+      sonar_host_url:
+        description: 'SonarQube base URL (enables the SARIF import; pass a Variable).'
+        type: string
+        default: ''
+      sonar_project_key:
+        description: 'SonarQube project key (slash-free; default: <owner>_<repo>).'
+        type: string
+        default: ''
+      sonar_args:
+        description: 'Extra -D analysis args passed to the SonarQube scanner.'
+        type: string
+        default: ''
       runs_on:
         type: string
         default: 'ubuntu-latest'
@@ -79,6 +91,9 @@ on:
         required: false
       dependency_track_api_key:
         description: 'Dependency-Track API key (only needed if dependency_track_url is set).'
+        required: false
+      sonar_token:
+        description: 'SonarQube token (only needed if sonar_host_url is set).'
         required: false
 
 permissions:
@@ -126,3 +141,7 @@ jobs:
           dependency_track_project_name: ${{ inputs.dependency_track_project_name != '' && inputs.dependency_track_project_name || github.repository }}
           dependency_track_project_version: ${{ inputs.dependency_track_project_version != '' && inputs.dependency_track_project_version || github.ref_name }}
           dependency_track_auto_create: ${{ inputs.dependency_track_auto_create }}
+          sonar_host_url: ${{ inputs.sonar_host_url }}
+          sonar_token: ${{ secrets.sonar_token }}
+          sonar_project_key: ${{ inputs.sonar_project_key != '' && inputs.sonar_project_key || format('{0}_{1}', github.repository_owner, github.event.repository.name) }}
+          sonar_args: ${{ inputs.sonar_args }}
