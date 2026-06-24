@@ -24,17 +24,16 @@ Chargate splits the difference:
 - **Ship** the *complete* SARIF to DefectDojo / the Security tab → full visibility,
   including inherited debt and trends.
 
-## Three surfaces
+## Two surfaces
 
 | Surface | What it is | When to use |
 | --- | --- | --- |
-| **Reusable workflow** | `.github/workflows/gate.yml` (`on: workflow_call`) | Easiest — a consumer's whole config is ~one job block. |
-| **Composite action** | `action.yml` | When you compose your own steps. |
+| **Composite action** | `action.yml` | The CI gate — a few lines in a workflow. |
 | **pre-commit hook** | `.pre-commit-hooks.yaml` (`chargate` hook) | Fast local first line on staged files. |
 
-All three drive the same `chargate` Python CLI.
+Both drive the same `chargate` Python CLI.
 
-### 1. Reusable workflow (recommended)
+### 1. Composite action (recommended)
 
 ```yaml
 # .github/workflows/security.yml
@@ -43,24 +42,6 @@ on:
   pull_request:
   push:
     branches: [main]
-
-jobs:
-  chargate:
-    uses: magmamoose/chargate/.github/workflows/gate.yml@v2
-    secrets:
-      defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}   # optional
-```
-
-That's it. On PRs it runs MegaLinter whole-repo, gates on net-new findings, and
-ships the full SARIF. On push to the default branch it runs a non-gating baseline
-scan. (Reusable workflows are consumed by path, independent of the Marketplace
-listing.)
-
-### 2. Composite action
-
-```yaml
-name: Security
-on: [pull_request]
 
 permissions:
   contents: read
@@ -80,10 +61,12 @@ jobs:
           # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
 ```
 
-The action checks out with `fetch-depth: 0` by default (net-new needs the
-merge-base). Set `checkout: 'false'` if you already checked out with full history.
+On PRs it runs MegaLinter whole-repo, gates on net-new findings, and ships the
+full SARIF; on push to the default branch it runs a non-gating baseline scan. The
+action checks out with `fetch-depth: 0` by default (net-new needs the merge-base) —
+set `checkout: 'false'` if you already checked out with full history.
 
-### 3. pre-commit hook
+### 2. pre-commit hook
 
 ```yaml
 # .pre-commit-config.yaml
@@ -279,7 +262,7 @@ v1 was a composite action that fetched a hand-rolled scanner runtime from
 | Blocks on all findings | Blocks only on **net-new** findings. |
 
 The **`v1` tag is frozen** on the old runtime, so existing pins keep working until
-you migrate. Move to the reusable workflow (one job block) when ready.
+you migrate. Move to the `v2` composite action when ready.
 
 ## Conventions
 
