@@ -356,6 +356,80 @@ def test_ci_dependency_track_skipped_without_bom(pr_repo, capsys):
     assert "skipped (no --bom path)" in capsys.readouterr().err
 
 
+def _ci_pr_comment_args(repo, base, head, sarif_path, *extra: str) -> list[str]:
+    return [
+        "ci", "--mode", "pr",
+        "--sarif", str(sarif_path),
+        "--base", base, "--head", head, "--repo", str(repo),
+        "--pr-comment", *extra,
+    ]  # fmt: skip
+
+
+def test_ci_pr_comment_skipped_without_token(pr_repo, capsys, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    code = main(
+        _ci_pr_comment_args(repo, base, head, sarif_path, "--pr-number", "7", "--repo-slug", "o/r")
+    )
+    assert code == EXIT_BLOCKED  # PR-comment skip must NOT change the gate
+    assert "skipped (no token" in capsys.readouterr().err
+
+
+def test_ci_pr_comment_skipped_without_pr_number(pr_repo, capsys, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    code = main(_ci_pr_comment_args(repo, base, head, sarif_path, "--repo-slug", "o/r"))
+    assert code == EXIT_BLOCKED
+    assert "need --pr-number" in capsys.readouterr().err
+
+
+def test_ci_pr_comment_posts_summary_and_inline(pr_repo, capsys, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    captured: dict = {}
+
+    def _fake_post(config, *, summary_body=None, inline_comments=None):
+        captured["config"] = config
+        captured["summary_body"] = summary_body
+        captured["inline_comments"] = inline_comments
+        from chargate.github_comment import GitHubCommentResult
+
+        return GitHubCommentResult(ok=True, message="summary created, 1 inline comment(s)")
+
+    monkeypatch.setattr("chargate.github_comment.post_pr_feedback", _fake_post)
+
+    code = main(
+        _ci_pr_comment_args(repo, base, head, sarif_path, "--pr-number", "7", "--repo-slug", "o/r")
+    )
+    assert code == EXIT_BLOCKED  # the one net-new finding still gates
+    assert "PR comments: summary created" in capsys.readouterr().err
+
+    # Wiring: slug/pr/head-SHA flowed into the config; the head was resolved to a SHA.
+    assert captured["config"].repo_slug == "o/r"
+    assert captured["config"].pr_number == 7
+    assert captured["config"].commit_id == head
+    # The summary lists net-new; the one added line (4) becomes an inline comment.
+    from chargate.github_comment import SUMMARY_MARKER
+
+    assert SUMMARY_MARKER in captured["summary_body"]
+    assert [c.line for c in captured["inline_comments"]] == [4]
+    assert captured["inline_comments"][0].path == "app.py"
+
+
+def test_ci_pr_comment_not_attempted_in_baseline_mode(pr_repo, capsys, monkeypatch):
+    repo, _base, _head, sarif_path = pr_repo
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    called = {"n": 0}
+    monkeypatch.setattr(
+        "chargate.github_comment.post_pr_feedback",
+        lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+    )
+    main(["ci", "--mode", "baseline", "--sarif", str(sarif_path), "--repo", str(repo),
+          "--pr-comment", "--pr-number", "7", "--repo-slug", "o/r"])  # fmt: skip
+    assert called["n"] == 0  # baseline never comments
+
+
 def test_local_no_staged_files_passes(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

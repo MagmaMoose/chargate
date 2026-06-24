@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-15T23:13:20Z",
+  "generated": "2026-06-24T00:00:00Z",
   "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact). One `chargate` CLI backs three GitHub surfaces: a composite action (action.yml), a reusable workflow (gate.yml), and a pre-commit hook. The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary.",
   "entrypoints": [
     "src/chargate/cli.py:main",
@@ -12,11 +12,11 @@
       "path": "src/chargate/cli.py",
       "purpose": "argparse dispatch for the 4 subcommands (filter-sarif | ci | local | version); wires git -> filter -> gate -> report -> DefectDojo. The only module that touches os.environ + file writes for the CLI flow.",
       "exports": ["main", "build_parser", "cmd_filter_sarif", "cmd_ci", "cmd_local", "cmd_version", "counts_to_dict"],
-      "depends_on": ["git", "megalinter", "defectdojo", "report", "modes", "gate", "sarif.diff", "sarif.filter", "__init__"]
+      "depends_on": ["git", "megalinter", "defectdojo", "github_comment", "report", "modes", "gate", "sarif.diff", "sarif.filter", "__init__"]
     },
     "sarif.filter": {
       "path": "src/chargate/sarif/filter.py",
-      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O.",
+      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O. ResultVerdict carries the finding `message` + an `inline_safe` flag (added-line/new-file only) for picking valid inline PR-comment targets.",
       "exports": ["filter_sarif", "classify_results", "FilterPolicy", "FilterResult", "ResultVerdict", "Precision", "NoLocationPolicy", "normalize_sarif_uri"],
       "depends_on": ["sarif.counts", "sarif.diff", "sarif.model"]
     },
@@ -29,7 +29,7 @@
     "sarif.model": {
       "path": "src/chargate/sarif/model.py",
       "purpose": "Defensive, typed accessors over SARIF 2.1.0 result objects (primary uri, startLine, resolved level, security-severity, severity band). Tolerates missing/None fields. Pure.",
-      "exports": ["iter_results", "primary_uri", "primary_start_line", "resolve_level", "security_severity", "severity_band", "SARIF_LEVELS"],
+      "exports": ["iter_results", "primary_uri", "primary_start_line", "primary_message", "resolve_level", "security_severity", "severity_band", "SARIF_LEVELS"],
       "depends_on": []
     },
     "sarif.counts": {
@@ -41,7 +41,7 @@
     "git": {
       "path": "src/chargate/git.py",
       "purpose": "The ONLY git/subprocess boundary. Resolve merge-base(base, head), produce unified-diff text, detect shallow clones, and fail loudly with a fetch-depth hint. Keeps sarif/ pure.",
-      "exports": ["compute_changed_lines", "merge_base", "diff_text", "is_shallow", "GitError", "MergeBaseError", "ShallowCloneError"],
+      "exports": ["compute_changed_lines", "merge_base", "diff_text", "rev_parse", "is_shallow", "GitError", "MergeBaseError", "ShallowCloneError"],
       "depends_on": ["sarif.diff"]
     },
     "gate": {
@@ -62,6 +62,12 @@
       "exports": ["import_sarif", "build_request", "build_form_fields", "encode_multipart", "DefectDojoConfig", "DefectDojoResult"],
       "depends_on": []
     },
+    "github_comment": {
+      "path": "src/chargate/github_comment.py",
+      "purpose": "Optional GHAS-style PR review-comment client (urllib, JSON). Posts net-new findings as ONE updatable summary comment (hidden-marker upsert) + inline review comments (delete-then-recreate, no stacking). Failure-isolated: post_pr_feedback NEVER raises, returns ok=False so a GitHub API error can't fail the gate. Pure transport; comment bodies are rendered by report.py.",
+      "exports": ["post_pr_feedback", "GitHubCommentConfig", "GitHubCommentResult", "InlineComment", "SUMMARY_MARKER", "FINDING_MARKER"],
+      "depends_on": []
+    },
     "modes": {
       "path": "src/chargate/modes.py",
       "purpose": "Resolve run mode from an explicit flag or GITHUB_EVENT_NAME: PR (net-new gate) vs BASELINE (full scan, no gate). Mode.gates says whether to apply the gate.",
@@ -70,9 +76,9 @@
     },
     "report": {
       "path": "src/chargate/report.py",
-      "purpose": "Output helpers: render the Markdown job summary (pure, testable) + append to GITHUB_STEP_SUMMARY and write key=value GITHUB_OUTPUT (no-ops off Actions).",
-      "exports": ["render_summary", "append_step_summary", "write_outputs"],
-      "depends_on": ["gate", "modes", "sarif.counts"]
+      "purpose": "Output helpers: render the Markdown job summary + the PR summary/inline comment bodies (all pure, testable) + append to GITHUB_STEP_SUMMARY and write key=value GITHUB_OUTPUT (no-ops off Actions).",
+      "exports": ["render_summary", "render_pr_summary", "render_inline_body", "append_step_summary", "write_outputs"],
+      "depends_on": ["gate", "github_comment", "modes", "sarif.counts", "sarif.filter"]
     },
     "local": {
       "path": "src/chargate/local.py",
@@ -84,8 +90,8 @@
   "callgraph_highlights": [
     {
       "caller": "cli.cmd_ci",
-      "calls": ["modes.resolve_mode", "megalinter.run", "megalinter.locate_sarif", "git.compute_changed_lines", "sarif.filter.filter_sarif", "gate.decide_gate", "defectdojo.import_sarif", "report.render_summary", "report.append_step_summary", "report.write_outputs"],
-      "note": "The full CI flow. Baseline mode skips the diff + gate (filters against an empty DiffIndex, fail_on=none). A MegaLinter tool error only fails the job under --strict."
+      "calls": ["modes.resolve_mode", "megalinter.run", "megalinter.locate_sarif", "git.compute_changed_lines", "sarif.filter.filter_sarif", "gate.decide_gate", "defectdojo.import_sarif", "github_comment.post_pr_feedback", "report.render_pr_summary", "report.render_inline_body", "report.render_summary", "report.append_step_summary", "report.write_outputs"],
+      "note": "The full CI flow. Baseline mode skips the diff + gate (filters against an empty DiffIndex, fail_on=none). PR comments (net-new only) post on gate mode and never fail the gate. A MegaLinter tool error only fails the job under --strict."
     },
     {
       "caller": "cli.cmd_filter_sarif",

@@ -112,6 +112,39 @@ def test_file_precision_treats_any_changed_file_result_as_net_new(make_sarif, ma
     assert v.net_new and v.reason == "file-precision"
 
 
+# ── Provenance carried for PR comments (message + inline_safe) ────────────────
+
+
+def test_verdict_carries_finding_message(make_sarif, make_result):
+    diff = _index(FileDiff(path="src/a.py", status="modified", added_ranges=((21, 22),)))
+    sarif = make_sarif([make_result("src/a.py", 21, message="Use of weak MD5 hash")])
+    [v] = classify_results(sarif, diff)
+    assert v.message == "Use of weak MD5 hash"
+
+
+def test_inline_safe_only_for_added_line_and_new_file(make_sarif, make_result):
+    # added-line → safe inline target
+    added = _index(FileDiff(path="src/a.py", status="modified", added_ranges=((21, 22),)))
+    [v_added] = classify_results(make_sarif([make_result("src/a.py", 21)]), added)
+    assert v_added.reason == "added-line" and v_added.inline_safe
+
+    # new-file → safe inline target
+    new = _index(FileDiff(path="src/new.py", status="added", added_ranges=((1, 5),)))
+    [v_new] = classify_results(make_sarif([make_result("src/new.py", 2)]), new)
+    assert v_new.reason == "new-file" and v_new.inline_safe
+
+    # file-precision (line may be outside the diff) → NOT inline-safe
+    [v_file] = classify_results(
+        make_sarif([make_result("src/a.py", 5)]), added, FilterPolicy(precision=Precision.FILE)
+    )
+    assert v_file.net_new and not v_file.inline_safe
+
+    # no-region fallback (no start_line at all) → NOT inline-safe
+    lock = _index(FileDiff(path="lock.json", status="modified", added_ranges=((1, 9),)))
+    [v_noregion] = classify_results(make_sarif([make_result("lock.json", start_line=None)]), lock)
+    assert v_noregion.net_new and not v_noregion.inline_safe
+
+
 def test_no_region_in_changed_file_falls_back_to_file_level_by_default(make_sarif, make_result):
     # SCA findings (e.g. a new vuln in a changed lockfile) often lack a startLine.
     diff = _index(FileDiff(path="package-lock.json", status="modified", added_ranges=((100, 120),)))

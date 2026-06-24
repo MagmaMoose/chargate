@@ -29,7 +29,7 @@ on: [pull_request]
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write   # required for Chargate's PR comments (read if pr_comment: false)
   security-events: write
 
 jobs:
@@ -39,6 +39,7 @@ jobs:
       - uses: magmamoose/chargate@v2
         with:
           fail_on: high          # block only on net-new high/critical (default: any)
+          # pr_comment: 'false'  # turn off the GHAS-style PR comments (on by default)
           # defectdojo_url: https://dd.example.com
           # defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
           # dependency_track_url: https://dtrack.example.com
@@ -68,6 +69,34 @@ The hook (`language: python`, no Docker) runs a **fast staged-file subset**
 (gitleaks for secrets, ruff for Python — each skipped if not installed). It is a
 first line, deliberately narrower than the CI whole-repo net. Local/CI disparity
 is intended.
+
+## PR comments (GHAS-style)
+
+On pull requests Chargate posts feedback the way GitHub Advanced Security does —
+scoped to **net-new findings only**, so it stays quiet:
+
+- **One summary comment** that is *updated in place* on every push (found by a
+  hidden marker and `PATCH`ed, never duplicated).
+- **Inline review comments** on each net-new finding that sits on a changed line.
+  Prior Chargate inline comments are deleted and re-posted each run, so they never
+  stack. Findings without a precise changed line (project-level, or SCA on a
+  lockfile) are listed in the summary instead.
+
+It is **on by default** and needs `pull-requests: write` on the workflow. Toggle
+and tune it with the action inputs:
+
+| Input | Default | Effect |
+|-------|---------|--------|
+| `pr_comment` | `true` | Post the PR comments (set `false` to disable). |
+| `pr_comment_mode` | `both` | `summary`, `inline`, or `both`. |
+| `pr_comment_max_inline` | `50` | Cap on inline comments; the rest stay in the summary. |
+
+**Less noise — one surface per finding.** To avoid double-reporting, the full
+SARIF is uploaded to the Security tab only on **non-PR events** (the default-branch
+baseline keeps the inventory current). On PRs the native code-scanning diff
+annotations are therefore suppressed, leaving Chargate's comments as the sole
+PR-diff surface. The full, unfiltered SARIF is still always shipped (Security tab
+on push, artifact, and any configured sink).
 
 ## Sinks (DefectDojo & Dependency-Track)
 

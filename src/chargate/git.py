@@ -51,6 +51,11 @@ def _git_out(args: list[str], cwd: str | Path | None = None) -> str:
     return proc.stdout
 
 
+def rev_parse(rev: str, cwd: str | Path | None = None) -> str:
+    """Resolve ``rev`` (a ref, ``HEAD``, or SHA) to its full commit SHA."""
+    return _git_out(["rev-parse", rev], cwd).strip().splitlines()[0].strip()
+
+
 def is_shallow(cwd: str | Path | None = None) -> bool:
     """True if the working tree is a shallow clone."""
     proc = _git(["rev-parse", "--is-shallow-repository"], cwd)
