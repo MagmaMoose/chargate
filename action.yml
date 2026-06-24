@@ -92,9 +92,17 @@ inputs:
     required: false
     default: '50'
   pr_comment_token:
-    description: 'Token used ONLY to author the PR comments. Pass a GitHub App installation token (e.g. from actions/create-github-app-token) to post as your App (Chargate[bot]) instead of github-actions[bot]. Defaults to github_token.'
+    description: 'Explicit override token used ONLY to author the PR comments (BYO GitHub App via actions/create-github-app-token). Usually unset: with id-token: write the token broker provides a Chargate[bot] token automatically.'
     required: false
     default: ''
+  token_broker_url:
+    description: 'Chargate token-broker base URL. With job permission id-token: write and the Chargate App installed, comments are authored by Chargate[bot]. Set empty to disable (fall back to github-actions[bot]).'
+    required: false
+    default: 'https://chargate.magmamoose.com'
+  oidc_audience:
+    description: 'OIDC audience requested for the token-broker exchange (advanced).'
+    required: false
+    default: 'chargate'
 
   # ── DefectDojo (optional, first-class) ───────────────────────────────────
   defectdojo_url:
@@ -197,12 +205,27 @@ runs:
         artifact-name: chargate-sbom
         upload-artifact: 'true'
 
+    # Author PR comments as Chargate[bot]: exchange this run's OIDC token for a
+    # repo-scoped Chargate App installation token at the broker. Fail-soft — on
+    # any problem it emits an empty token and the gate step below falls back to
+    # github_token (github-actions[bot]). Needs `id-token: write` on the job.
+    - name: Request Chargate[bot] token
+      id: app-token
+      if: ${{ inputs.pr_comment == 'true' && inputs.token_broker_url != '' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') }}
+      shell: bash
+      env:
+        TOKEN_BROKER_URL: ${{ inputs.token_broker_url }}
+        OIDC_AUDIENCE: ${{ inputs.oidc_audience }}
+      run: "$GITHUB_ACTION_PATH/scripts/request-app-token.sh"
+
     - name: Chargate gate
       id: chargate
       shell: bash
       env:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
-        GITHUB_TOKEN: ${{ inputs.pr_comment_token != '' && inputs.pr_comment_token || inputs.github_token }}
+        # Comment-token precedence: explicit pr_comment_token (BYO App) → the
+        # Chargate[bot] broker token → github_token (github-actions[bot]).
+        GITHUB_TOKEN: ${{ inputs.pr_comment_token != '' && inputs.pr_comment_token || steps.app-token.outputs.token != '' && steps.app-token.outputs.token || inputs.github_token }}
         DEFECTDOJO_TOKEN: ${{ inputs.defectdojo_token }}
         DEPENDENCYTRACK_API_KEY: ${{ inputs.dependency_track_api_key }}
         BASE_REF_IN: ${{ inputs.base_ref }}

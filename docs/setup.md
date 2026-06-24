@@ -78,26 +78,34 @@ and tune it with the action inputs:
 | `pr_comment` | `true` | Post the PR comments (set `false` to disable). |
 | `pr_comment_mode` | `both` | `summary`, `inline`, or `both`. |
 | `pr_comment_max_inline` | `50` | Cap on inline comments; the rest stay in the summary. |
-| `pr_comment_token` | `github_token` | Token used **only** to author the comments. |
+| `pr_comment_token` | `github_token` | Explicit override token for authorship (usually unset — see below). |
+| `token_broker_url` | `https://chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship; empty disables. |
+| `oidc_audience` | `chargate` | OIDC audience for the broker exchange (advanced). |
 
-**Post as your own bot (optional).** By default the comments are authored by
-`github-actions[bot]` (the identity of the default `GITHUB_TOKEN` — that name can't
-be renamed). To post as e.g. `Chargate[bot]`, create a GitHub App (only **Pull
-requests: write** is needed), install it, and mint an installation token to pass as
-`pr_comment_token`. The Security-tab upload keeps using `github_token`, so the App
-needs no other permissions:
+**Comment as `Chargate[bot]` (opt-in, zero key management).** By default the
+comments are authored by `github-actions[bot]` (the default `GITHUB_TOKEN`'s
+identity, which can't be renamed). To have them posted by **`Chargate[bot]`**
+instead, with its own name + avatar:
+
+1. **Install the Chargate GitHub App** on your org/repo.
+2. Add **`id-token: write`** to the workflow's `permissions`.
 
 ```yaml
-steps:
-  - uses: actions/create-github-app-token@v3
-    id: app-token
-    with:
-      app-id: ${{ vars.CHARGATE_APP_ID }}
-      private-key: ${{ secrets.CHARGATE_APP_PRIVATE_KEY }}
-  - uses: magmamoose/chargate@v2
-    with:
-      pr_comment_token: ${{ steps.app-token.outputs.token }}
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write          # exchange OIDC for a Chargate[bot] token
+  security-events: write
 ```
+
+That's it — no app keys to manage. The action exchanges the run's OIDC token at the
+Chargate token broker for a short-lived token scoped to your repo with
+`pull_requests: write` only. It is **fail-soft**: without `id-token: write`, or if
+the App isn't installed, comments simply fall back to `github-actions[bot]`.
+
+*Self-hosted alternative:* if you'd rather not depend on the broker, bring your own
+App token — `actions/create-github-app-token` → pass it as `pr_comment_token` (it
+takes precedence over the broker). That App needs only **Pull requests: write**.
 
 **Less noise — one surface per finding.** To avoid double-reporting, the full
 SARIF is uploaded to the Security tab only on **non-PR events** (the default-branch

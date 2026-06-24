@@ -1,0 +1,28 @@
+# DNS-only Ingress for the Chargate token broker at chargate.magmamoose.com.
+#
+# This Ingress doesn't route traffic itself — the firefly cloudflared tunnel
+# terminates chargate.magmamoose.com at the in-cluster Service. The matching
+# tunnel ingress rule lives in the infra repo
+# (terraform/cloudflare/zero-trust/prod/tunnels.tf).
+#
+# Its purpose here is to give external-dns-cloudflare a record to publish: the
+# proxied CNAME against the magmamoose.com zone pointing at the tunnel.
+#
+# NO Cloudflare Access policy — GitHub Actions runners must reach /token
+# unauthenticated; callers are authenticated by their OIDC token in the broker.
+#
+# Chargate/KICS suppression (reviewed false positive, not a vulnerability):
+#   611ab018... `metadata.namespace is undefined` — kustomize base; the namespace
+#   is set by the overlay (k8s/overlays/prod/kustomization.yaml: `namespace: chargate`).
+# kics-scan disable=611ab018-c4aa-4ba2-b0f6-a448337509a6
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chargate
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: "chargate.magmamoose.com"
+    external-dns.alpha.kubernetes.io/target: "7694eb38-c35e-4905-bd2b-16ab7053080a.cfargotunnel.com"
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  rules:
+    - host: chargate.magmamoose.com
