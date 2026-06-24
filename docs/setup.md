@@ -75,7 +75,7 @@ and tune it with the action inputs:
 | `pr_comment` | `true` | Post the PR comments (set `false` to disable). |
 | `pr_comment_mode` | `both` | `summary`, `inline`, or `both`. |
 | `pr_comment_max_inline` | `50` | Cap on inline comments; the rest stay in the summary. |
-| `token_broker_url` | `https://api.chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship; empty disables. |
+| `token_broker_url` | `https://chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship; empty disables. |
 | `oidc_audience` | `chargate` | OIDC audience for the broker exchange (advanced). |
 
 **Comment as `Chargate[bot]` (opt-in, zero key management).** By default the

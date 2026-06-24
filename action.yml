@@ -94,7 +94,7 @@ inputs:
   token_broker_url:
     description: 'Chargate token-broker base URL. With job permission id-token: write and the Chargate App installed, comments are authored by Chargate[bot]. Set empty to disable (fall back to github-actions[bot]).'
     required: false
-    default: 'https://api.chargate.magmamoose.com'
+    default: 'https://chargate.magmamoose.com'
   oidc_audience:
     description: 'OIDC audience requested for the token-broker exchange (advanced).'
     required: false

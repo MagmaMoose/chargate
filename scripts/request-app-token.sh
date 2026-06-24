@@ -15,7 +15,7 @@ emit_empty() {
   exit 0
 }
 
-broker_url="${TOKEN_BROKER_URL:-https://api.chargate.magmamoose.com}"
+broker_url="${TOKEN_BROKER_URL:-https://chargate.magmamoose.com}"
 audience="${OIDC_AUDIENCE:-chargate}"
 [ -n "${broker_url}" ] || emit_empty "broker disabled"
 
