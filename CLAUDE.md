@@ -4,9 +4,8 @@ Chargate wraps **MegaLinter** (which does all the scanning) and adds **net-new
 (PR-diff) finding gating**: on a PR the gate is decided only by findings the diff
 introduced vs the merge-base; pre-existing findings never block. The full,
 unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab /
-artifact). One `chargate` CLI backs three surfaces: `action.yml` (composite
-action), `.github/workflows/gate.yml` (reusable workflow), and
-`.pre-commit-hooks.yaml` (local hook).
+artifact). One `chargate` CLI backs two surfaces: `action.yml` (composite
+action) and `.pre-commit-hooks.yaml` (local hook).
 
 @.claude/QUICK_START.md
 @.claude/ARCHITECTURE_MAP.md

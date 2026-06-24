@@ -1,10 +1,9 @@
 {
   "generated": "2026-06-15T23:13:20Z",
-  "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact). One `chargate` CLI backs three GitHub surfaces: a composite action (action.yml), a reusable workflow (gate.yml), and a pre-commit hook. The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary.",
+  "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact). One `chargate` CLI backs two GitHub surfaces: a composite action (action.yml) and a pre-commit hook. The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary.",
   "entrypoints": [
     "src/chargate/cli.py:main",
     "action.yml (composite action: install CLI -> `chargate ci`)",
-    ".github/workflows/gate.yml (reusable workflow, on: workflow_call)",
     ".pre-commit-hooks.yaml (hook id `chargate`, entry: `chargate local`)"
   ],
   "modules": {

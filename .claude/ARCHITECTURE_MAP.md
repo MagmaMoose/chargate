@@ -1,8 +1,8 @@
 # Architecture map
 
-One `chargate` Python CLI (`src/chargate/cli.py:main`) backs three GitHub
-surfaces: a composite action (`action.yml`), a reusable workflow
-(`.github/workflows/gate.yml`), and a pre-commit hook (`.pre-commit-hooks.yaml`).
+One `chargate` Python CLI (`src/chargate/cli.py:main`) backs two GitHub
+surfaces: a composite action (`action.yml`) and a pre-commit hook
+(`.pre-commit-hooks.yaml`).
 
 The flow: **MegaLinter** does all scanning and emits SARIF; chargate filters it to
 **net-new** findings (those the PR diff introduced vs the merge-base) and gates
