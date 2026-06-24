@@ -91,10 +91,14 @@ inputs:
     description: 'Cap on inline comments per run; the rest are listed in the summary.'
     required: false
     default: '50'
+  pr_comment_token:
+    description: 'Explicit override token used ONLY to author the PR comments (BYO GitHub App via actions/create-github-app-token). Usually unset: with id-token: write the token broker provides a Chargate[bot] token automatically.'
+    required: false
+    default: ''
   token_broker_url:
     description: 'Chargate token-broker base URL. With job permission id-token: write and the Chargate App installed, comments are authored by Chargate[bot]. Set empty to disable (fall back to github-actions[bot]).'
     required: false
-    default: 'https://api.chargate.magmamoose.com'
+    default: 'https://chargate.magmamoose.com'
   oidc_audience:
     description: 'OIDC audience requested for the token-broker exchange (advanced).'
     required: false
@@ -132,7 +136,7 @@ inputs:
     required: false
     default: ''
   dependency_track_api_key:
-    description: 'Dependency-Track API key (pass a Secret). Needs BOM_UPLOAD (+ PROJECT_CREATION_UPLOAD for auto-create).'
+    description: 'Dependency-Track API key (pass a Secret). Needs BOM_UPLOAD (+ PROJECT_CREATION_UPLOAD for auto-create, + VIEW_PORTFOLIO for the PR-comment project link).'
     required: false
     default: ''
   dependency_track_project_name:
@@ -189,9 +193,10 @@ runs:
       run: python -m pip install --disable-pip-version-check --quiet "$GITHUB_ACTION_PATH"
 
     # Generate a language-agnostic CycloneDX BOM (Syft) for the Dependency-Track
-    # sink. Runs only when enabled; chargate then uploads the file below.
+    # sink. Push/baseline only: PRs don't upload a BOM (no throwaway per-PR
+    # versions, faster PR CI), so there's nothing to generate then either.
     - name: Generate CycloneDX SBOM
-      if: ${{ inputs.dependency_track_url != '' }}
+      if: ${{ inputs.dependency_track_url != '' && github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
       uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       with:
         path: '.'
@@ -218,8 +223,9 @@ runs:
       shell: bash
       env:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
-        # Prefer the Chargate[bot] broker token for the comment; else github_token.
-        GITHUB_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || inputs.github_token }}
+        # Comment-token precedence: explicit pr_comment_token (BYO App) → the
+        # Chargate[bot] broker token → github_token (github-actions[bot]).
+        GITHUB_TOKEN: ${{ inputs.pr_comment_token != '' && inputs.pr_comment_token || steps.app-token.outputs.token != '' && steps.app-token.outputs.token || inputs.github_token }}
         DEFECTDOJO_TOKEN: ${{ inputs.defectdojo_token }}
         DEPENDENCYTRACK_API_KEY: ${{ inputs.dependency_track_api_key }}
         BASE_REF_IN: ${{ inputs.base_ref }}
@@ -227,6 +233,7 @@ runs:
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GH_SHA: ${{ github.sha }}
+        DEFAULT_BRANCH_IN: ${{ github.event.repository.default_branch }}
         PR_NUMBER_IN: ${{ github.event.pull_request.number }}
         REPO_SLUG_IN: ${{ github.repository }}
         PR_COMMENT_IN: ${{ inputs.pr_comment }}
@@ -291,10 +298,21 @@ runs:
         fi
 
         if [ -n "$DT_URL_IN" ]; then
-          args+=(--dependency-track-url "$DT_URL_IN" --bom "$bom_abs")
+          args+=(--dependency-track-url "$DT_URL_IN")
           [ -n "$DT_PROJECT_NAME_IN" ] && args+=(--dt-project-name "$DT_PROJECT_NAME_IN")
-          [ -n "$DT_PROJECT_VERSION_IN" ] && args+=(--dt-project-version "$DT_PROJECT_VERSION_IN")
-          [ "$DT_AUTO_CREATE_IN" != "true" ] && args+=(--dt-no-auto-create)
+          case "$GITHUB_EVENT_NAME" in
+            pull_request|pull_request_target)
+              # PRs don't upload (no throwaway N/merge versions); just link the
+              # comment to the existing default-branch project.
+              args+=(--dt-project-version "${DEFAULT_BRANCH_IN:-main}")
+              ;;
+            *)
+              # Push / tags: upload the BOM as a tracked, shipped artifact.
+              args+=(--bom "$bom_abs")
+              [ -n "$DT_PROJECT_VERSION_IN" ] && args+=(--dt-project-version "$DT_PROJECT_VERSION_IN")
+              [ "$DT_AUTO_CREATE_IN" != "true" ] && args+=(--dt-no-auto-create)
+              ;;
+          esac
         fi
 
         # GHAS-style PR comments: only on pull_request events, only when we have a

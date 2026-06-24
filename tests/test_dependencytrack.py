@@ -30,18 +30,35 @@ class _FakeResponse:
 
 
 class _FakeOpener:
-    def __init__(self, response=None, exc: Exception | None = None):
+    """Records every request; returns ``responses`` in order, else a single response.
+
+    ``upload_bom`` may now make two calls (the BOM POST, then a project lookup), so
+    the opener keeps the full request list and ``.request`` is the first (the upload).
+    """
+
+    def __init__(self, response=None, exc: Exception | None = None, responses=None):
         self.response = response
+        self._responses = list(responses) if responses is not None else None
         self.exc = exc
-        self.request = None
+        self.requests: list = []
         self.timeout = None
 
+    @property
+    def request(self):
+        return self.requests[0] if self.requests else None
+
     def open(self, request, timeout=None):
-        self.request = request
+        self.requests.append(request)
         self.timeout = timeout
         if self.exc is not None:
             raise self.exc
-        return self.response
+        if self._responses is not None:
+            item = self._responses[min(len(self.requests) - 1, len(self._responses) - 1)]
+        else:
+            item = self.response
+        if isinstance(item, Exception):
+            raise item  # a per-call failure (e.g. a 403 on the lookup)
+        return item
 
 
 @pytest.fixture
@@ -131,6 +148,70 @@ def test_upload_success(bom_file):
     body = opener.request.data.decode("utf-8")
     assert 'name="projectName"' in body
     assert "P" in body
+
+
+def test_upload_resolves_project_url_via_lookup(bom_file):
+    # Upload returns a token; a follow-up lookup resolves the UUID for the UI link.
+    opener = _FakeOpener(
+        responses=[_FakeResponse(200, '{"token": "t-1"}'), _FakeResponse(200, '{"uuid": "u-9"}')]
+    )
+    result = dt.upload_bom(_config(), bom_file, opener=opener)
+    assert result.ok
+    assert result.project_url == "https://dtrack.example.com/projects/u-9"
+    # Second call is the lookup, carrying the project name + version.
+    lookup = opener.requests[1]
+    assert "/api/v1/project/lookup" in lookup.full_url
+    assert "name=P" in lookup.full_url and "version=1.0.0" in lookup.full_url
+
+
+def test_upload_project_url_from_provided_uuid_skips_lookup(bom_file):
+    opener = _FakeOpener(_FakeResponse(200, '{"token": "t-2"}'))
+    result = dt.upload_bom(_config(project_uuid="abc-uuid"), bom_file, opener=opener)
+    assert result.project_url == "https://dtrack.example.com/projects/abc-uuid"
+    assert len(opener.requests) == 1  # UUID known up front — no lookup call
+
+
+def test_upload_lookup_miss_leaves_project_url_none(bom_file):
+    opener = _FakeOpener(
+        responses=[_FakeResponse(200, '{"token": "t-3"}'), _FakeResponse(200, "{}")]
+    )
+    result = dt.upload_bom(_config(), bom_file, opener=opener)
+    assert result.ok  # upload still succeeded
+    assert result.project_url is None
+
+
+def test_upload_lookup_forbidden_hints_view_portfolio(bom_file):
+    # The BOM POST succeeds; the project lookup is 403 (key lacks VIEW_PORTFOLIO).
+    forbidden = urllib.error.HTTPError(
+        "https://dtrack.example.com/api/v1/project/lookup",
+        403,
+        "Forbidden",
+        {},
+        io.BytesIO(b"{}"),
+    )
+    opener = _FakeOpener(responses=[_FakeResponse(200, '{"token": "t-4"}'), forbidden])
+    result = dt.upload_bom(_config(), bom_file, opener=opener)
+    assert result.ok  # the upload itself is unaffected
+    assert result.project_url is None
+    assert "VIEW_PORTFOLIO" in result.message  # the reason is surfaced, not silent
+
+
+def test_resolve_project_link_returns_url():
+    # PR path: resolve the link without uploading a BOM.
+    opener = _FakeOpener(_FakeResponse(200, '{"uuid": "u-7"}'))
+    url, reason = dt.resolve_project_link(_config(), opener=opener)
+    assert url == "https://dtrack.example.com/projects/u-7"
+    assert reason is None
+    assert "/api/v1/project/lookup" in opener.request.full_url
+
+
+def test_resolve_project_link_forbidden_returns_reason():
+    forbidden = urllib.error.HTTPError(
+        "https://dtrack.example.com/api/v1/project/lookup", 403, "Forbidden", {}, io.BytesIO(b"{}")
+    )
+    url, reason = dt.resolve_project_link(_config(), opener=_FakeOpener(exc=forbidden))
+    assert url is None
+    assert "VIEW_PORTFOLIO" in reason
 
 
 def test_upload_http_error_is_not_ok(bom_file):

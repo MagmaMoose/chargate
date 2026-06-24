@@ -67,6 +67,9 @@ scoped to **net-new findings only**, so it stays quiet:
   stack. Findings without a precise changed line (project-level, or SCA on a
   lockfile) are listed in the summary instead.
 
+When the full SARIF / BOM are shipped to DefectDojo / Dependency-Track, the summary
+comment footer links straight to the imported Test and project there.
+
 It is **on by default** and needs `pull-requests: write` on the workflow. Toggle
 and tune it with the action inputs:
 
@@ -75,7 +78,8 @@ and tune it with the action inputs:
 | `pr_comment` | `true` | Post the PR comments (set `false` to disable). |
 | `pr_comment_mode` | `both` | `summary`, `inline`, or `both`. |
 | `pr_comment_max_inline` | `50` | Cap on inline comments; the rest stay in the summary. |
-| `token_broker_url` | `https://api.chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship; empty disables. |
+| `pr_comment_token` | `github_token` | Explicit override token for authorship (usually unset — see below). |
+| `token_broker_url` | `https://chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship; empty disables. |
 | `oidc_audience` | `chargate` | OIDC audience for the broker exchange (advanced). |
 
 **Comment as `Chargate[bot]` (opt-in, zero key management).** By default the
@@ -98,6 +102,10 @@ That's it — no app keys to manage. The action exchanges the run's OIDC token a
 Chargate token broker for a short-lived token scoped to your repo with
 `pull_requests: write` only. It is **fail-soft**: without `id-token: write`, or if
 the App isn't installed, comments simply fall back to `github-actions[bot]`.
+
+*Self-hosted alternative:* if you'd rather not depend on the broker, bring your own
+App token — `actions/create-github-app-token` → pass it as `pr_comment_token` (it
+takes precedence over the broker). That App needs only **Pull requests: write**.
 
 **Less noise — one surface per finding.** To avoid double-reporting, the full
 SARIF is uploaded to the Security tab only on **non-PR events** (the default-branch
@@ -150,7 +158,16 @@ Dependency-Track server:
 
 Generates the BOM with `anchore/sbom-action` (Syft) and `POST`s it to
 `/api/v1/bom` (multipart), auto-creating the project/version on first upload. The
-API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create).
+API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create, and
+`VIEW_PORTFOLIO` so the PR-comment footer can resolve the project's UUID into a
+link — without it the upload still succeeds, just with no link).
+
+**Upload happens on push / tags only.** Dependency-Track tracks *shipped*
+artifacts, so the BOM is generated and uploaded only on non-PR events (push to the
+default branch, tags). On pull requests Chargate skips the upload entirely — no
+throwaway per-PR versions, faster PR CI — and instead links the PR comment to the
+project's existing default-branch version. (DefectDojo still imports the full SARIF
+on PRs, since reimport updates one Test rather than spawning versions.)
 
 ## MegaLinter configuration
 

@@ -333,27 +333,32 @@ def test_ci_dependency_track_skipped_without_key(pr_repo, capsys, monkeypatch):
     assert "skipped (no API key" in capsys.readouterr().err
 
 
-def test_ci_dependency_track_skipped_without_bom(pr_repo, capsys):
+def test_ci_dependency_track_skipped_without_project(pr_repo, capsys, monkeypatch):
     repo, base, head, sarif_path = pr_repo
+    monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
     code = main(
-        [
-            "ci",
-            "--mode",
-            "pr",
-            "--sarif",
-            str(sarif_path),
-            "--base",
-            base,
-            "--head",
-            head,
-            "--repo",
-            str(repo),
-            "--dependency-track-url",
-            "https://dtrack.example.com",
-        ]
-    )
+        ["ci", "--mode", "pr", "--sarif", str(sarif_path), "--base", base, "--head", head,
+         "--repo", str(repo), "--dependency-track-url", "https://dtrack.example.com"]
+    )  # fmt: skip
     assert code == EXIT_BLOCKED
-    assert "skipped (no --bom path)" in capsys.readouterr().err
+    assert "need --dt-project-uuid or --dt-project-name" in capsys.readouterr().err
+
+
+def test_ci_dependency_track_link_only_without_bom(pr_repo, capsys, monkeypatch):
+    # No --bom (the PR path): resolve the project link without uploading.
+    repo, base, head, sarif_path = pr_repo
+    monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
+    monkeypatch.setattr(
+        "chargate.dependencytrack.resolve_project_link",
+        lambda config, **kw: ("https://dt.example.com/projects/u-1", None),
+    )
+    code = main(
+        ["ci", "--mode", "pr", "--sarif", str(sarif_path), "--base", base, "--head", head,
+         "--repo", str(repo), "--dependency-track-url", "https://dt.example.com",
+         "--dt-project-name", "org/repo"]
+    )  # fmt: skip
+    assert code == EXIT_BLOCKED  # link-only never affects the gate
+    assert "Dependency-Track: linked" in capsys.readouterr().err
 
 
 def _ci_pr_comment_args(repo, base, head, sarif_path, *extra: str) -> list[str]:

@@ -40,9 +40,22 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+      # Mint a token from the "Chargate" GitHub App so PR comments are authored by
+      # Chargate[bot] (not github-actions[bot]). Skipped when the app isn't
+      # configured, in which case pr_comment_token is empty and the action falls
+      # back to GITHUB_TOKEN. The app only needs Pull requests: write.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        if: ${{ vars.MM_CHARGATE_APP_ID != '' }}
+        with:
+          app-id: ${{ vars.MM_CHARGATE_APP_ID }}
+          private-key: ${{ secrets.MM_CHARGATE_APP_PRIVATE_KEY }}
       - uses: ./
         with:
           checkout: 'false'   # already checked out above with full history
+          # Author PR comments as Chargate[bot] when the app is configured; the
+          # Security-tab upload keeps using the default github_token.
+          pr_comment_token: ${{ steps.app-token.outputs.token }}
           # DefectDojo — full-SARIF sink. product / product_type / engagement
           # default to the repo name / "Research and Development" / "ci".
           defectdojo_url: ${{ vars.MM_DEFECTDOJO_URL }}

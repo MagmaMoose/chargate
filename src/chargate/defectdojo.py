@@ -60,10 +60,31 @@ class DefectDojoResult:
     status: int | None = None
     message: str = ""
     response: dict[str, Any] | None = None
+    url: str | None = None  # link to the imported Test in the DefectDojo UI
 
 
 def _bool(value: bool) -> str:
     return "true" if value else "false"
+
+
+def test_url(base_url: str, response: dict[str, Any] | None) -> str | None:
+    """Build a UI link to the imported Test from an import/reimport response.
+
+    The (re)import-scan responses carry the test id under ``test_id`` (reimport) or
+    ``test`` (import); the Test page is ``{base}/test/{id}``. Returns None when no
+    numeric id is present.
+    """
+    if not isinstance(response, dict):
+        return None
+    raw = response.get("test_id")
+    if raw is None:
+        raw = response.get("test")
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        return None
+    test_id = str(raw).strip()
+    if not test_id.isdigit():
+        return None
+    return f"{base_url.rstrip('/')}/test/{test_id}"
 
 
 def build_form_fields(config: DefectDojoConfig) -> dict[str, str]:
@@ -163,12 +184,14 @@ def import_sarif(
             status = getattr(response, "status", None) or response.getcode()
             raw = response.read().decode("utf-8", errors="replace")
             parsed = _safe_json(raw)
+            ok = 200 <= int(status) < 300
             return DefectDojoResult(
-                ok=200 <= int(status) < 300,
+                ok=ok,
                 endpoint=endpoint,
                 status=int(status),
-                message="uploaded" if 200 <= int(status) < 300 else raw[:500],
+                message="uploaded" if ok else raw[:500],
                 response=parsed,
+                url=test_url(config.base_url, parsed) if ok else None,
             )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500] if exc.fp else ""

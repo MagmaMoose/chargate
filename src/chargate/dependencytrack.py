@@ -14,7 +14,8 @@ addressed either by ``project`` UUID or by ``projectName`` + ``projectVersion``
 
 Mirrors :mod:`chargate.defectdojo`; see also :mod:`chargate.sarif` for the pure
 gate core. Dependency-Track auth is the ``X-Api-Key`` header; the key needs
-``BOM_UPLOAD`` (plus ``PROJECT_CREATION_UPLOAD`` when ``autoCreate`` is set).
+``BOM_UPLOAD`` (plus ``PROJECT_CREATION_UPLOAD`` when ``autoCreate`` is set, and
+``VIEW_PORTFOLIO`` to resolve the project's UUID for the PR-comment link).
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from __future__ import annotations
 import json
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +67,7 @@ class DependencyTrackResult:
     message: str = ""
     token: str | None = None
     response: dict[str, Any] | None = None
+    project_url: str | None = None  # link to the project in the Dependency-Track UI
 
 
 def strip_bom_marker(bom_bytes: bytes) -> bytes:
@@ -138,6 +141,75 @@ def build_request(config: DependencyTrackConfig, bom_path: Path) -> urllib.reque
     return request
 
 
+def _build_opener(verify_ssl: bool) -> urllib.request.OpenerDirector:
+    if verify_ssl:
+        return urllib.request.build_opener()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+
+
+def lookup_project_uuid(
+    config: DependencyTrackConfig, opener: urllib.request.OpenerDirector
+) -> tuple[str | None, str | None]:
+    """Resolve the project's UUID for a UI link. Returns ``(uuid, reason_unavailable)``.
+
+    The BOM upload response only carries a processing ``token``, so to build a
+    ``/projects/{uuid}`` link we ask ``GET /api/v1/project/lookup`` — which needs the
+    API key to hold **VIEW_PORTFOLIO**. On any failure the UUID is None and the
+    second value explains why (surfaced in the result message); this never affects
+    the upload itself.
+    """
+    if config.project_uuid:
+        return config.project_uuid, None
+    if not config.project_name:
+        return None, None
+    query = urllib.parse.urlencode(
+        {"name": config.project_name, "version": config.project_version or ""}
+    )
+    url = f"{config.base_url.rstrip('/')}/api/v1/project/lookup?{query}"
+    request = urllib.request.Request(url, method="GET")
+    request.add_header("X-Api-Key", config.api_key)
+    request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", _USER_AGENT)
+    try:
+        with opener.open(request, timeout=config.timeout) as response:
+            data = _safe_json(response.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return None, "project link skipped — the API key needs the VIEW_PORTFOLIO permission"
+        return None, f"project link skipped — lookup returned HTTP {exc.code}"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return None, f"project link skipped — lookup failed: {exc}"
+    uuid = data.get("uuid") if isinstance(data, dict) else None
+    if isinstance(uuid, str) and uuid:
+        return uuid, None
+    return None, "project link skipped — project not found via lookup"
+
+
+def project_url(base_url: str, uuid: str) -> str:
+    """The Dependency-Track UI link for a project UUID."""
+    return f"{base_url.rstrip('/')}/projects/{uuid}"
+
+
+def resolve_project_link(
+    config: DependencyTrackConfig,
+    *,
+    opener: urllib.request.OpenerDirector | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve a project's UI link WITHOUT uploading. Returns ``(url, reason)``.
+
+    Used on pull requests, where Chargate doesn't push a BOM (so DT isn't littered
+    with throwaway per-PR versions) but the comment should still link to the
+    project's existing (e.g. default-branch) page. Never raises.
+    """
+    if opener is None:
+        opener = _build_opener(config.verify_ssl)
+    uuid, reason = lookup_project_uuid(config, opener)
+    return (project_url(config.base_url, uuid) if uuid else None), reason
+
+
 def upload_bom(
     config: DependencyTrackConfig,
     bom_path: str | Path,
@@ -156,13 +228,7 @@ def upload_bom(
         return DependencyTrackResult(False, endpoint, message=f"could not read BOM: {exc}")
 
     if opener is None:
-        if config.verify_ssl:
-            opener = urllib.request.build_opener()
-        else:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        opener = _build_opener(config.verify_ssl)
 
     try:
         with opener.open(request, timeout=config.timeout) as response:
@@ -171,13 +237,18 @@ def upload_bom(
             parsed = _safe_json(raw)
             ok = 200 <= int(status) < 300
             token = parsed.get("token") if isinstance(parsed, dict) else None
+            uuid, link_reason = lookup_project_uuid(config, opener) if ok else (None, None)
+            message = "uploaded" if ok else raw[:500]
+            if ok and link_reason:
+                message = f"uploaded ({link_reason})"
             return DependencyTrackResult(
                 ok=ok,
                 endpoint=endpoint,
                 status=int(status),
-                message="uploaded" if ok else raw[:500],
+                message=message,
                 token=token if isinstance(token, str) else None,
                 response=parsed,
+                project_url=project_url(config.base_url, uuid) if uuid else None,
             )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500] if exc.fp else ""

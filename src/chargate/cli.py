@@ -21,7 +21,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from chargate import __version__
 from chargate import defectdojo as dd
@@ -233,15 +233,16 @@ def cmd_ci(args: argparse.Namespace) -> int:
         )
 
     # 4. Optional DefectDojo import of the FULL SARIF (never fails the gate).
-    dd_message = _maybe_import_defectdojo(
-        args, sarif_path if not args.sarif_out else Path(args.sarif_out)
-    )
+    dd = _maybe_import_defectdojo(args, sarif_path if not args.sarif_out else Path(args.sarif_out))
 
     # 4b. Optional Dependency-Track upload of the CycloneDX BOM (never fails the gate).
-    dt_message = _maybe_upload_dependencytrack(args)
+    dt = _maybe_upload_dependencytrack(args)
 
     # 4c. Optional GHAS-style PR comments — net-new only (never fails the gate).
-    pr_message = _maybe_comment_pr(args, result, decision, mode)
+    #     The footer links to wherever the SARIF / BOM just landed.
+    pr_message = _maybe_comment_pr(
+        args, result, decision, mode, defectdojo_url=dd.url, dependency_track_url=dt.url
+    )
 
     # 5. Report.
     summary = report_mod.render_summary(
@@ -249,17 +250,17 @@ def cmd_ci(args: argparse.Namespace) -> int:
         decision,
         mode,
         megalinter_ok=megalinter_ok,
-        dd_message=dd_message,
-        dt_message=dt_message,
+        dd_message=dd.message,
+        dt_message=dt.message,
         pr_message=pr_message,
     )
     report_mod.append_step_summary(summary)
     if not args.quiet:
         _print_summary(result, decision)
-        if dd_message:
-            _eprint(f"chargate: DefectDojo: {dd_message}")
-        if dt_message:
-            _eprint(f"chargate: Dependency-Track: {dt_message}")
+        if dd.message:
+            _eprint(f"chargate: DefectDojo: {dd.message}")
+        if dt.message:
+            _eprint(f"chargate: Dependency-Track: {dt.message}")
         if pr_message:
             _eprint(f"chargate: PR comments: {pr_message}")
     report_mod.write_outputs(
@@ -278,12 +279,19 @@ def cmd_ci(args: argparse.Namespace) -> int:
     return decision.exit_code
 
 
-def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> str | None:
+class _SinkOutcome(NamedTuple):
+    """A sink's human message plus a UI link to where it landed (both optional)."""
+
+    message: str | None = None
+    url: str | None = None
+
+
+def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> _SinkOutcome:
     if not args.defectdojo_url:
-        return None
+        return _SinkOutcome()
     token = os.environ.get(args.defectdojo_token_env, "")
     if not token:
-        return f"skipped (no token in ${args.defectdojo_token_env})"
+        return _SinkOutcome(f"skipped (no token in ${args.defectdojo_token_env})")
     config = dd.DefectDojoConfig(
         base_url=args.defectdojo_url,
         token=token,
@@ -298,22 +306,19 @@ def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> str 
         verify_ssl=not args.dd_insecure,
     )
     result = dd.import_sarif(config, sarif_path)
-    return result.message if result.ok else f"upload failed (non-blocking): {result.message}"
+    if result.ok:
+        return _SinkOutcome(result.message, result.url)
+    return _SinkOutcome(f"upload failed (non-blocking): {result.message}")
 
 
-def _maybe_upload_dependencytrack(args: argparse.Namespace) -> str | None:
+def _maybe_upload_dependencytrack(args: argparse.Namespace) -> _SinkOutcome:
     if not args.dependency_track_url:
-        return None
-    if not args.bom:
-        return "skipped (no --bom path)"
+        return _SinkOutcome()
     if not args.dt_project_uuid and not args.dt_project_name:
-        return "skipped (need --dt-project-uuid or --dt-project-name)"
+        return _SinkOutcome("skipped (need --dt-project-uuid or --dt-project-name)")
     api_key = os.environ.get(args.dt_api_key_env, "")
     if not api_key:
-        return f"skipped (no API key in ${args.dt_api_key_env})"
-    bom_path = Path(args.bom)
-    if not bom_path.is_file():
-        return f"skipped (BOM not found: {bom_path})"
+        return _SinkOutcome(f"skipped (no API key in ${args.dt_api_key_env})")
     config = dt.DependencyTrackConfig(
         base_url=args.dependency_track_url,
         api_key=api_key,
@@ -326,8 +331,20 @@ def _maybe_upload_dependencytrack(args: argparse.Namespace) -> str | None:
         is_latest=args.dt_is_latest,
         verify_ssl=not args.dt_insecure,
     )
+
+    # No --bom → don't upload (e.g. on PRs); just resolve the project link so the
+    # PR comment can point at the existing (default-branch) project.
+    if not args.bom:
+        url, reason = dt.resolve_project_link(config)
+        return _SinkOutcome("linked" if url else (reason or "no link (upload skipped)"), url)
+
+    bom_path = Path(args.bom)
+    if not bom_path.is_file():
+        return _SinkOutcome(f"skipped (BOM not found: {bom_path})")
     result = dt.upload_bom(config, bom_path)
-    return result.message if result.ok else f"upload failed (non-blocking): {result.message}"
+    if result.ok:
+        return _SinkOutcome(result.message, result.project_url)
+    return _SinkOutcome(f"upload failed (non-blocking): {result.message}")
 
 
 def _resolve_head_sha(args: argparse.Namespace) -> str:
@@ -344,7 +361,13 @@ def _resolve_head_sha(args: argparse.Namespace) -> str:
 
 
 def _maybe_comment_pr(
-    args: argparse.Namespace, result: FilterResult, decision: Any, mode: Mode
+    args: argparse.Namespace,
+    result: FilterResult,
+    decision: Any,
+    mode: Mode,
+    *,
+    defectdojo_url: str | None = None,
+    dependency_track_url: str | None = None,
 ) -> str | None:
     """Post GHAS-style PR comments for net-new findings. Never fails the gate."""
     if not args.pr_comment or not mode.gates:
@@ -381,7 +404,13 @@ def _maybe_comment_pr(
     summary_body: str | None = None
     if args.pr_comment_mode in ("summary", "both"):
         summary_body = report_mod.render_pr_summary(
-            result.counts, decision, mode, net_new, note=note
+            result.counts,
+            decision,
+            mode,
+            net_new,
+            note=note,
+            defectdojo_url=defectdojo_url,
+            dependency_track_url=dependency_track_url,
         )
 
     config = ghc.GitHubCommentConfig(
