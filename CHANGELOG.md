@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v2.5.1 (2026-06-24)
+
+### Bug Fixes
+
+- **ci**: Restore dropped release-workflow wiring + dedupe release.yaml
+  ([`1ab0068`](https://github.com/MagmaMoose/chargate/commit/1ab00681b8a64619998f928cb17644c9e4697b4b))
+
+
 ## v2.5.0 (2026-06-24)
 
 ### Bug Fixes
