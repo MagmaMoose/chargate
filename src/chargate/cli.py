@@ -27,6 +27,7 @@ from chargate import __version__
 from chargate import defectdojo as dd
 from chargate import dependencytrack as dt
 from chargate import git as cgit
+from chargate import github_comment as ghc
 from chargate import local as local_mod
 from chargate import megalinter as ml
 from chargate import report as report_mod
@@ -239,6 +240,9 @@ def cmd_ci(args: argparse.Namespace) -> int:
     # 4b. Optional Dependency-Track upload of the CycloneDX BOM (never fails the gate).
     dt_message = _maybe_upload_dependencytrack(args)
 
+    # 4c. Optional GHAS-style PR comments — net-new only (never fails the gate).
+    pr_message = _maybe_comment_pr(args, result, decision, mode)
+
     # 5. Report.
     summary = report_mod.render_summary(
         result.counts,
@@ -247,6 +251,7 @@ def cmd_ci(args: argparse.Namespace) -> int:
         megalinter_ok=megalinter_ok,
         dd_message=dd_message,
         dt_message=dt_message,
+        pr_message=pr_message,
     )
     report_mod.append_step_summary(summary)
     if not args.quiet:
@@ -255,6 +260,8 @@ def cmd_ci(args: argparse.Namespace) -> int:
             _eprint(f"chargate: DefectDojo: {dd_message}")
         if dt_message:
             _eprint(f"chargate: Dependency-Track: {dt_message}")
+        if pr_message:
+            _eprint(f"chargate: PR comments: {pr_message}")
     report_mod.write_outputs(
         {
             "mode": mode.value,
@@ -321,6 +328,74 @@ def _maybe_upload_dependencytrack(args: argparse.Namespace) -> str | None:
     )
     result = dt.upload_bom(config, bom_path)
     return result.message if result.ok else f"upload failed (non-blocking): {result.message}"
+
+
+def _resolve_head_sha(args: argparse.Namespace) -> str:
+    """Resolve the PR head to a full SHA for anchoring inline comments.
+
+    In CI ``--head`` is already the PR head SHA; ``rev-parse`` returns it unchanged
+    and also handles the local ``HEAD`` case. On failure, fall back to the literal
+    ref (likely already a SHA), or "" for ``HEAD`` which can't anchor inline.
+    """
+    try:
+        return cgit.rev_parse(args.head, args.repo)
+    except cgit.GitError:
+        return "" if args.head == "HEAD" else args.head
+
+
+def _maybe_comment_pr(
+    args: argparse.Namespace, result: FilterResult, decision: Any, mode: Mode
+) -> str | None:
+    """Post GHAS-style PR comments for net-new findings. Never fails the gate."""
+    if not args.pr_comment or not mode.gates:
+        return None
+    if not args.pr_number or not args.repo_slug:
+        return "skipped (need --pr-number and --repo-slug)"
+    token = os.environ.get(args.github_token_env, "")
+    if not token:
+        return f"skipped (no token in ${args.github_token_env})"
+
+    net_new = list(result.net_new)
+
+    # Inline comments only on findings guaranteed to sit on a changed line.
+    inline_comments: list[ghc.InlineComment] | None = None
+    note: str | None = None
+    if args.pr_comment_mode in ("inline", "both"):
+        eligible = [v for v in net_new if v.inline_safe and v.uri and v.start_line]
+        dropped = max(0, len(eligible) - args.pr_comment_max_inline)
+        shown = eligible[: args.pr_comment_max_inline]
+        inline_comments = [
+            ghc.InlineComment(
+                path=v.uri,  # type: ignore[arg-type]  # filtered to truthy uri above
+                line=v.start_line,  # type: ignore[arg-type]  # filtered to truthy start_line
+                body=report_mod.render_inline_body(v),
+            )
+            for v in shown
+        ]
+        if dropped:
+            note = (
+                f"_Posted {len(shown)} inline comment(s); {dropped} more net-new "
+                f"finding(s) are listed above (inline cap)._"
+            )
+
+    summary_body: str | None = None
+    if args.pr_comment_mode in ("summary", "both"):
+        summary_body = report_mod.render_pr_summary(
+            result.counts, decision, mode, net_new, note=note
+        )
+
+    config = ghc.GitHubCommentConfig(
+        base_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+        repo_slug=args.repo_slug,
+        pr_number=args.pr_number,
+        commit_id=_resolve_head_sha(args),
+        token=token,
+        verify_ssl=not args.pr_comment_insecure,
+    )
+    posted = ghc.post_pr_feedback(
+        config, summary_body=summary_body, inline_comments=inline_comments
+    )
+    return posted.message if posted.ok else f"comment failed (non-blocking): {posted.message}"
 
 
 def cmd_local(args: argparse.Namespace) -> int:
@@ -537,6 +612,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ci.add_argument(
         "--dt-insecure", action="store_true", help="Disable TLS verification for Dependency-Track."
+    )
+    ci.add_argument(
+        "--pr-comment",
+        action="store_true",
+        help="Post GHAS-style PR comments for net-new findings (PR/gate mode only).",
+    )
+    ci.add_argument("--pr-number", type=int, help="Pull request number to comment on.")
+    ci.add_argument("--repo-slug", help="owner/repo of the pull request.")
+    ci.add_argument(
+        "--github-token-env",
+        default="GITHUB_TOKEN",
+        help="Env var holding the GitHub token (needs pull-requests: write).",
+    )
+    ci.add_argument(
+        "--pr-comment-mode",
+        choices=["summary", "inline", "both"],
+        default="both",
+        help="What to post: one summary comment, inline annotations, or both (default).",
+    )
+    ci.add_argument(
+        "--pr-comment-max-inline",
+        type=int,
+        default=50,
+        help="Cap on inline comments per run; the rest are listed in the summary.",
+    )
+    ci.add_argument(
+        "--pr-comment-insecure",
+        action="store_true",
+        help="Disable TLS verification for the GitHub API (GHES testing).",
     )
     ci.add_argument("--quiet", action="store_true", help="Suppress the human summary.")
     ci.set_defaults(func=cmd_ci)

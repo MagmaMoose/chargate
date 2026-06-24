@@ -57,6 +57,21 @@ def primary_start_line(result: dict) -> int | None:
     return start if isinstance(start, int) else None
 
 
+def primary_message(result: dict) -> str | None:
+    """The result's human-readable ``message.text``, trimmed, or None.
+
+    This is the finding text a tool reports (e.g. "Use of weak MD5 hash"); used to
+    give PR comments a body. Tolerates missing/blank/oddly-typed messages.
+    """
+    message = result.get("message")
+    if not isinstance(message, dict):
+        return None
+    text = message.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    return None
+
+
 def _rule_for(result: dict, run: dict) -> dict | None:
     driver = (run.get("tool") or {}).get("driver") or {}
     rules = driver.get("rules") or []

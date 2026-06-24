@@ -74,9 +74,23 @@ inputs:
     required: false
     default: 'true'
   github_token:
-    description: 'Token for the GitHub Security-tab SARIF upload.'
+    description: 'Token for the GitHub Security-tab SARIF upload + PR comments. Needs pull-requests: write on the consumer workflow for comments.'
     required: false
     default: ${{ github.token }}
+
+  # ── PR comments (GHAS-style, net-new only) ───────────────────────────────
+  pr_comment:
+    description: 'Post GHAS-style PR comments for net-new findings (PR events only). Needs pull-requests: write.'
+    required: false
+    default: 'true'
+  pr_comment_mode:
+    description: 'What to post: summary (one updatable comment) | inline (per-line) | both.'
+    required: false
+    default: 'both'
+  pr_comment_max_inline:
+    description: 'Cap on inline comments per run; the rest are listed in the summary.'
+    required: false
+    default: '50'
 
   # ── DefectDojo (optional, first-class) ───────────────────────────────────
   defectdojo_url:
@@ -183,6 +197,7 @@ runs:
       shell: bash
       env:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
         DEFECTDOJO_TOKEN: ${{ inputs.defectdojo_token }}
         DEPENDENCYTRACK_API_KEY: ${{ inputs.dependency_track_api_key }}
         BASE_REF_IN: ${{ inputs.base_ref }}
@@ -190,6 +205,11 @@ runs:
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GH_SHA: ${{ github.sha }}
+        PR_NUMBER_IN: ${{ github.event.pull_request.number }}
+        REPO_SLUG_IN: ${{ github.repository }}
+        PR_COMMENT_IN: ${{ inputs.pr_comment }}
+        PR_COMMENT_MODE_IN: ${{ inputs.pr_comment_mode }}
+        PR_COMMENT_MAX_INLINE_IN: ${{ inputs.pr_comment_max_inline }}
         # All inputs flow through env (never interpolated into the script body)
         # so a malicious value can't break out of the shell — defense-in-depth
         # against `${{ }}` template injection.
@@ -255,10 +275,24 @@ runs:
           [ "$DT_AUTO_CREATE_IN" != "true" ] && args+=(--dt-no-auto-create)
         fi
 
+        # GHAS-style PR comments: only on pull_request events, only when we have a
+        # PR number (chargate itself no-ops outside PR/gate mode regardless).
+        if [ "$PR_COMMENT_IN" = "true" ] && [ -n "$PR_NUMBER_IN" ]; then
+          args+=(--pr-comment
+            --pr-number "$PR_NUMBER_IN"
+            --repo-slug "$REPO_SLUG_IN"
+            --pr-comment-mode "$PR_COMMENT_MODE_IN"
+            --pr-comment-max-inline "$PR_COMMENT_MAX_INLINE_IN")
+        fi
+
         chargate "${args[@]}"
 
+    # Push/baseline only: on PRs the native code-scanning PR annotations would
+    # double-report alongside Chargate's PR comments. The Security tab inventory
+    # stays current from the default-branch baseline; PR diffs are owned by the
+    # Chargate comments instead.
     - name: Upload SARIF to GitHub Security tab
-      if: ${{ always() && inputs.upload_github_sarif == 'true' && steps.chargate.outputs.sarif_path != '' && hashFiles(steps.chargate.outputs.sarif_path) != '' }}
+      if: ${{ always() && inputs.upload_github_sarif == 'true' && github.event_name != 'pull_request' && steps.chargate.outputs.sarif_path != '' && hashFiles(steps.chargate.outputs.sarif_path) != '' }}
       continue-on-error: true
       uses: github/codeql-action/upload-sarif@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4.36.1
       with:

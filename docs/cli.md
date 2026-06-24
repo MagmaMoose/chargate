@@ -63,6 +63,16 @@ Key flags beyond the shared filter options:
 | `--bom` | — | Path to the CycloneDX BOM to upload (the action generates this with Syft). |
 | `--dt-project-name` / `--dt-project-version` / `--dt-project-uuid` | — | Dependency-Track project targeting. |
 | `--dt-no-auto-create` / `--dt-is-latest` / `--dt-insecure` | off | Don't auto-create the project / mark latest / skip TLS verify. |
+| `--pr-comment` | off | Post GHAS-style PR comments for net-new findings (PR/gate mode only). |
+| `--pr-number` / `--repo-slug` | — | Pull request number and `owner/repo` to comment on. |
+| `--github-token-env` | `GITHUB_TOKEN` | Env var with a token that has `pull-requests: write`. |
+| `--pr-comment-mode` | `both` | `summary` (one updatable comment), `inline`, or `both`. |
+| `--pr-comment-max-inline` | `50` | Cap on inline comments; the rest stay in the summary. |
+| `--pr-comment-insecure` | off | Skip TLS verification for the GitHub API (GHES testing). |
+
+PR comments are net-new only and failure-isolated: a GitHub API error is logged and
+never changes the gate outcome. The host action sets `--pr-number` / `--repo-slug`
+from the event and honors `GITHUB_API_URL` for GHES.
 
 ## `chargate local`
 

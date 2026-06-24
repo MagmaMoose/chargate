@@ -22,6 +22,7 @@ from chargate.sarif.counts import Counts, count_results
 from chargate.sarif.diff import DiffIndex, FileDiff, normalize_path
 from chargate.sarif.model import (
     iter_results,
+    primary_message,
     primary_start_line,
     primary_uri,
     resolve_level,
@@ -63,6 +64,11 @@ class FilterPolicy:
     strip_prefixes: tuple[str, ...] = ()
 
 
+# `_classify_one` reasons whose result is guaranteed to sit on a RIGHT-side line
+# that is part of the PR diff (so a GitHub inline review comment cannot 422).
+_INLINE_SAFE_REASONS = frozenset({"added-line", "new-file"})
+
+
 @dataclass(frozen=True)
 class ResultVerdict:
     """The net-new verdict for a single SARIF result, with provenance."""
@@ -76,6 +82,17 @@ class ResultVerdict:
     level: str
     band: str | None = None  # security-severity band (critical/high/...) if the tool emits one
     rule_id: str | None = None
+    message: str | None = None  # the tool's finding text, for PR comment bodies
+
+    @property
+    def inline_safe(self) -> bool:
+        """Whether this verdict maps to a line that's guaranteed to be in the diff.
+
+        Only ``added-line`` / ``new-file`` net-new results sit on a RIGHT-side
+        changed line, so only those are safe targets for an inline review comment
+        (others would 422). File-precision and no-region findings go to the summary.
+        """
+        return self.net_new and self.start_line is not None and self.reason in _INLINE_SAFE_REASONS
 
 
 @dataclass(frozen=True)
@@ -177,6 +194,7 @@ def classify_results(
                 level=level,
                 band=band,
                 rule_id=result.get("ruleId"),
+                message=primary_message(result),
             )
         )
     return tuple(verdicts)

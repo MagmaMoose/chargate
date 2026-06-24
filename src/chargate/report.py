@@ -8,11 +8,13 @@ to test) or append to the GitHub Actions files named by ``GITHUB_STEP_SUMMARY`` 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from chargate.gate import GateDecision, effective_band
+from chargate.github_comment import FINDING_MARKER, SUMMARY_MARKER
 from chargate.modes import Mode
 from chargate.sarif.counts import Counts
+from chargate.sarif.filter import ResultVerdict
 
 
 def render_summary(
@@ -23,6 +25,7 @@ def render_summary(
     megalinter_ok: bool = True,
     dd_message: str | None = None,
     dt_message: str | None = None,
+    pr_message: str | None = None,
 ) -> str:
     """Render the Markdown job summary for a CI run."""
     lines: list[str] = ["## 🔴 Chargate", ""]
@@ -73,7 +76,81 @@ def render_summary(
         lines.append(f"**Dependency-Track:** {dt_message}")
         lines.append("")
 
+    if pr_message:
+        lines.append(f"**PR comments:** {pr_message}")
+        lines.append("")
+
     return "\n".join(lines)
+
+
+def _finding_line(verdict: ResultVerdict, *, blocking: bool) -> str:
+    """One Markdown bullet describing a net-new finding (severity, rule, where, text)."""
+    where = verdict.uri or "(no location)"
+    if verdict.start_line is not None:
+        where = f"{where}:{verdict.start_line}"
+    rule = f" `{verdict.rule_id}`" if verdict.rule_id else ""
+    text = f" — {verdict.message}" if verdict.message else ""
+    icon = "❌" if blocking else "⚠️"  # blocking vs below-threshold net-new
+    return f"- {icon} **{effective_band(verdict)}**{rule} — {where}{text}"
+
+
+def render_pr_summary(
+    counts: Counts,
+    decision: GateDecision,
+    mode: Mode,
+    net_new: Sequence[ResultVerdict],
+    *,
+    note: str | None = None,
+) -> str:
+    """Render the updatable PR summary comment (carries :data:`SUMMARY_MARKER`).
+
+    Lists *every* net-new finding (blocking and below-threshold), marking which
+    ones block. Mirrors the job summary but is tuned to live on the PR thread.
+    """
+    blocking_ids = {(v.run_index, v.result_index) for v in decision.blocking}
+    gate = "❌ `fail`" if decision.failed else "✅ `pass`"
+    lines: list[str] = [
+        SUMMARY_MARKER,
+        "## 🔴 Chargate — net-new security gate",
+        "",
+        f"**Mode:** `{mode.value}` · **Gate:** {gate}",
+        "",
+        "| Net-new | Pre-existing (never blocking) | Total in full SARIF |",
+        "|--------|-------------------------------|---------------------|",
+        f"| {counts.net_new} | {counts.pre_existing} | {counts.total} |",
+        "",
+    ]
+
+    if net_new:
+        lines.append(f"**Net-new findings ({len(net_new)}):**")
+        lines.append("")
+        for verdict in net_new:
+            blocking = (verdict.run_index, verdict.result_index) in blocking_ids
+            lines.append(_finding_line(verdict, blocking=blocking))
+        lines.append("")
+    elif mode.gates:
+        lines.append("✅ No net-new findings introduced by this change.")
+        lines.append("")
+    else:
+        lines.append("📋 Baseline scan — full SARIF shipped; no net-new gate.")
+        lines.append("")
+
+    if note:
+        lines.append(note)
+        lines.append("")
+    lines.append(
+        "<sub>Pre-existing findings never block. The full, unfiltered SARIF ships to "
+        "the Security tab / artifact. — Chargate</sub>"
+    )
+    return "\n".join(lines)
+
+
+def render_inline_body(verdict: ResultVerdict) -> str:
+    """Render one inline review comment body (carries :data:`FINDING_MARKER`)."""
+    rule = f" · `{verdict.rule_id}`" if verdict.rule_id else ""
+    headline = f"**{effective_band(verdict)}**{rule}"
+    body = verdict.message or "Net-new finding introduced by this change."
+    return f"{FINDING_MARKER}\n{headline}\n\n{body}\n\n<sub>Chargate · net-new finding</sub>"
 
 
 def append_step_summary(text: str) -> None:
