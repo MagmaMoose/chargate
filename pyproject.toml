@@ -54,7 +54,7 @@ pythonpath = ["src"]
 addopts = "-ra"
 
 # python-semantic-release (driven by Diatreme on release; see
-# .github/workflows/release.yaml). PSR computes the next stable version from
+# .github/workflows/release.yml). PSR computes the next stable version from
 # conventional commits since the last tag and writes it to BOTH locations below,
 # so the hatchling package version and `chargate version` stay in lockstep — do
 # not bump these by hand.
