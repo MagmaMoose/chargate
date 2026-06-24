@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chargate
+  labels:
+    app: chargate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chargate
+  template:
+    metadata:
+      labels:
+        app: chargate
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # Numeric UID/GID so the kubelet can verify non-root (the image's `app`
+        # user is uid/gid 1000; a name alone fails the non-root check).
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        # The token broker (FastAPI). Verifies a consumer's GitHub Actions OIDC
+        # token and mints a repo-scoped Chargate App installation token so the
+        # PR comment is authored by Chargate[bot].
+        - name: chargate
+          image: ghcr.io/magmamoose/chargate:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          # APP_ID / PRIVATE_KEY come from OCI Vault via the ExternalSecret.
+          envFrom:
+            - secretRef:
+                name: chargate-broker
+          env:
+            # Must match the `oidc_audience` the consumer action requests.
+            - name: OIDC_AUDIENCE
+              value: "chargate"
+            - name: GITHUB_API_URL
+              value: "https://api.github.com"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+      restartPolicy: Always
