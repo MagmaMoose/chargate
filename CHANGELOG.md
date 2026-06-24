@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v2.5.0 (2026-06-24)
+
+### Bug Fixes
+
+- Bump the actions-version group across 1 directory with 3 updates
+  ([`90367b7`](https://github.com/MagmaMoose/chargate/commit/90367b7aea7c956b4f8c2f4b23810d444e821bc5))
+
+
 ## v2.4.0 (2026-06-24)
 
 ### Bug Fixes
