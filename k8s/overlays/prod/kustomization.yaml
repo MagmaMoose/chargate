@@ -8,4 +8,4 @@ images:
   # released image. The placeholder is replaced on the first reconcile after a
   # release publishes ghcr.io/magmamoose/chargate:<version>.
   - name: ghcr.io/magmamoose/chargate
-    newTag: v2.3.0 # {"$imagepolicy": "flux-system:chargate:tag"}
+    newTag: v2.5.1 # {"$imagepolicy": "flux-system:chargate:tag"}
