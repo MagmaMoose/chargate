@@ -26,15 +26,14 @@ Chargate splits the difference:
 - **Ship** the *complete* SARIF to DefectDojo / the Security tab (and a CycloneDX
   BOM to Dependency-Track) → full visibility, including inherited debt and trends.
 
-## Three surfaces, one CLI
+## Two surfaces, one CLI
 
 | Surface | What it is | When to use |
 | --- | --- | --- |
-| **Reusable workflow** | `.github/workflows/gate.yml` (`on: workflow_call`) | Easiest — a consumer's whole config is ~one job block. |
-| **Composite action** | `action.yml` | When you compose your own steps. |
+| **Composite action** | `action.yml` | The CI gate — a few lines in a workflow. |
 | **pre-commit hook** | `.pre-commit-hooks.yaml` (`chargate` hook) | Fast local first line on staged files. |
 
-All three drive the same `chargate` Python CLI. See [Setup & usage](setup.md) to
+Both drive the same `chargate` Python CLI. See [Setup & usage](setup.md) to
 wire one up, [Architecture](architecture.md) for how it fits together, and
 [Net-new gating](net-new.md) for the precise classification rules.
 
