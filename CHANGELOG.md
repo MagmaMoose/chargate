@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.3.0 (2026-06-24)
+
+### Chores
+
+- Provision required workflows (caldrith)
+  ([`be4ef0c`](https://github.com/MagmaMoose/chargate/commit/be4ef0c5eb99d6ab689a828aa78d5e05f0706ecc))
+
+### Features
+
+- Post GHAS-style PR comments for net-new findings
+  ([`1386d64`](https://github.com/MagmaMoose/chargate/commit/1386d640c5c5b5f07e2ac78d3c654a831dd50960))
+
+
 ## v2.2.0 (2026-06-24)
 
 ### Chores
