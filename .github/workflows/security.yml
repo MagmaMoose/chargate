@@ -25,6 +25,7 @@ permissions:
   contents: read
   pull-requests: write     # Chargate posts net-new findings as PR comments
   security-events: write   # full SARIF -> GitHub Security tab
+  # kics-scan ignore-line
   id-token: write          # OIDC exchange at the broker -> comment as Chargate[bot]
 
 concurrency:
