@@ -1,17 +1,15 @@
 name: Security
 
-# Chargate eats its own dog food: this caller invokes the reusable gate workflow
-# and wires both sinks to the Magma Moose org variables/secrets.
+# Chargate eats its own dog food by consuming the LOCAL composite action
+# (./action.yml at THIS commit) — the same thing an external repo gets from
+#   uses: magmamoose/chargate@v2
+# so every run exercises the action under test. The only extra line vs. an
+# external consumer is the checkout: a local `uses: ./` needs the repo present
+# first, whereas `magmamoose/chargate@v2` checks the consumer out itself.
 #
-# It uses the LOCAL path (`./.github/workflows/gate.yml`) on purpose, so each run
-# exercises the gate from THIS commit — including unreleased changes. An external
-# consumer's file is identical except they pin the published workflow instead:
-#
-#   uses: magmamoose/chargate/.github/workflows/gate.yml@v2
-#
-# The arbitrary `MM_*` names live entirely here on the caller side; chargate's
-# reusable workflow only ever sees the values. Each sink is active iff its host
-# URL is set — no separate on/off toggle.
+# Each sink is active iff its host URL is set — no separate on/off toggle. With
+# product / engagement / project all defaulting to the repo, a consumer wiring a
+# sink supplies only the URL + credential (the MM_* names are this repo's vars).
 
 on:
   pull_request:
@@ -20,8 +18,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
-  security-events: write
+  pull-requests: write     # Chargate posts net-new findings as PR comments
+  security-events: write   # full SARIF -> GitHub Security tab
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,16 +27,20 @@ concurrency:
 
 jobs:
   chargate:
-    uses: ./.github/workflows/gate.yml
-    with:
-      # DefectDojo — the full SARIF sink (active iff defectdojo_url is set).
-      defectdojo_url: ${{ vars.MM_DEFECTDOJO_URL }}
-      defectdojo_product: chargate
-      defectdojo_product_type: Research and Development
-      defectdojo_engagement: ci
-      # Dependency-Track — the CycloneDX BOM sink (active iff dependency_track_url
-      # is set). Project name/version default to the repo and ref.
-      dependency_track_url: ${{ vars.MM_DEPENDENCYTRACK_URL }}
-    secrets:
-      defectdojo_token: ${{ secrets.MM_DEFECTDOJO_API_KEY }}
-      dependency_track_api_key: ${{ secrets.MM_DEPENDENCYTRACK_API_KEY }}
+    runs-on: ubuntu-latest
+    steps:
+      # Local `uses: ./` needs action.yml present; net-new needs full history.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          checkout: 'false'   # already checked out above with full history
+          # DefectDojo — full-SARIF sink. product / product_type / engagement
+          # default to the repo name / "Research and Development" / "ci".
+          defectdojo_url: ${{ vars.MM_DEFECTDOJO_URL }}
+          defectdojo_token: ${{ secrets.MM_DEFECTDOJO_API_KEY }}
+          # Dependency-Track — CycloneDX BOM sink. project name/version default to
+          # the repo and ref.
+          dependency_track_url: ${{ vars.MM_DEPENDENCYTRACK_URL }}
+          dependency_track_api_key: ${{ secrets.MM_DEPENDENCYTRACK_API_KEY }}

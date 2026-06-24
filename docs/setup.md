@@ -1,6 +1,6 @@
 # Setup & usage
 
-## 1. Reusable workflow (recommended)
+## 1. Composite action (recommended)
 
 ```yaml
 # .github/workflows/security.yml
@@ -9,23 +9,6 @@ on:
   pull_request:
   push:
     branches: [main]
-
-jobs:
-  chargate:
-    uses: magmamoose/chargate/.github/workflows/gate.yml@v2
-    secrets:
-      defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}   # optional
-```
-
-On PRs it runs MegaLinter whole-repo, gates on net-new findings, and ships the
-full SARIF. On push to the default branch it runs a non-gating baseline scan.
-Reusable workflows are consumed by path, independent of the Marketplace listing.
-
-## 2. Composite action
-
-```yaml
-name: Security
-on: [pull_request]
 
 permissions:
   contents: read
@@ -46,10 +29,12 @@ jobs:
           # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
 ```
 
-The action checks out with `fetch-depth: 0` by default (net-new needs the
-merge-base). Set `checkout: 'false'` if you already checked out with full history.
+On PRs it runs MegaLinter whole-repo, gates on net-new findings, and ships the
+full SARIF; on push to the default branch it runs a non-gating baseline scan. The
+action checks out with `fetch-depth: 0` by default (net-new needs the merge-base) —
+set `checkout: 'false'` if you already checked out with full history.
 
-## 3. pre-commit hook
+## 2. pre-commit hook
 
 ```yaml
 # .pre-commit-config.yaml
@@ -114,13 +99,17 @@ Uploads the **full** SARIF (never the filtered one):
   with:
     defectdojo_url: https://defectdojo.example.com   # active iff this is set
     defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
-    defectdojo_product: my-service
-    defectdojo_product_type: Research and Development   # needed to auto-create a new product
-    defectdojo_engagement: ci
+    # Optional — these default to the repo name / "Research and Development" / "ci":
+    # defectdojo_product: my-service
+    # defectdojo_product_type: Research and Development   # used to auto-create a new product
+    # defectdojo_engagement: ci
 ```
 
-Uses `reimport-scan` by default (one Test per engagement; `close_old_findings`
-mitigates findings that disappear) and auto-creates the product/engagement.
+URL + token is all you need: `defectdojo_product` defaults to the repo name,
+`defectdojo_product_type` to `Research and Development`, and `defectdojo_engagement`
+to `ci`. Uses `reimport-scan` by default (one Test per engagement;
+`close_old_findings` mitigates findings that disappear) and auto-creates the
+product/engagement.
 
 ### Dependency-Track
 

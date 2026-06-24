@@ -4,7 +4,6 @@
   "entrypoints": [
     "src/chargate/cli.py:main",
     "action.yml (composite action: install CLI -> `chargate ci`)",
-    ".github/workflows/gate.yml (reusable workflow, on: workflow_call)",
     ".pre-commit-hooks.yaml (hook id `chargate`, entry: `chargate local`)"
   ],
   "modules": {

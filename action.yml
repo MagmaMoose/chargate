@@ -102,17 +102,17 @@ inputs:
     required: false
     default: ''
   defectdojo_product:
-    description: 'DefectDojo product name (auto-created if missing).'
+    description: 'DefectDojo product name (auto-created if missing). Defaults to the repo name.'
     required: false
-    default: ''
+    default: ${{ github.event.repository.name }}
   defectdojo_product_type:
-    description: 'DefectDojo product type name (required to auto-create a new product).'
+    description: 'DefectDojo product type name (used to auto-create a new product).'
     required: false
-    default: ''
+    default: 'Research and Development'
   defectdojo_engagement:
     description: 'DefectDojo engagement name (auto-created if missing).'
     required: false
-    default: ''
+    default: 'ci'
   defectdojo_close_old:
     description: 'Close findings no longer present on reimport.'
     required: false

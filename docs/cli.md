@@ -1,6 +1,6 @@
 # CLI reference
 
-All three GitHub surfaces drive the same `chargate` CLI. Exit codes: `0` pass ·
+Both GitHub surfaces drive the same `chargate` CLI. Exit codes: `0` pass ·
 `1` blocking net-new findings · `2` setup/usage error.
 
 ```sh
