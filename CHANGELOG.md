@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v2.4.0 (2026-06-24)
+
+### Bug Fixes
+
+- **k8s**: Clear all 14 Chargate net-new findings (addresses self-gated review)
+  ([`9703d61`](https://github.com/MagmaMoose/chargate/commit/9703d61cf5e1ad56d11bbf5f96eed1f01ba76744))
+
+- **security.yml**: Suppress KICS id-token false positive with ignore-line
+  ([`85563cd`](https://github.com/MagmaMoose/chargate/commit/85563cdd7105eb9351e9688d15213a9b43524da8))
+
+### Features
+
+- Author PR comments as Chargate[bot] via an OIDC token broker
+  ([`3701126`](https://github.com/MagmaMoose/chargate/commit/3701126462c2b120f714ffa30ecd8e5d432c1d4d))
+
+
 ## v2.3.0 (2026-06-24)
 
 ### Chores
