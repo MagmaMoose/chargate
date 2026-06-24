@@ -1,6 +1,6 @@
 [project]
 name = "chargate"
-version = "2.1.0"
+version = "2.2.0"
 description = "Security + lint gate: a thin MegaLinter wrapper with net-new (PR-diff) finding gating."
 readme = "README.md"
 requires-python = ">=3.11"

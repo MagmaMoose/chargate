@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.2.0 (2026-06-24)
+
+### Chores
+
+- Provision required workflows (caldrith)
+  ([`81a93a4`](https://github.com/MagmaMoose/chargate/commit/81a93a49354ab2a1fa55ed4ab9f037e21e370a58))
+
+### Features
+
+- Make the composite action the single surface; minimal-config sinks
+  ([`8bc02a5`](https://github.com/MagmaMoose/chargate/commit/8bc02a548c41fa27687e4d3a2076dac25e0ba625))
+
+
 ## v2.1.0 (2026-06-17)
 
 ### Bug Fixes
