@@ -167,12 +167,12 @@ runs:
   steps:
     - name: Checkout
       if: ${{ inputs.checkout == 'true' }}
-      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         fetch-depth: ${{ inputs.fetch_depth }}
 
     - name: Set up Python
-      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: ${{ inputs.python_version }}
 
@@ -294,7 +294,7 @@ runs:
     - name: Upload SARIF to GitHub Security tab
       if: ${{ always() && inputs.upload_github_sarif == 'true' && github.event_name != 'pull_request' && steps.chargate.outputs.sarif_path != '' && hashFiles(steps.chargate.outputs.sarif_path) != '' }}
       continue-on-error: true
-      uses: github/codeql-action/upload-sarif@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4.36.1
+      uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
       with:
         sarif_file: ${{ steps.chargate.outputs.sarif_path }}
         token: ${{ inputs.github_token }}
