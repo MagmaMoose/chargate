@@ -101,22 +101,26 @@ def render_pr_summary(
     net_new: Sequence[ResultVerdict],
     *,
     note: str | None = None,
+    defectdojo_url: str | None = None,
+    dependency_track_url: str | None = None,
 ) -> str:
     """Render the updatable PR summary comment (carries :data:`SUMMARY_MARKER`).
 
     Lists *every* net-new finding (blocking and below-threshold), marking which
     ones block. Mirrors the job summary but is tuned to live on the PR thread.
+    When the full SARIF / BOM were shipped to DefectDojo / Dependency-Track, the
+    footer links straight to where they landed.
     """
     blocking_ids = {(v.run_index, v.result_index) for v in decision.blocking}
     gate = "❌ `fail`" if decision.failed else "✅ `pass`"
     lines: list[str] = [
         SUMMARY_MARKER,
-        "## 🔴 Chargate — net-new security gate",
+        "## 🔴 Chargate: Security & Linting",
         "",
         f"**Mode:** `{mode.value}` · **Gate:** {gate}",
         "",
-        "| Net-new | Pre-existing (never blocking) | Total in full SARIF |",
-        "|--------|-------------------------------|---------------------|",
+        "| Net-new | Pre-existing | Total in full SARIF |",
+        "|--------|--------------|---------------------|",
         f"| {counts.net_new} | {counts.pre_existing} | {counts.total} |",
         "",
     ]
@@ -138,9 +142,19 @@ def render_pr_summary(
     if note:
         lines.append(note)
         lines.append("")
+
+    uploads: list[str] = []
+    if defectdojo_url:
+        uploads.append(f"[SARIF in DefectDojo]({defectdojo_url})")
+    if dependency_track_url:
+        uploads.append(f"[SBOM in Dependency-Track]({dependency_track_url})")
+    if uploads:
+        lines.append("**Uploaded:** " + " · ".join(uploads))
+        lines.append("")
+
     lines.append(
         "<sub>Pre-existing findings never block. The full, unfiltered SARIF ships to "
-        "the Security tab / artifact. — Chargate</sub>"
+        "the Security tab or as an artifact.</sub>"
     )
     return "\n".join(lines)
 

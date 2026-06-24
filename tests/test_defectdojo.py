@@ -104,6 +104,23 @@ def test_import_success(sarif_file):
     assert opener.request.full_url.endswith("/api/v2/reimport-scan/")
 
 
+def test_test_url_from_response():
+    assert (
+        dd.test_url("https://dd.example.com/", {"test_id": 12}) == "https://dd.example.com/test/12"
+    )
+    assert dd.test_url("https://dd.example.com", {"test": "8"}) == "https://dd.example.com/test/8"
+    assert dd.test_url("https://dd.example.com", {"test": "nope"}) is None
+    assert dd.test_url("https://dd.example.com", {}) is None
+    assert dd.test_url("https://dd.example.com", None) is None
+
+
+def test_import_success_sets_test_url(sarif_file):
+    opener = _FakeOpener(_FakeResponse(201, '{"test_id": 42}'))
+    result = dd.import_sarif(_config(), sarif_file, opener=opener)
+    assert result.ok
+    assert result.url == "https://dd.example.com/test/42"
+
+
 def test_import_http_error_is_not_ok(sarif_file):
     http_error = urllib.error.HTTPError(
         "https://dd.example.com", 400, "Bad Request", {}, io.BytesIO(b'{"message":"nope"}')

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,7 @@ class DependencyTrackResult:
     message: str = ""
     token: str | None = None
     response: dict[str, Any] | None = None
+    project_url: str | None = None  # link to the project in the Dependency-Track UI
 
 
 def strip_bom_marker(bom_bytes: bytes) -> bytes:
@@ -138,6 +140,50 @@ def build_request(config: DependencyTrackConfig, bom_path: Path) -> urllib.reque
     return request
 
 
+def _build_opener(verify_ssl: bool) -> urllib.request.OpenerDirector:
+    if verify_ssl:
+        return urllib.request.build_opener()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+
+
+def lookup_project_uuid(
+    config: DependencyTrackConfig, opener: urllib.request.OpenerDirector
+) -> str | None:
+    """Resolve the project's UUID — the provided one, else a name/version lookup.
+
+    Best-effort: the BOM upload response only carries a processing ``token``, so we
+    ask ``GET /api/v1/project/lookup`` for the UUID to build a UI link. Any error
+    (or no match) yields None — this never affects the upload's success.
+    """
+    if config.project_uuid:
+        return config.project_uuid
+    if not config.project_name:
+        return None
+    query = urllib.parse.urlencode(
+        {"name": config.project_name, "version": config.project_version or ""}
+    )
+    url = f"{config.base_url.rstrip('/')}/api/v1/project/lookup?{query}"
+    request = urllib.request.Request(url, method="GET")
+    request.add_header("X-Api-Key", config.api_key)
+    request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", _USER_AGENT)
+    try:
+        with opener.open(request, timeout=config.timeout) as response:
+            data = _safe_json(response.read().decode("utf-8", errors="replace"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+        return None
+    uuid = data.get("uuid") if isinstance(data, dict) else None
+    return uuid if isinstance(uuid, str) and uuid else None
+
+
+def project_url(base_url: str, uuid: str) -> str:
+    """The Dependency-Track UI link for a project UUID."""
+    return f"{base_url.rstrip('/')}/projects/{uuid}"
+
+
 def upload_bom(
     config: DependencyTrackConfig,
     bom_path: str | Path,
@@ -156,13 +202,7 @@ def upload_bom(
         return DependencyTrackResult(False, endpoint, message=f"could not read BOM: {exc}")
 
     if opener is None:
-        if config.verify_ssl:
-            opener = urllib.request.build_opener()
-        else:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        opener = _build_opener(config.verify_ssl)
 
     try:
         with opener.open(request, timeout=config.timeout) as response:
@@ -171,6 +211,7 @@ def upload_bom(
             parsed = _safe_json(raw)
             ok = 200 <= int(status) < 300
             token = parsed.get("token") if isinstance(parsed, dict) else None
+            uuid = lookup_project_uuid(config, opener) if ok else None
             return DependencyTrackResult(
                 ok=ok,
                 endpoint=endpoint,
@@ -178,6 +219,7 @@ def upload_bom(
                 message="uploaded" if ok else raw[:500],
                 token=token if isinstance(token, str) else None,
                 response=parsed,
+                project_url=project_url(config.base_url, uuid) if uuid else None,
             )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500] if exc.fp else ""

@@ -67,6 +67,9 @@ scoped to **net-new findings only**, so it stays quiet:
   stack. Findings without a precise changed line (project-level, or SCA on a
   lockfile) are listed in the summary instead.
 
+When the full SARIF / BOM are shipped to DefectDojo / Dependency-Track, the summary
+comment footer links straight to the imported Test and project there.
+
 It is **on by default** and needs `pull-requests: write` on the workflow. Toggle
 and tune it with the action inputs:
 

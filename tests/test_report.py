@@ -100,6 +100,35 @@ def test_render_pr_summary_lists_net_new_with_marker(make_sarif, make_result):
     assert "❌" in md  # blocking finding marked
 
 
+def test_render_pr_summary_title_columns_and_footer(make_sarif, make_result):
+    result, decision = _pr_inputs(make_sarif, make_result)
+    md = render_pr_summary(result.counts, decision, Mode.PR, list(result.net_new))
+    assert "## 🔴 Chargate: Security & Linting" in md
+    assert "| Net-new | Pre-existing | Total in full SARIF |" in md
+    assert "ships to the Security tab or as an artifact." in md
+    assert "— Chargate" not in md  # old footer suffix dropped
+
+
+def test_render_pr_summary_includes_sink_links(make_sarif, make_result):
+    result, decision = _pr_inputs(make_sarif, make_result)
+    md = render_pr_summary(
+        result.counts,
+        decision,
+        Mode.PR,
+        list(result.net_new),
+        defectdojo_url="https://dd.example.com/test/42",
+        dependency_track_url="https://dt.example.com/projects/u-9",
+    )
+    assert "[SARIF in DefectDojo](https://dd.example.com/test/42)" in md
+    assert "[SBOM in Dependency-Track](https://dt.example.com/projects/u-9)" in md
+
+
+def test_render_pr_summary_omits_uploads_line_without_links(make_sarif, make_result):
+    result, decision = _pr_inputs(make_sarif, make_result)
+    md = render_pr_summary(result.counts, decision, Mode.PR, list(result.net_new))
+    assert "Uploaded:" not in md
+
+
 def test_render_pr_summary_pass_when_no_net_new(make_sarif, make_result):
     diff = DiffIndex(())  # nothing changed → no net-new
     sarif = make_sarif([make_result("a.py", 1, level="error")])
