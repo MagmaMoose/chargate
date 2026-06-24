@@ -29,11 +29,21 @@ packages = ["src/chargate"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 # Docs tooling (non-default group): `uv run --group docs mkdocs serve|build`.
 docs = ["mkdocs-material>=9.5"]
+# The token-broker service under `broker/` is a separate deployable with its own
+# deps — they are deliberately NOT runtime deps of the stdlib-only chargate CLI.
+# Test with: `uv run --group broker python -m pytest broker/tests`.
+broker = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pyjwt[crypto]>=2.9",
+  "httpx>=0.27",
+  "pydantic-settings>=2.5",
+]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "broker"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
