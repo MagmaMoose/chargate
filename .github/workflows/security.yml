@@ -1,5 +1,10 @@
 name: Security
 
+# Chargate/KICS suppression (reviewed false positive, not a vulnerability):
+#   baee238e... Passwords And Secrets - Generic Token misfires on the required
+#   `id-token: write` GitHub OIDC permission key below — no secret is present.
+# kics-scan disable=baee238e-1921-4801-9c3f-79ae1d7b2cbc
+#
 # Chargate eats its own dog food by consuming the LOCAL composite action
 # (./action.yml at THIS commit) — the same thing an external repo gets from
 #   uses: magmamoose/chargate@v2

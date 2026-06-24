@@ -10,6 +10,11 @@
 #
 # NO Cloudflare Access policy — GitHub Actions runners must reach /token
 # unauthenticated; callers are authenticated by their OIDC token in the broker.
+#
+# Chargate/KICS suppression (reviewed false positive, not a vulnerability):
+#   611ab018... `metadata.namespace is undefined` — kustomize base; the namespace
+#   is set by the overlay (k8s/overlays/prod/kustomization.yaml: `namespace: chargate`).
+# kics-scan disable=611ab018-c4aa-4ba2-b0f6-a448337509a6
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

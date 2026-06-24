@@ -1,3 +1,17 @@
+# Chargate/KICS suppressions (reviewed false positives, not vulnerabilities):
+#   611ab018... `metadata.namespace is undefined` — kustomize base; the namespace
+#     is set by the overlay (k8s/overlays/prod/kustomization.yaml: `namespace: chargate`).
+#   02323c00... runAsUser low UID — intentional: matches the image's `app` user
+#     (uid 1000). Running as a higher UID would mismatch the image filesystem.
+#   7c81d34c... / 583053b7... image lacks digest / tag is `latest` — placeholder
+#     for Flux ImagePolicy, which rewrites the tag (and pins to the released
+#     `vX.Y.Z`) on reconcile. See the overlay's `images:` block.
+#   4a20ebac... / 48a5beba... no LimitRange / ResourceQuota — those are cluster-
+#     namespace policies, not Deployment-level fields. Out of scope here.
+#   3d658f8b... envFrom.secretRef is defined — this is the correct pattern: the
+#     Secret is created by an ExternalSecret synced from OCI Vault (see
+#     externalsecret.yaml). Inlining the values would be the actual vulnerability.
+# kics-scan disable=611ab018-c4aa-4ba2-b0f6-a448337509a6,02323c00-cdc3-4fdc-a310-4f2b3e7a1660,7c81d34c-8e5a-402b-9798-9f442630e678,583053b7-e632-46f0-b989-f81ff8045385,4a20ebac-1060-4c81-95d1-1f7f620e983b,48a5beba-e4c0-4584-a2aa-e6894e4cf424,3d658f8b-d988-41a0-a841-40043121de1e
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,7 +27,13 @@ spec:
     metadata:
       labels:
         app: chargate
+      annotations:
+        # AppArmor: confine the broker with the host's default runtime profile
+        # (matches the seccompProfile RuntimeDefault below).
+        container.apparmor.security.beta.kubernetes.io/chargate: runtime/default
     spec:
+      # The broker never calls the k8s API — disable SA token mount.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         # Numeric UID/GID so the kubelet can verify non-root (the image's `app`
