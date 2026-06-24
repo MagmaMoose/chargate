@@ -196,6 +196,24 @@ def test_upload_lookup_forbidden_hints_view_portfolio(bom_file):
     assert "VIEW_PORTFOLIO" in result.message  # the reason is surfaced, not silent
 
 
+def test_resolve_project_link_returns_url():
+    # PR path: resolve the link without uploading a BOM.
+    opener = _FakeOpener(_FakeResponse(200, '{"uuid": "u-7"}'))
+    url, reason = dt.resolve_project_link(_config(), opener=opener)
+    assert url == "https://dtrack.example.com/projects/u-7"
+    assert reason is None
+    assert "/api/v1/project/lookup" in opener.request.full_url
+
+
+def test_resolve_project_link_forbidden_returns_reason():
+    forbidden = urllib.error.HTTPError(
+        "https://dtrack.example.com/api/v1/project/lookup", 403, "Forbidden", {}, io.BytesIO(b"{}")
+    )
+    url, reason = dt.resolve_project_link(_config(), opener=_FakeOpener(exc=forbidden))
+    assert url is None
+    assert "VIEW_PORTFOLIO" in reason
+
+
 def test_upload_http_error_is_not_ok(bom_file):
     http_error = urllib.error.HTTPError(
         "https://dtrack.example.com", 401, "Unauthorized", {}, io.BytesIO(b'{"message":"bad key"}')

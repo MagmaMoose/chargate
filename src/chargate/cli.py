@@ -314,16 +314,11 @@ def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> _Sin
 def _maybe_upload_dependencytrack(args: argparse.Namespace) -> _SinkOutcome:
     if not args.dependency_track_url:
         return _SinkOutcome()
-    if not args.bom:
-        return _SinkOutcome("skipped (no --bom path)")
     if not args.dt_project_uuid and not args.dt_project_name:
         return _SinkOutcome("skipped (need --dt-project-uuid or --dt-project-name)")
     api_key = os.environ.get(args.dt_api_key_env, "")
     if not api_key:
         return _SinkOutcome(f"skipped (no API key in ${args.dt_api_key_env})")
-    bom_path = Path(args.bom)
-    if not bom_path.is_file():
-        return _SinkOutcome(f"skipped (BOM not found: {bom_path})")
     config = dt.DependencyTrackConfig(
         base_url=args.dependency_track_url,
         api_key=api_key,
@@ -336,6 +331,16 @@ def _maybe_upload_dependencytrack(args: argparse.Namespace) -> _SinkOutcome:
         is_latest=args.dt_is_latest,
         verify_ssl=not args.dt_insecure,
     )
+
+    # No --bom → don't upload (e.g. on PRs); just resolve the project link so the
+    # PR comment can point at the existing (default-branch) project.
+    if not args.bom:
+        url, reason = dt.resolve_project_link(config)
+        return _SinkOutcome("linked" if url else (reason or "no link (upload skipped)"), url)
+
+    bom_path = Path(args.bom)
+    if not bom_path.is_file():
+        return _SinkOutcome(f"skipped (BOM not found: {bom_path})")
     result = dt.upload_bom(config, bom_path)
     if result.ok:
         return _SinkOutcome(result.message, result.project_url)

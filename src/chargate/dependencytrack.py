@@ -193,6 +193,23 @@ def project_url(base_url: str, uuid: str) -> str:
     return f"{base_url.rstrip('/')}/projects/{uuid}"
 
 
+def resolve_project_link(
+    config: DependencyTrackConfig,
+    *,
+    opener: urllib.request.OpenerDirector | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve a project's UI link WITHOUT uploading. Returns ``(url, reason)``.
+
+    Used on pull requests, where Chargate doesn't push a BOM (so DT isn't littered
+    with throwaway per-PR versions) but the comment should still link to the
+    project's existing (e.g. default-branch) page. Never raises.
+    """
+    if opener is None:
+        opener = _build_opener(config.verify_ssl)
+    uuid, reason = lookup_project_uuid(config, opener)
+    return (project_url(config.base_url, uuid) if uuid else None), reason
+
+
 def upload_bom(
     config: DependencyTrackConfig,
     bom_path: str | Path,

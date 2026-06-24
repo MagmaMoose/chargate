@@ -154,6 +154,13 @@ API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create, and
 `VIEW_PORTFOLIO` so the PR-comment footer can resolve the project's UUID into a
 link — without it the upload still succeeds, just with no link).
 
+**Upload happens on push / tags only.** Dependency-Track tracks *shipped*
+artifacts, so the BOM is generated and uploaded only on non-PR events (push to the
+default branch, tags). On pull requests Chargate skips the upload entirely — no
+throwaway per-PR versions, faster PR CI — and instead links the PR comment to the
+project's existing default-branch version. (DefectDojo still imports the full SARIF
+on PRs, since reimport updates one Test rather than spawning versions.)
+
 ## MegaLinter configuration
 
 Chargate injects the critical env (`DISABLE_ERRORS`, `SARIF_REPORTER`,
