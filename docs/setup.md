@@ -78,6 +78,26 @@ and tune it with the action inputs:
 | `pr_comment` | `true` | Post the PR comments (set `false` to disable). |
 | `pr_comment_mode` | `both` | `summary`, `inline`, or `both`. |
 | `pr_comment_max_inline` | `50` | Cap on inline comments; the rest stay in the summary. |
+| `pr_comment_token` | `github_token` | Token used **only** to author the comments. |
+
+**Post as your own bot (optional).** By default the comments are authored by
+`github-actions[bot]` (the identity of the default `GITHUB_TOKEN` — that name can't
+be renamed). To post as e.g. `Chargate[bot]`, create a GitHub App (only **Pull
+requests: write** is needed), install it, and mint an installation token to pass as
+`pr_comment_token`. The Security-tab upload keeps using `github_token`, so the App
+needs no other permissions:
+
+```yaml
+steps:
+  - uses: actions/create-github-app-token@v3
+    id: app-token
+    with:
+      app-id: ${{ vars.CHARGATE_APP_ID }}
+      private-key: ${{ secrets.CHARGATE_APP_PRIVATE_KEY }}
+  - uses: magmamoose/chargate@v2
+    with:
+      pr_comment_token: ${{ steps.app-token.outputs.token }}
+```
 
 **Less noise — one surface per finding.** To avoid double-reporting, the full
 SARIF is uploaded to the Security tab only on **non-PR events** (the default-branch

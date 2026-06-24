@@ -91,6 +91,10 @@ inputs:
     description: 'Cap on inline comments per run; the rest are listed in the summary.'
     required: false
     default: '50'
+  pr_comment_token:
+    description: 'Token used ONLY to author the PR comments. Pass a GitHub App installation token (e.g. from actions/create-github-app-token) to post as your App (Chargate[bot]) instead of github-actions[bot]. Defaults to github_token.'
+    required: false
+    default: ''
 
   # ── DefectDojo (optional, first-class) ───────────────────────────────────
   defectdojo_url:
@@ -197,7 +201,7 @@ runs:
       shell: bash
       env:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
-        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_TOKEN: ${{ inputs.pr_comment_token != '' && inputs.pr_comment_token || inputs.github_token }}
         DEFECTDOJO_TOKEN: ${{ inputs.defectdojo_token }}
         DEPENDENCYTRACK_API_KEY: ${{ inputs.dependency_track_api_key }}
         BASE_REF_IN: ${{ inputs.base_ref }}
