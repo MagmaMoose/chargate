@@ -128,7 +128,7 @@ inputs:
     required: false
     default: ''
   dependency_track_api_key:
-    description: 'Dependency-Track API key (pass a Secret). Needs BOM_UPLOAD (+ PROJECT_CREATION_UPLOAD for auto-create).'
+    description: 'Dependency-Track API key (pass a Secret). Needs BOM_UPLOAD (+ PROJECT_CREATION_UPLOAD for auto-create, + VIEW_PORTFOLIO for the PR-comment project link).'
     required: false
     default: ''
   dependency_track_project_name:

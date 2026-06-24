@@ -103,7 +103,8 @@ def test_render_pr_summary_lists_net_new_with_marker(make_sarif, make_result):
 def test_render_pr_summary_title_columns_and_footer(make_sarif, make_result):
     result, decision = _pr_inputs(make_sarif, make_result)
     md = render_pr_summary(result.counts, decision, Mode.PR, list(result.net_new))
-    assert "## 🔴 Chargate: Security & Linting" in md
+    assert "## Chargate: Security & Linting" in md
+    assert "🔴" not in md  # red circle removed
     assert "| Net-new | Pre-existing | Total in full SARIF |" in md
     assert "ships to the Security tab or as an artifact." in md
     assert "— Chargate" not in md  # old footer suffix dropped

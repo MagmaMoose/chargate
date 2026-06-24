@@ -53,8 +53,12 @@ class _FakeOpener:
         if self.exc is not None:
             raise self.exc
         if self._responses is not None:
-            return self._responses[min(len(self.requests) - 1, len(self._responses) - 1)]
-        return self.response
+            item = self._responses[min(len(self.requests) - 1, len(self._responses) - 1)]
+        else:
+            item = self.response
+        if isinstance(item, Exception):
+            raise item  # a per-call failure (e.g. a 403 on the lookup)
+        return item
 
 
 @pytest.fixture
@@ -174,6 +178,22 @@ def test_upload_lookup_miss_leaves_project_url_none(bom_file):
     result = dt.upload_bom(_config(), bom_file, opener=opener)
     assert result.ok  # upload still succeeded
     assert result.project_url is None
+
+
+def test_upload_lookup_forbidden_hints_view_portfolio(bom_file):
+    # The BOM POST succeeds; the project lookup is 403 (key lacks VIEW_PORTFOLIO).
+    forbidden = urllib.error.HTTPError(
+        "https://dtrack.example.com/api/v1/project/lookup",
+        403,
+        "Forbidden",
+        {},
+        io.BytesIO(b"{}"),
+    )
+    opener = _FakeOpener(responses=[_FakeResponse(200, '{"token": "t-4"}'), forbidden])
+    result = dt.upload_bom(_config(), bom_file, opener=opener)
+    assert result.ok  # the upload itself is unaffected
+    assert result.project_url is None
+    assert "VIEW_PORTFOLIO" in result.message  # the reason is surfaced, not silent
 
 
 def test_upload_http_error_is_not_ok(bom_file):

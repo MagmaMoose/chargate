@@ -28,7 +28,7 @@ def render_summary(
     pr_message: str | None = None,
 ) -> str:
     """Render the Markdown job summary for a CI run."""
-    lines: list[str] = ["## 🔴 Chargate", ""]
+    lines: list[str] = ["## Chargate", ""]
     lines.append(
         f"**Mode:** `{mode.value}` · **Gate:** " + ("`fail`" if decision.failed else "`pass`")
     )
@@ -115,7 +115,7 @@ def render_pr_summary(
     gate = "❌ `fail`" if decision.failed else "✅ `pass`"
     lines: list[str] = [
         SUMMARY_MARKER,
-        "## 🔴 Chargate: Security & Linting",
+        "## Chargate: Security & Linting",
         "",
         f"**Mode:** `{mode.value}` · **Gate:** {gate}",
         "",

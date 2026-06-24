@@ -150,7 +150,9 @@ Dependency-Track server:
 
 Generates the BOM with `anchore/sbom-action` (Syft) and `POST`s it to
 `/api/v1/bom` (multipart), auto-creating the project/version on first upload. The
-API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create).
+API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create, and
+`VIEW_PORTFOLIO` so the PR-comment footer can resolve the project's UUID into a
+link — without it the upload still succeeds, just with no link).
 
 ## MegaLinter configuration
 
