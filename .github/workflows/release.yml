@@ -1,27 +1,25 @@
-# Diatreme release — single-environment Trunk-Based Development (mono-env).
-#
-# Flow (one long-lived branch: main):
-#   push to main → python-semantic-release computes the next STABLE version from
-#                  conventional commits since the last tag, bumps pyproject.toml +
-#                  src/chargate/__init__.py, updates CHANGELOG.md, tags vX.Y.Z, and
-#                  publishes the GitHub Release.
-#   then         → the floating major action tag (v2, v1, ...) is force-moved onto
-#                  the new release, so consumers pinning magmamoose/chargate@v2 (or
-#                  `rev: v2` in .pre-commit-config) track the latest stable v2.x.
-#   finally      → the bump-homebrew job opens a PR on MagmaMoose/homebrew-tap
-#                  bumping the chargate formula to the new tag — event-driven, so the
-#                  tap no longer needs to poll for new versions on a cron.
-#
-# chargate is a composite action + Python CLI (no Docker image), so this is a
-# version-only release — it mirrors how Diatreme self-releases.
-#
-# First cut: main already carries a breaking change since v1.1.3, so PSR computes
-# 2.0.0 as the next version (verified with `semantic-release version --print`). The
-# first push that runs this workflow cuts v2.0.0 automatically; version-override
-# (manual dispatch) is only needed to force a specific version or to release when
-# there are no feat/fix/perf commits. This v2.0.0 is what the homebrew-tap chargate
-# formula pins to.
+# Chargate/KICS suppression (reviewed false positive, not a vulnerability):
+#   baee238e... Passwords And Secrets - Generic Token misfires on the required
+#   `id-token: write` GitHub OIDC permission key below — no secret is present.
+# kics-scan disable=baee238e-1921-4801-9c3f-79ae1d7b2cbc
 name: Release
+
+# Diatreme release workflow (one image-aware template for the whole org).
+#
+# Detects a container build (docker-bake.hcl / Dockerfile):
+#   - pull_request: image repos run `mode: ci` -> BUILD + push a pr-<N> image to
+#     GHCR, so the build is verified BEFORE merge. Non-image repos no-op (the
+#     required `diatreme` check passes trivially).
+#   - push to the default branch: `mode: release` -> version + GitHub Release;
+#     image repos also promote the image.
+#
+# versioning-tool defaults to gitversion (language-agnostic). Per-repo overrides:
+#   - Python: versioning-tool: semantic-release-python (+ a pyproject config).
+#   - Node:   versioning-tool: semantic-release-npm.
+#   - Non-`main` default branch (e.g. master): set on.push.branches to match.
+#
+# All actions are SHA-pinned (Chargate's pre-commit hook enforces this); the
+# trailing `# vX.Y.Z` comment tracks the tag each pinned SHA corresponds to.
 
 on:
   pull_request:
@@ -34,19 +32,12 @@ on:
       - LICENSE
       - .gitignore
   workflow_dispatch:
-    inputs:
-      version-override:
-        description: 'Explicit version e.g. v2.0.0. Blank = auto-compute from commits; required to force a release when there are no feat/fix/perf commits.'
-        required: false
-        default: ''
 
 permissions:
   contents: write     # version bump + tag on release
   id-token: write     # OIDC for the Diatreme public-app token broker
   packages: write     # push the PR/release container image to GHCR
 
-# Serialize releases per ref so two pushes to main can't race the tag write.
-# Never cancel a release mid-flight.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -54,17 +45,8 @@ concurrency:
 jobs:
   diatreme:
     runs-on: ubuntu-latest
-    # Surface Diatreme's release outputs at the job level so bump-homebrew (and the
-    # major-tag step) can gate on them — `needs.<job>.outputs.*` only sees what the
-    # job re-exports from its steps.
-    outputs:
-      released: ${{ steps.release.outputs.released }}
-      version: ${{ steps.release.outputs.version }}
-      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0   # full history + tags for the floating major-tag move below
       - id: detect
         shell: bash
         # image_name is set only when the repo builds a container image; Diatreme
@@ -82,66 +64,12 @@ jobs:
           mode: ci
           image_name: ${{ steps.detect.outputs.image_name }}
       # Default-branch push (or manual dispatch): version + release.
-      - id: release
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      - if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: magmamoose/diatreme@f31adec7d62907cc81b9b880cd776e24fcdcbaf1 # v2.0.0
         with:
           mode: release
-          versioning-tool: semantic-release-python
+          versioning-tool: gitversion
           environment: prod
           environments: '["prod"]'
           prerelease-identifiers: '{}'
-          version-override: ${{ github.event_name == 'workflow_dispatch' && inputs.version-override || '' }}
           image_name: ${{ steps.detect.outputs.image_name }}
-
-      # chargate is consumed by floating major tag (magmamoose/chargate@v2); Diatreme
-      # only pushes the full vX.Y.Z tag, so move the major alias onto each stable
-      # release here. Uses GITHUB_TOKEN — if a tag ruleset blocks it, grant the token
-      # bypass or swap in a Diatreme/PAT token.
-      - name: Update floating major action tag
-        if: steps.release.outputs.released == 'true' && !contains(steps.release.outputs.version, '-')
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          prefix="${RELEASE_TAG%"${RELEASE_VERSION}"}"
-          major="${RELEASE_VERSION%%.*}"
-          major_tag="${prefix}${major}"
-          target_commit="$(git rev-list -n 1 "${RELEASE_TAG}")"
-
-          git config user.name "semantic-release"
-          git config user.email "semantic-release@users.noreply.github.com"
-          git tag -f "${major_tag}" "${target_commit}"
-          git push \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "refs/tags/${major_tag}" \
-            --force
-
-  # Event-driven Homebrew bump: when a stable release is cut, open a PR on the tap
-  # bumping the chargate formula to the new tag (url + sha256 recomputed). This
-  # replaces polling the tap on a cron. Requires HOMEBREW_TAP_TOKEN — a fine-grained
-  # PAT on MagmaMoose/homebrew-tap with Contents + Pull requests: write.
-  bump-homebrew:
-    needs: diatreme
-    if: needs.diatreme.outputs.released == 'true' && !contains(needs.diatreme.outputs.version, '-')
-    runs-on: macos-latest
-    permissions:
-      contents: read
-    steps:
-      # Homebrew 6.x refuses to load formulae from untrusted third-party taps when
-      # HOMEBREW_REQUIRE_TAP_TRUST is set (it is, on the runner). dawidd6 *clones*
-      # the tap, so trust it by name before the bump or `brew bump-formula-pr` aborts
-      # with Homebrew::UntrustedTapError.
-      - name: Trust the MagmaMoose tap
-        run: brew trust --tap magmamoose/tap
-      - name: Bump chargate formula in the tap
-        uses: dawidd6/action-homebrew-bump-formula@1446dca236b0440c6f02723a3f14f13be2c04ab0 # v7
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: MagmaMoose/homebrew-tap
-          formula: chargate
-          tag: ${{ needs.diatreme.outputs.tag }}
-          no_fork: true   # push the bump branch straight to the tap (don't fork)
