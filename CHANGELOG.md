@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.5.2 (2026-06-27)
+
+### Bug Fixes
+
+- **ci**: Build multi-arch (amd64+arm64) images
+  ([`15ac301`](https://github.com/MagmaMoose/chargate/commit/15ac301a94f460f218e3e6ebcf6e77da0e9325cc))
+
+### Chores
+
+- Update chargate image
+  ([`ee637c9`](https://github.com/MagmaMoose/chargate/commit/ee637c9daf0bbca5cce108d88854d966fd8bddea))
+
+
 ## v2.5.1 (2026-06-24)
 
 ### Bug Fixes
