@@ -23,6 +23,25 @@ def iter_results(sarif: dict[str, Any]) -> Iterator[tuple[int, int, dict, dict]]
             yield ri, xi, result, run
 
 
+def is_suppressed(result: dict) -> bool:
+    """True if a result carries an in-source suppression (SARIF 2.1.0 §3.27.23).
+
+    A result is suppressed iff its ``suppressions`` array is present and non-empty.
+    This is how linters report an author-acknowledged accepted risk: checkov's
+    ``# checkov:skip=<id>:<reason>``, Bandit's ``# nosec``, Semgrep's
+    ``# nosemgrep`` all surface as ``suppressions: [{"kind": "inSource", ...}]``.
+    Such a finding is an explicit, in-code decision and must never gate.
+
+    A suppression whose ``status`` is explicitly ``"rejected"`` does not suppress
+    (SARIF/GitHub semantics); an absent ``status`` means accepted, which is what
+    the common linters emit.
+    """
+    suppressions = result.get("suppressions")
+    if not isinstance(suppressions, list) or not suppressions:
+        return False
+    return any(not (isinstance(s, dict) and s.get("status") == "rejected") for s in suppressions)
+
+
 def _primary_location(result: dict) -> dict | None:
     """The primary (first) location of a result, per SARIF convention.
 
