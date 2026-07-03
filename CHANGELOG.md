@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.6.0 (2026-07-03)
+
+### Chores
+
+- Update chargate image
+  ([`0b881b3`](https://github.com/MagmaMoose/chargate/commit/0b881b3135fbcdb2139b83d3103ceb8dc8a0b47d))
+
+### Features
+
+- Add opt-in incremental (changed-files-only) PR scanning
+  ([`507f206`](https://github.com/MagmaMoose/chargate/commit/507f20687a3606dd609b75bc4cb31f21dd3d120d))
+
+
 ## v2.5.2 (2026-06-27)
 
 ### Bug Fixes
