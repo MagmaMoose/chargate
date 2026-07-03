@@ -29,6 +29,24 @@ def test_build_env_disables_errors_and_enables_reporters():
     assert env["ENABLE_LINTERS"] == "REPOSITORY_TRIVY"
 
 
+def test_build_env_defaults_to_whole_repo_scan():
+    env = ml.build_env(ml.MegaLinterConfig())
+    assert env["VALIDATE_ALL_CODEBASE"] == "true"
+
+
+def test_build_env_incremental_disables_validate_all_codebase():
+    env = ml.build_env(ml.MegaLinterConfig(validate_all_codebase=False))
+    assert env["VALIDATE_ALL_CODEBASE"] == "false"
+
+
+def test_build_env_merges_extra_env():
+    # Incremental runs pass DEFAULT_BRANCH so MegaLinter can find changed files.
+    env = ml.build_env(
+        ml.MegaLinterConfig(validate_all_codebase=False, extra_env={"DEFAULT_BRANCH": "main"})
+    )
+    assert env["DEFAULT_BRANCH"] == "main"
+
+
 def test_build_docker_command_mounts_workspace_and_passes_env(tmp_path: Path):
     config = ml.MegaLinterConfig(workspace=str(tmp_path))
     cmd = ml.build_docker_command(config, {"FOO": "bar"})

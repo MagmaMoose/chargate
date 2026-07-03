@@ -59,6 +59,14 @@ inputs:
     description: 'Comma-separated MegaLinter linter keys to disable.'
     required: false
     default: ''
+  incremental:
+    description: >-
+      PR events only: run MegaLinter over just the files the PR changes
+      (VALIDATE_ALL_CODEBASE=false) instead of the whole repo — faster on large
+      repos. The net-new gate still uses chargate's own diff. Baseline (push)
+      scans are always whole-repo. Default off.
+    required: false
+    default: 'false'
 
   # ── SARIF output ─────────────────────────────────────────────────────────
   emit_sarif_artifact:
@@ -250,6 +258,7 @@ runs:
         ML_TAG_IN: ${{ inputs.megalinter_tag }}
         ENABLE_LINTERS_IN: ${{ inputs.enable_linters }}
         DISABLE_LINTERS_IN: ${{ inputs.disable_linters }}
+        INCREMENTAL_IN: ${{ inputs.incremental }}
         DD_URL_IN: ${{ inputs.defectdojo_url }}
         DD_PRODUCT_IN: ${{ inputs.defectdojo_product }}
         DD_PRODUCT_TYPE_IN: ${{ inputs.defectdojo_product_type }}
@@ -283,6 +292,8 @@ runs:
           --sarif-out "$sarif_abs")
         [ -n "$base" ] && args+=(--base "$base")
         [ "$STRICT_IN" = "true" ] && args+=(--strict)
+        # Incremental applies to PR/gate mode; chargate no-ops it on baseline runs.
+        [ "$INCREMENTAL_IN" = "true" ] && args+=(--incremental --default-branch "${DEFAULT_BRANCH_IN:-}")
 
         IFS=',' read -ra _en <<< "$ENABLE_LINTERS_IN"
         for l in "${_en[@]}"; do [ -n "$l" ] && args+=(--enable-linter "$l"); done
