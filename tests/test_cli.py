@@ -435,6 +435,49 @@ def test_ci_pr_comment_not_attempted_in_baseline_mode(pr_repo, capsys, monkeypat
     assert called["n"] == 0  # baseline never comments
 
 
+# ── chargate ci --incremental (MegaLinter whole-repo vs changed-files) ───────
+
+
+def _capture_ml_config(monkeypatch, sarif_path: Path) -> dict:
+    """Stub the Docker MegaLinter run, capturing the config it was handed."""
+    from chargate import megalinter as ml
+
+    captured: dict = {}
+
+    def fake_run(config, *, runner=None):
+        captured["config"] = config
+        return ml.MegaLinterRun(returncode=0, command=("docker",), sarif_path=sarif_path)
+
+    monkeypatch.setattr(ml, "run", fake_run)
+    monkeypatch.setattr(ml, "locate_sarif", lambda config: sarif_path)
+    return captured
+
+
+def test_ci_incremental_disables_whole_repo_scan_on_pr(pr_repo, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--incremental", "--default-branch", "main", "--quiet"])  # fmt: skip
+    assert captured["config"].validate_all_codebase is False
+    assert captured["config"].extra_env.get("DEFAULT_BRANCH") == "main"
+
+
+def test_ci_defaults_to_whole_repo_scan_on_pr(pr_repo, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--quiet"])  # fmt: skip
+    assert captured["config"].validate_all_codebase is True
+
+
+def test_ci_incremental_ignored_in_baseline_mode(pr_repo, monkeypatch):
+    # Baseline (push) must always scan the whole repo even if --incremental is set.
+    repo, _base, _head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    main(["ci", "--mode", "baseline", "--repo", str(repo), "--incremental", "--quiet"])
+    assert captured["config"].validate_all_codebase is True
+
+
 def test_local_no_staged_files_passes(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

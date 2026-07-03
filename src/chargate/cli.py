@@ -178,12 +178,21 @@ def cmd_ci(args: argparse.Namespace) -> int:
     if args.sarif:
         sarif_path = Path(args.sarif)
     else:
+        # Incremental (changed-files-only) scanning applies to PR/gate mode only;
+        # the baseline scan is always whole-repo so its SARIF stays authoritative.
+        incremental = args.incremental and mode.gates
+        extra_env: dict[str, str] = {}
+        if incremental and args.default_branch:
+            # MegaLinter needs the base branch to compute the changed-file set.
+            extra_env["DEFAULT_BRANCH"] = args.default_branch
         ml_config = ml.MegaLinterConfig(
             flavor=args.flavor,
             image_tag=args.megalinter_tag,
             workspace=args.repo,
             enable_linters=tuple(args.enable_linter or ()),
             disable_linters=tuple(args.disable_linter or ()),
+            validate_all_codebase=not incremental,
+            extra_env=extra_env,
         )
         try:
             ml_run = ml.run(ml_config)
@@ -550,6 +559,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ci.add_argument(
         "--disable-linter", action="append", metavar="KEY", help="Disable a linter (repeatable)."
+    )
+    ci.add_argument(
+        "--incremental",
+        action="store_true",
+        help=(
+            "PR/gate mode only: run MegaLinter over just the files changed vs the base "
+            "(VALIDATE_ALL_CODEBASE=false) instead of the whole repo — faster on large "
+            "repos. The net-new gate still uses chargate's own diff; the baseline (push) "
+            "scan is always whole-repo."
+        ),
+    )
+    ci.add_argument(
+        "--default-branch",
+        default="",
+        help="Base branch for incremental change detection (sets MegaLinter DEFAULT_BRANCH).",
     )
     ci.add_argument(
         "--precision",

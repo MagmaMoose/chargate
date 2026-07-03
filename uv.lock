@@ -136,7 +136,7 @@ wheels = [
 
 [[package]]
 name = "chargate"
-version = "2.3.0"
+version = "2.5.2"
 source = { editable = "." }
 
 [package.dev-dependencies]
