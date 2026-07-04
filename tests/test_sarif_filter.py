@@ -272,11 +272,19 @@ def test_filter_sarif_prunes_suppressed_results(make_sarif, make_result):
     kept = out.filtered_sarif["runs"][0]["results"]
     assert [r["ruleId"] for r in kept] == ["blocks"]
     assert out.counts.net_new == 1
+    # The suppressed result is tallied on its own, not folded into pre-existing.
+    assert out.counts.suppressed == 1
+    assert out.counts.pre_existing == 0
+    assert out.counts.total == 2
 
 
 def test_is_suppressed_predicate():
     assert is_suppressed({"suppressions": [{"kind": "inSource"}]}) is True
     assert is_suppressed({"suppressions": [{"status": "accepted"}]}) is True
     assert is_suppressed({"suppressions": [{"status": "rejected"}]}) is False
+    # `underReview` is not a dismissal (GitHub keeps the alert open), so it gates.
+    assert is_suppressed({"suppressions": [{"status": "underReview"}]}) is False
+    # Any accepted suppression in the array is enough, even alongside a rejected one.
+    assert is_suppressed({"suppressions": [{"status": "rejected"}, {"kind": "inSource"}]}) is True
     assert is_suppressed({"suppressions": []}) is False
     assert is_suppressed({}) is False

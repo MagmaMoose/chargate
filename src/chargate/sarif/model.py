@@ -32,14 +32,17 @@ def is_suppressed(result: dict) -> bool:
     ``# nosemgrep`` all surface as ``suppressions: [{"kind": "inSource", ...}]``.
     Such a finding is an explicit, in-code decision and must never gate.
 
-    A suppression whose ``status`` is explicitly ``"rejected"`` does not suppress
-    (SARIF/GitHub semantics); an absent ``status`` means accepted, which is what
-    the common linters emit.
+    Per SARIF §3.35.3 a suppression's ``status`` is ``accepted`` (the default when
+    absent — what checkov/bandit/semgrep emit), ``underReview``, or ``rejected``.
+    Only ``accepted`` (or an absent status) suppresses; ``underReview`` and
+    ``rejected`` do not, matching GitHub, which keeps those alerts open.
     """
     suppressions = result.get("suppressions")
     if not isinstance(suppressions, list) or not suppressions:
         return False
-    return any(not (isinstance(s, dict) and s.get("status") == "rejected") for s in suppressions)
+    return any(
+        isinstance(s, dict) and s.get("status", "accepted") == "accepted" for s in suppressions
+    )
 
 
 def _primary_location(result: dict) -> dict | None:

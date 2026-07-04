@@ -222,6 +222,7 @@ def filter_sarif(
     """
     verdicts = classify_results(sarif, diff_index, policy)
     keep = {(v.run_index, v.result_index) for v in verdicts if v.net_new}
+    suppressed = {(v.run_index, v.result_index) for v in verdicts if v.reason == "suppressed"}
 
     filtered = copy.deepcopy(sarif)
     for run_index, run in enumerate(filtered.get("runs") or []):
@@ -235,5 +236,5 @@ def filter_sarif(
     return FilterResult(
         filtered_sarif=filtered,
         verdicts=verdicts,
-        counts=count_results(sarif, keep),
+        counts=count_results(sarif, keep, suppressed),
     )

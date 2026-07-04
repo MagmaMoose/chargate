@@ -110,6 +110,23 @@ def test_render_pr_summary_title_columns_and_footer(make_sarif, make_result):
     assert "— Chargate" not in md  # old footer suffix dropped
 
 
+def test_render_pr_summary_surfaces_suppressed(make_sarif, make_result):
+    # A finding suppressed in-source on an added line: the gate passes, but the
+    # accepted risk must be visible in its own column, not folded into pre-existing.
+    diff = DiffIndex((FileDiff(path="a.py", status="added", added_ranges=((1, 100),)),))
+    res = make_result("a.py", 4, rule_id="CKV_AWS_117", level="warning")
+    res["suppressions"] = [{"kind": "inSource", "justification": "accepted"}]
+    result = filter_sarif(make_sarif([res]), diff)
+    decision = decide_gate(result, "any")
+    md = render_pr_summary(result.counts, decision, Mode.PR, list(result.net_new))
+
+    assert not decision.failed
+    assert result.counts.suppressed == 1
+    assert result.counts.pre_existing == 0
+    assert "| Net-new | Pre-existing | Suppressed | Total in full SARIF |" in md
+    assert "in-source suppressions (accepted" in md  # footer explains the column
+
+
 def test_render_pr_summary_includes_sink_links(make_sarif, make_result):
     result, decision = _pr_inputs(make_sarif, make_result)
     md = render_pr_summary(
