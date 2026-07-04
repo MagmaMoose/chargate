@@ -11,6 +11,7 @@ from chargate.sarif.filter import (
     filter_sarif,
     normalize_sarif_uri,
 )
+from chargate.sarif.model import is_suppressed
 
 
 def _index(*files: FileDiff) -> DiffIndex:
@@ -216,3 +217,74 @@ def test_filter_sarif_preserves_tool_driver(make_sarif, make_result):
     driver = out.filtered_sarif["runs"][0]["tool"]["driver"]
     assert driver["name"] == "TestTool"
     assert driver["rules"][0]["id"] == "R1"
+
+
+# ── Suppressions (in-source accepted risks must never gate) ──────────────────
+
+
+def _suppressed(result: dict, *, status: str | None = None) -> dict:
+    """Attach a SARIF in-source suppression, as checkov/bandit/semgrep emit."""
+    suppression: dict = {"kind": "inSource", "justification": "accepted risk"}
+    if status is not None:
+        suppression["status"] = status
+    result["suppressions"] = [suppression]
+    return result
+
+
+def test_suppressed_result_on_added_line_is_not_net_new(make_sarif, make_result):
+    # The exact shape checkov emits for `# checkov:skip=CKV_AWS_117:...` on a
+    # brand-new file — it must be treated as an accepted risk, not a blocker.
+    diff = _index(FileDiff(path="src/new.py", status="added", added_ranges=((1, 5),)))
+    sarif = make_sarif([_suppressed(make_result("src/new.py", 2, rule_id="CKV_AWS_117"))])
+    [v] = classify_results(sarif, diff)
+    assert not v.net_new
+    assert v.reason == "suppressed"
+
+
+def test_rejected_suppression_still_gates(make_sarif, make_result):
+    # A suppression a reviewer explicitly rejected does not accept the risk.
+    diff = _index(FileDiff(path="src/new.py", status="added", added_ranges=((1, 5),)))
+    sarif = make_sarif([_suppressed(make_result("src/new.py", 2, rule_id="R1"), status="rejected")])
+    [v] = classify_results(sarif, diff)
+    assert v.net_new
+    assert v.reason == "new-file"
+
+
+def test_empty_suppressions_array_still_gates(make_sarif, make_result):
+    # SARIF: a result is suppressed iff `suppressions` is present *and non-empty*.
+    diff = _index(FileDiff(path="src/a.py", status="modified", added_ranges=((21, 22),)))
+    result = make_result("src/a.py", 21, rule_id="R1")
+    result["suppressions"] = []
+    [v] = classify_results(make_sarif([result]), diff)
+    assert v.net_new
+    assert v.reason == "added-line"
+
+
+def test_filter_sarif_prunes_suppressed_results(make_sarif, make_result):
+    diff = _index(FileDiff(path="src/new.py", status="added", added_ranges=((1, 5),)))
+    sarif = make_sarif(
+        [
+            make_result("src/new.py", 2, rule_id="blocks"),
+            _suppressed(make_result("src/new.py", 3, rule_id="accepted")),
+        ]
+    )
+    out = filter_sarif(sarif, diff)
+    kept = out.filtered_sarif["runs"][0]["results"]
+    assert [r["ruleId"] for r in kept] == ["blocks"]
+    assert out.counts.net_new == 1
+    # The suppressed result is tallied on its own, not folded into pre-existing.
+    assert out.counts.suppressed == 1
+    assert out.counts.pre_existing == 0
+    assert out.counts.total == 2
+
+
+def test_is_suppressed_predicate():
+    assert is_suppressed({"suppressions": [{"kind": "inSource"}]}) is True
+    assert is_suppressed({"suppressions": [{"status": "accepted"}]}) is True
+    assert is_suppressed({"suppressions": [{"status": "rejected"}]}) is False
+    # `underReview` is not a dismissal (GitHub keeps the alert open), so it gates.
+    assert is_suppressed({"suppressions": [{"status": "underReview"}]}) is False
+    # Any accepted suppression in the array is enough, even alongside a rejected one.
+    assert is_suppressed({"suppressions": [{"status": "rejected"}, {"kind": "inSource"}]}) is True
+    assert is_suppressed({"suppressions": []}) is False
+    assert is_suppressed({}) is False

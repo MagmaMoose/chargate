@@ -37,6 +37,8 @@ def render_summary(
     lines.append("|--------|-------|")
     lines.append(f"| Net-new findings | {counts.net_new} |")
     lines.append(f"| Pre-existing (never blocking) | {counts.pre_existing} |")
+    if counts.suppressed:
+        lines.append(f"| Suppressed (accepted in-source) | {counts.suppressed} |")
     lines.append(f"| Total in full SARIF | {counts.total} |")
     if counts.per_band_net_new:
         bands = ", ".join(f"{k}={v}" for k, v in sorted(counts.per_band_net_new.items()))
@@ -113,15 +115,27 @@ def render_pr_summary(
     """
     blocking_ids = {(v.run_index, v.result_index) for v in decision.blocking}
     gate = "❌ `fail`" if decision.failed else "✅ `pass`"
+    # Only widen the headline table with a Suppressed column when there's something
+    # to show, so the common (no-suppression) summary stays unchanged.
+    if counts.suppressed:
+        table = [
+            "| Net-new | Pre-existing | Suppressed | Total in full SARIF |",
+            "|--------|--------------|------------|---------------------|",
+            f"| {counts.net_new} | {counts.pre_existing} | {counts.suppressed} | {counts.total} |",
+        ]
+    else:
+        table = [
+            "| Net-new | Pre-existing | Total in full SARIF |",
+            "|--------|--------------|---------------------|",
+            f"| {counts.net_new} | {counts.pre_existing} | {counts.total} |",
+        ]
     lines: list[str] = [
         SUMMARY_MARKER,
         "## Chargate: Security & Linting",
         "",
         f"**Mode:** `{mode.value}` · **Gate:** {gate}",
         "",
-        "| Net-new | Pre-existing | Total in full SARIF |",
-        "|--------|--------------|---------------------|",
-        f"| {counts.net_new} | {counts.pre_existing} | {counts.total} |",
+        *table,
         "",
     ]
 
@@ -153,7 +167,8 @@ def render_pr_summary(
         lines.append("")
 
     lines.append(
-        "<sub>Pre-existing findings never block. The full, unfiltered SARIF ships to "
+        "<sub>Pre-existing findings never block; in-source suppressions (accepted "
+        "risks) are reported but never gate. The full, unfiltered SARIF ships to "
         "the Security tab or as an artifact.</sub>"
     )
     return "\n".join(lines)

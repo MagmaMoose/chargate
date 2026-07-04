@@ -5,6 +5,10 @@ diff *and*, at line precision, its ``startLine`` falls inside an added/modified
 hunk. All edge-case policies (no-location, renamed/copied, deleted, no-region
 fallback, precision) are expressed on :class:`FilterPolicy` and applied here.
 
+An in-source **suppression** (a non-empty SARIF ``suppressions`` array — checkov's
+``# checkov:skip``, Bandit's ``# nosec``, Semgrep's ``# nosemgrep``) always wins:
+a suppressed result is an author-accepted risk and is never net-new.
+
 The full input SARIF is never mutated; :func:`filter_sarif` returns a pruned deep
 copy containing only the net-new results, alongside per-result verdicts (with a
 human-readable reason for gate citations) and :class:`Counts`.
@@ -21,6 +25,7 @@ from urllib.parse import unquote
 from chargate.sarif.counts import Counts, count_results
 from chargate.sarif.diff import DiffIndex, FileDiff, normalize_path
 from chargate.sarif.model import (
+    is_suppressed,
     iter_results,
     primary_message,
     primary_start_line,
@@ -183,6 +188,11 @@ def classify_results(
         level = resolve_level(result, run)
         band = severity_band(security_severity(result, run))
         net_new, reason = _classify_one(uri, start_line, changed, policy)
+        # An author-acknowledged in-source suppression (checkov:skip, nosec,
+        # nosemgrep, ...) is an accepted risk and must never gate, regardless of
+        # whether it lands on a changed line.
+        if is_suppressed(result):
+            net_new, reason = False, "suppressed"
         verdicts.append(
             ResultVerdict(
                 run_index=run_index,
@@ -212,6 +222,7 @@ def filter_sarif(
     """
     verdicts = classify_results(sarif, diff_index, policy)
     keep = {(v.run_index, v.result_index) for v in verdicts if v.net_new}
+    suppressed = {(v.run_index, v.result_index) for v in verdicts if v.reason == "suppressed"}
 
     filtered = copy.deepcopy(sarif)
     for run_index, run in enumerate(filtered.get("runs") or []):
@@ -225,5 +236,5 @@ def filter_sarif(
     return FilterResult(
         filtered_sarif=filtered,
         verdicts=verdicts,
-        counts=count_results(sarif, keep),
+        counts=count_results(sarif, keep, suppressed),
     )

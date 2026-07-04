@@ -68,6 +68,7 @@ def counts_to_dict(result: FilterResult) -> dict[str, Any]:
         "net_new_count": c.net_new,
         "total_count": c.total,
         "pre_existing_count": c.pre_existing,
+        "suppressed_count": c.suppressed,
         "per_level_total": c.per_level_total,
         "per_level_net_new": c.per_level_net_new,
         "per_severity_total": c.per_band_total,
@@ -81,6 +82,8 @@ def _print_summary(result: FilterResult, decision: Any) -> None:
         f"chargate: net-new {c.net_new} / {c.total} total "
         f"({c.pre_existing} pre-existing, never blocking)"
     )
+    if c.suppressed:
+        _eprint(f"chargate: {c.suppressed} suppressed (accepted in-source, never blocking)")
     if c.per_band_net_new:
         bands = ", ".join(f"{k}={v}" for k, v in sorted(c.per_band_net_new.items()))
         _eprint(f"chargate: net-new by severity: {bands}")
