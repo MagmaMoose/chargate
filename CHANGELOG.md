@@ -2,6 +2,24 @@
 
 <!-- version list -->
 
+## v2.7.0 (2026-07-04)
+
+### Bug Fixes
+
+- **sarif**: Never gate on in-source suppressed findings
+  ([`c8021be`](https://github.com/MagmaMoose/chargate/commit/c8021be5f942b51ebba1f198e02ad76bd64dcbcf))
+
+### Chores
+
+- Update chargate image
+  ([`63949d0`](https://github.com/MagmaMoose/chargate/commit/63949d02dfed8811b366fcbc6d24372deb37041e))
+
+### Features
+
+- **sarif**: Surface suppressed findings as a distinct count; tighten status semantics
+  ([`250649b`](https://github.com/MagmaMoose/chargate/commit/250649bd212eba7ec1483bc7210236f923c2f7ad))
+
+
 ## v2.6.0 (2026-07-03)
 
 ### Chores
