@@ -22,6 +22,7 @@ jobs:
       - uses: magmamoose/chargate@v2
         with:
           fail_on: high          # block only on net-new high/critical (default: any)
+          # ignore_sops_encrypted: 'false'  # gate on SOPS-encrypted values too (dropped by default)
           # pr_comment: 'false'  # turn off the GHAS-style PR comments (on by default)
           # defectdojo_url: https://dd.example.com
           # defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}

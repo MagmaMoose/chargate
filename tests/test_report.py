@@ -16,6 +16,7 @@ from chargate.report import (
 )
 from chargate.sarif.diff import DiffIndex, FileDiff
 from chargate.sarif.filter import filter_sarif
+from chargate.sarif.sops import SopsIndex
 
 
 def _result_and_decision(make_sarif, make_result, fail_on="any"):
@@ -125,6 +126,31 @@ def test_render_pr_summary_surfaces_suppressed(make_sarif, make_result):
     assert result.counts.pre_existing == 0
     assert "| Net-new | Pre-existing | Suppressed | Total in full SARIF |" in md
     assert "in-source suppressions (accepted" in md  # footer explains the column
+
+
+def _sops_result(make_sarif, make_result, fail_on="any"):
+    diff = DiffIndex((FileDiff(path="secret.yaml", status="added", added_ranges=((1, 100),)),))
+    sarif = make_sarif(
+        [make_result("secret.yaml", 7, rule_id="generic-api-key", level="error")],
+        tool_name="gitleaks",
+    )
+    result = filter_sarif(sarif, diff, sops_index=SopsIndex({"secret.yaml": frozenset({7})}))
+    return result, decide_gate(result, fail_on)
+
+
+def test_render_summary_surfaces_sops_ignored(make_sarif, make_result):
+    result, decision = _sops_result(make_sarif, make_result)
+    assert result.counts.sops_ignored == 1
+    assert result.counts.net_new == 0  # the false positive no longer blocks
+    md = render_summary(result.counts, decision, Mode.PR)
+    assert "SOPS-encrypted (false positive) | 1" in md
+
+
+def test_render_pr_summary_surfaces_sops_encrypted(make_sarif, make_result):
+    result, decision = _sops_result(make_sarif, make_result)
+    md = render_pr_summary(result.counts, decision, Mode.PR, list(result.net_new))
+    assert "| Net-new | Pre-existing | SOPS-encrypted | Total in full SARIF |" in md
+    assert "SOPS-encrypted secret false positives" in md  # footer explains the column
 
 
 def test_render_pr_summary_includes_sink_links(make_sarif, make_result):

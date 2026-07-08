@@ -26,6 +26,7 @@ chargate filter-sarif --sarif report.sarif --base "$BASE" --head "$HEAD" \
 | `--precision` | `line` | Net-new precision: `line` or `file`. |
 | `--no-location-policy` | `ignore` | Treatment of results with no file location: `ignore` (never block) or `block`. |
 | `--no-region-fallback` | off | Disable file-level fallback for changed-file results lacking a `startLine`. |
+| `--no-sops-ignore` | off | Gate on secret-scanner hits even on SOPS-encrypted values (`ENC[AES256_GCM,...]`). By default these are dropped as false positives — see [Net-new gating](net-new.md#sops-encrypted-secrets). |
 | `--strip-prefix` | — | Path prefix to strip from SARIF URIs before matching (repeatable). |
 | `--no-merge-base` | off | Diff `base..head` directly instead of `merge-base(base, head)..head`. |
 | `--out` / `--full-out` / `--counts-json` | — | Write the net-new SARIF / a copy of the full SARIF / counts JSON. |

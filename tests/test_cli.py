@@ -485,3 +485,124 @@ def test_local_no_staged_files_passes(tmp_path: Path):
     _run(["config", "user.email", "t@e.com"], repo)
     _run(["config", "user.name", "T"], repo)
     assert main(["local", "--repo", str(repo), "--quiet"]) == EXIT_OK
+
+
+# ── SOPS-encrypted secret false positives (end-to-end, reads the working tree) ─
+
+_ENC_VALUE = "ENC[AES256_GCM,data:VoEcCA==,iv:Zf9wZ0k=,tag:J803kKv==,type:str]"
+
+
+@pytest.fixture
+def sops_repo(tmp_path: Path, make_sarif, make_result):
+    """A repo whose head adds one SOPS-encrypted secret and one plaintext secret.
+
+    A gitleaks-flavored SARIF flags both added lines (2 and 3); only the plaintext
+    one should survive as net-new. Returns (repo, base, head, sarif_path).
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run(["init", "-q", "-b", "main"], repo)
+    _run(["config", "user.email", "t@e.com"], repo)
+    _run(["config", "user.name", "T"], repo)
+    _run(["config", "commit.gpgsign", "false"], repo)
+
+    (repo / "secret.yaml").write_text("stringData:\n", encoding="utf-8")
+    _run(["add", "-A"], repo)
+    _run(["commit", "-q", "-m", "base"], repo)
+    base = _rev(repo)
+
+    (repo / "secret.yaml").write_text(
+        f"stringData:\n    DB_PASS: {_ENC_VALUE}\n    PLAINTEXT: super-secret-value-123\n",
+        encoding="utf-8",
+    )
+    _run(["add", "-A"], repo)
+    _run(["commit", "-q", "-m", "pr"], repo)
+    head = _rev(repo)
+
+    sarif = make_sarif(
+        [
+            make_result("secret.yaml", 2, rule_id="generic-api-key", level="error"),  # encrypted
+            make_result("secret.yaml", 3, rule_id="generic-api-key", level="error"),  # plaintext
+        ],
+        tool_name="gitleaks",
+    )
+    sarif_path = tmp_path / "report.sarif"
+    sarif_path.write_text(json.dumps(sarif), encoding="utf-8")
+    return repo, base, head, sarif_path
+
+
+def test_filter_sarif_ignores_sops_encrypted_secret(sops_repo, tmp_path: Path, capsys):
+    repo, base, head, sarif_path = sops_repo
+    counts = tmp_path / "counts.json"
+    code = main(
+        [
+            "filter-sarif",
+            "--sarif",
+            str(sarif_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--repo",
+            str(repo),
+            "--counts-json",
+            str(counts),
+        ]
+    )
+    # The plaintext secret still gates; the encrypted one is dropped as a false positive.
+    assert code == EXIT_BLOCKED
+    data = json.loads(counts.read_text(encoding="utf-8"))
+    assert data["net_new_count"] == 1
+    assert data["sops_ignored_count"] == 1
+    assert "SOPS-encrypted secret finding(s) ignored" in capsys.readouterr().err
+
+
+def test_filter_sarif_no_sops_ignore_flag_gates_on_encrypted(sops_repo, tmp_path: Path):
+    repo, base, head, sarif_path = sops_repo
+    counts = tmp_path / "counts.json"
+    code = main(
+        [
+            "filter-sarif",
+            "--sarif",
+            str(sarif_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--repo",
+            str(repo),
+            "--no-sops-ignore",
+            "--counts-json",
+            str(counts),
+            "--quiet",
+        ]
+    )
+    # With the escape hatch, both findings gate and nothing is dropped as SOPS.
+    assert code == EXIT_BLOCKED
+    data = json.loads(counts.read_text(encoding="utf-8"))
+    assert data["net_new_count"] == 2
+    assert data["sops_ignored_count"] == 0
+
+
+def test_build_sops_index_reads_only_secret_finding_files(tmp_path: Path, make_sarif, make_result):
+    from chargate.cli import _build_sops_index
+    from chargate.sarif.filter import FilterPolicy
+
+    (tmp_path / "secret.yaml").write_text(
+        f"a:\n    K: {_ENC_VALUE}\n    P: plaintext\n", encoding="utf-8"
+    )
+    secret_sarif = make_sarif(
+        [make_result("secret.yaml", 2, rule_id="generic-api-key")], tool_name="gitleaks"
+    )
+    index = _build_sops_index(str(tmp_path), secret_sarif, FilterPolicy())
+    assert index.is_encrypted("secret.yaml", 2)  # the ENC line
+    assert not index.is_encrypted("secret.yaml", 3)  # the plaintext line
+
+    # A non-secret finding's file is never scanned; and the feature can be turned off.
+    lint_sarif = make_sarif(
+        [make_result("secret.yaml", 2, rule_id="line-length")], tool_name="yamllint"
+    )
+    assert not _build_sops_index(str(tmp_path), lint_sarif, FilterPolicy())
+    assert not _build_sops_index(
+        str(tmp_path), secret_sarif, FilterPolicy(ignore_sops_encrypted=False)
+    )
