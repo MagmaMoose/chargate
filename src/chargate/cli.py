@@ -41,7 +41,10 @@ from chargate.sarif.filter import (
     NoLocationPolicy,
     Precision,
     filter_sarif,
+    normalize_sarif_uri,
 )
+from chargate.sarif.model import is_secret_result, iter_results, primary_uri
+from chargate.sarif.sops import EMPTY_SOPS_INDEX, SopsIndex, scan_encrypted_lines
 
 
 def _eprint(message: str) -> None:
@@ -62,6 +65,40 @@ def _fail(message: str) -> int:
     return EXIT_ERROR
 
 
+def _build_sops_index(repo: str, sarif: dict[str, Any], policy: FilterPolicy) -> SopsIndex:
+    """Index the SOPS-encrypted lines of files that carry a secret finding.
+
+    The IO boundary for the pure SOPS filter — mirrors how :mod:`chargate.git`
+    reads git and feeds a pure ``DiffIndex`` to the filter. Only files with a
+    secret-scanner finding are read, so a PR with no secret findings does zero file
+    reads. A file that can't be read (missing/binary) is skipped, leaving its
+    findings eligible to gate.
+    """
+    if not policy.ignore_sops_encrypted:
+        return EMPTY_SOPS_INDEX
+    repo_root = Path(repo)
+    encrypted: dict[str, frozenset[int]] = {}
+    read: set[str] = set()
+    for _run_index, _result_index, result, run in iter_results(sarif):
+        if not is_secret_result(result, run):
+            continue
+        uri = primary_uri(result)
+        if uri is None:
+            continue
+        norm = normalize_sarif_uri(uri, policy.strip_prefixes)
+        if norm in read:
+            continue
+        read.add(norm)
+        try:
+            text = (repo_root / norm).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        lines = scan_encrypted_lines(text)
+        if lines:
+            encrypted[norm] = lines
+    return SopsIndex(encrypted)
+
+
 def counts_to_dict(result: FilterResult) -> dict[str, Any]:
     c = result.counts
     return {
@@ -69,6 +106,7 @@ def counts_to_dict(result: FilterResult) -> dict[str, Any]:
         "total_count": c.total,
         "pre_existing_count": c.pre_existing,
         "suppressed_count": c.suppressed,
+        "sops_ignored_count": c.sops_ignored,
         "per_level_total": c.per_level_total,
         "per_level_net_new": c.per_level_net_new,
         "per_severity_total": c.per_band_total,
@@ -84,6 +122,11 @@ def _print_summary(result: FilterResult, decision: Any) -> None:
     )
     if c.suppressed:
         _eprint(f"chargate: {c.suppressed} suppressed (accepted in-source, never blocking)")
+    if c.sops_ignored:
+        _eprint(
+            f"chargate: {c.sops_ignored} SOPS-encrypted secret finding(s) ignored "
+            "(false positives, never blocking)"
+        )
     if c.per_band_net_new:
         bands = ", ".join(f"{k}={v}" for k, v in sorted(c.per_band_net_new.items()))
         _eprint(f"chargate: net-new by severity: {bands}")
@@ -130,8 +173,10 @@ def cmd_filter_sarif(args: argparse.Namespace) -> int:
         no_location_policy=NoLocationPolicy(args.no_location_policy),
         file_level_fallback_when_no_region=not args.no_region_fallback,
         strip_prefixes=tuple(args.strip_prefix or ()),
+        ignore_sops_encrypted=not args.no_sops_ignore,
     )
-    result = filter_sarif(sarif, diff_index, policy)
+    sops_index = _build_sops_index(args.repo, sarif, policy)
+    result = filter_sarif(sarif, diff_index, policy, sops_index)
 
     try:
         decision = decide_gate(result, args.fail_on)
@@ -170,6 +215,7 @@ def _policy_from_args(
         no_location_policy=NoLocationPolicy(args.no_location_policy),
         file_level_fallback_when_no_region=not args.no_region_fallback,
         strip_prefixes=prefixes,
+        ignore_sops_encrypted=not args.no_sops_ignore,
     )
 
 
@@ -225,7 +271,8 @@ def cmd_ci(args: argparse.Namespace) -> int:
             return _fail(str(exc))
         repo_abs = str(Path(args.repo).resolve())
         policy = _policy_from_args(args, extra_prefixes=(ml.CONTAINER_WORKSPACE, repo_abs))
-        result = filter_sarif(sarif, diff_index, policy)
+        sops_index = _build_sops_index(args.repo, sarif, policy)
+        result = filter_sarif(sarif, diff_index, policy, sops_index)
         try:
             decision = decide_gate(result, args.fail_on)
         except ValueError as exc:
@@ -512,6 +559,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable file-level fallback for changed-file results lacking a startLine.",
     )
     fs.add_argument(
+        "--no-sops-ignore",
+        action="store_true",
+        help="Gate on secret-scanner hits even on SOPS-encrypted values (ENC[AES256_GCM,...]).",
+    )
+    fs.add_argument(
         "--strip-prefix",
         action="append",
         metavar="PREFIX",
@@ -594,6 +646,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-region-fallback",
         action="store_true",
         help="Disable file-level fallback for no-region results.",
+    )
+    ci.add_argument(
+        "--no-sops-ignore",
+        action="store_true",
+        help="Gate on secret-scanner hits even on SOPS-encrypted values (ENC[AES256_GCM,...]).",
     )
     ci.add_argument(
         "--strip-prefix",

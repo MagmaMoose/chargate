@@ -11,13 +11,19 @@
       "path": "src/chargate/cli.py",
       "purpose": "argparse dispatch for the 4 subcommands (filter-sarif | ci | local | version); wires git -> filter -> gate -> report -> DefectDojo. The only module that touches os.environ + file writes for the CLI flow.",
       "exports": ["main", "build_parser", "cmd_filter_sarif", "cmd_ci", "cmd_local", "cmd_version", "counts_to_dict"],
-      "depends_on": ["git", "megalinter", "defectdojo", "github_comment", "report", "modes", "gate", "sarif.diff", "sarif.filter", "__init__"]
+      "depends_on": ["git", "megalinter", "defectdojo", "github_comment", "report", "modes", "gate", "sarif.diff", "sarif.filter", "sarif.model", "sarif.sops", "__init__"]
     },
     "sarif.filter": {
       "path": "src/chargate/sarif/filter.py",
-      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O. ResultVerdict carries the finding `message` + an `inline_safe` flag (added-line/new-file only) for picking valid inline PR-comment targets.",
+      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O. ResultVerdict carries the finding `message` + an `inline_safe` flag (added-line/new-file only) for picking valid inline PR-comment targets. A secret-scanner hit on a SOPS-encrypted value (via an optional SopsIndex + FilterPolicy.ignore_sops_encrypted, default on) is dropped as a false positive (reason `sops-encrypted`).",
       "exports": ["filter_sarif", "classify_results", "FilterPolicy", "FilterResult", "ResultVerdict", "Precision", "NoLocationPolicy", "normalize_sarif_uri"],
-      "depends_on": ["sarif.counts", "sarif.diff", "sarif.model"]
+      "depends_on": ["sarif.counts", "sarif.diff", "sarif.model", "sarif.sops"]
+    },
+    "sarif.sops": {
+      "path": "src/chargate/sarif/sops.py",
+      "purpose": "Detect SOPS-encrypted values (`ENC[AES256_GCM,...]`) so secret scanners don't gate on them — a 100% false positive. Pure (stdlib `re` only): turns file text into the set of encrypted line numbers, wrapped in a SopsIndex the filter consults. A plaintext value in the same file matches nothing and still gates. File reading is an IO concern handled by cli.py (mirrors how git.py feeds a DiffIndex).",
+      "exports": ["SopsIndex", "EMPTY_SOPS_INDEX", "is_sops_encrypted_line", "scan_encrypted_lines", "SOPS_VALUE_RE"],
+      "depends_on": []
     },
     "sarif.diff": {
       "path": "src/chargate/sarif/diff.py",
@@ -27,13 +33,13 @@
     },
     "sarif.model": {
       "path": "src/chargate/sarif/model.py",
-      "purpose": "Defensive, typed accessors over SARIF 2.1.0 result objects (primary uri, startLine, resolved level, security-severity, severity band). Tolerates missing/None fields. Pure.",
-      "exports": ["iter_results", "primary_uri", "primary_start_line", "primary_message", "resolve_level", "security_severity", "severity_band", "SARIF_LEVELS"],
+      "purpose": "Defensive, typed accessors over SARIF 2.1.0 result objects (primary uri, startLine, resolved level, security-severity, severity band, tool driver name, in-source suppression, and a best-effort `is_secret_result` classifier for the SOPS filter). Tolerates missing/None fields. Pure.",
+      "exports": ["iter_results", "primary_uri", "primary_start_line", "primary_message", "resolve_level", "security_severity", "severity_band", "SARIF_LEVELS", "is_suppressed", "tool_driver_name", "is_secret_result"],
       "depends_on": []
     },
     "sarif.counts": {
       "path": "src/chargate/sarif/counts.py",
-      "purpose": "Tally totals + net-new + per-level + per-severity-band breakdowns. Takes net-new (run_index, result_index) keys (not verdicts) to avoid an import cycle with filter. Pure.",
+      "purpose": "Tally totals + net-new + suppressed + sops_ignored + per-level + per-severity-band breakdowns. Takes net-new/suppressed/sops (run_index, result_index) keys (not verdicts) to avoid an import cycle with filter; pre_existing = total - net_new - suppressed - sops_ignored. Pure.",
       "exports": ["count_results", "Counts"],
       "depends_on": ["sarif.model"]
     },

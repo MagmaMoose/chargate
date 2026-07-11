@@ -12,6 +12,7 @@ from chargate.sarif.filter import (
     normalize_sarif_uri,
 )
 from chargate.sarif.model import is_suppressed
+from chargate.sarif.sops import SopsIndex
 
 
 def _index(*files: FileDiff) -> DiffIndex:
@@ -288,3 +289,83 @@ def test_is_suppressed_predicate():
     assert is_suppressed({"suppressions": [{"status": "rejected"}, {"kind": "inSource"}]}) is True
     assert is_suppressed({"suppressions": []}) is False
     assert is_suppressed({}) is False
+
+
+# ── SOPS-encrypted secret false positives (never gate) ───────────────────────
+
+
+def _secret(make_sarif, results):
+    """A SARIF run whose driver is a secret scanner (gitleaks)."""
+    return make_sarif(results, tool_name="gitleaks")
+
+
+def _sops(path: str, *lines: int) -> SopsIndex:
+    return SopsIndex({path: frozenset(lines)})
+
+
+def test_secret_on_sops_encrypted_line_is_not_net_new(make_sarif, make_result):
+    diff = _index(FileDiff(path="k8s/secret.yaml", status="modified", added_ranges=((7, 7),)))
+    sarif = _secret(make_sarif, [make_result("k8s/secret.yaml", 7, rule_id="generic-api-key")])
+    [v] = classify_results(sarif, diff, sops_index=_sops("k8s/secret.yaml", 7))
+    assert not v.net_new
+    assert v.reason == "sops-encrypted"
+
+
+def test_secret_on_plaintext_line_in_sops_file_still_gates(make_sarif, make_result):
+    # "unless it's unencrypted": line 8 is a plaintext secret (not in the index).
+    diff = _index(FileDiff(path="k8s/secret.yaml", status="modified", added_ranges=((7, 8),)))
+    sarif = _secret(make_sarif, [make_result("k8s/secret.yaml", 8, rule_id="generic-api-key")])
+    [v] = classify_results(sarif, diff, sops_index=_sops("k8s/secret.yaml", 7))
+    assert v.net_new and v.reason == "added-line"
+
+
+def test_non_secret_finding_on_encrypted_line_still_gates(make_sarif, make_result):
+    # A yamllint line-length on the (unavoidably long) encrypted blob is not a
+    # secret finding, so it is out of scope and still gates.
+    diff = _index(FileDiff(path="k8s/secret.yaml", status="modified", added_ranges=((7, 7),)))
+    sarif = make_sarif(
+        [make_result("k8s/secret.yaml", 7, rule_id="line-length")], tool_name="yamllint"
+    )
+    [v] = classify_results(sarif, diff, sops_index=_sops("k8s/secret.yaml", 7))
+    assert v.net_new and v.reason == "added-line"
+
+
+def test_sops_ignore_disabled_still_gates(make_sarif, make_result):
+    diff = _index(FileDiff(path="k8s/secret.yaml", status="modified", added_ranges=((7, 7),)))
+    sarif = _secret(make_sarif, [make_result("k8s/secret.yaml", 7, rule_id="generic-api-key")])
+    policy = FilterPolicy(ignore_sops_encrypted=False)
+    [v] = classify_results(sarif, diff, policy, sops_index=_sops("k8s/secret.yaml", 7))
+    assert v.net_new and v.reason == "added-line"
+
+
+def test_no_sops_index_means_no_suppression(make_sarif, make_result):
+    diff = _index(FileDiff(path="k8s/secret.yaml", status="modified", added_ranges=((7, 7),)))
+    sarif = _secret(make_sarif, [make_result("k8s/secret.yaml", 7, rule_id="generic-api-key")])
+    [v] = classify_results(sarif, diff)  # feature needs the index built at the IO edge
+    assert v.net_new and v.reason == "added-line"
+
+
+def test_in_source_suppression_wins_over_sops(make_sarif, make_result):
+    # Both signals say "don't gate"; the author suppression is reported as such.
+    diff = _index(FileDiff(path="k8s/secret.yaml", status="added", added_ranges=((1, 9),)))
+    sarif = _secret(make_sarif, [_suppressed(make_result("k8s/secret.yaml", 7, rule_id="R1"))])
+    [v] = classify_results(sarif, diff, sops_index=_sops("k8s/secret.yaml", 7))
+    assert not v.net_new and v.reason == "suppressed"
+
+
+def test_filter_sarif_prunes_sops_ignored_and_tallies(make_sarif, make_result):
+    diff = _index(FileDiff(path="k8s/secret.yaml", status="added", added_ranges=((1, 9),)))
+    sarif = _secret(
+        make_sarif,
+        [
+            make_result("k8s/secret.yaml", 6, rule_id="plaintext-leak"),  # net-new, gates
+            make_result("k8s/secret.yaml", 7, rule_id="encrypted-fp"),  # SOPS false positive
+        ],
+    )
+    out = filter_sarif(sarif, diff, sops_index=_sops("k8s/secret.yaml", 7))
+    kept = out.filtered_sarif["runs"][0]["results"]
+    assert [r["ruleId"] for r in kept] == ["plaintext-leak"]
+    assert out.counts.net_new == 1
+    assert out.counts.sops_ignored == 1
+    assert out.counts.pre_existing == 0
+    assert out.counts.total == 2

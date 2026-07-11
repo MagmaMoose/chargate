@@ -9,6 +9,11 @@ An in-source **suppression** (a non-empty SARIF ``suppressions`` array — check
 ``# checkov:skip``, Bandit's ``# nosec``, Semgrep's ``# nosemgrep``) always wins:
 a suppressed result is an author-accepted risk and is never net-new.
 
+A secret-scanner hit on a **SOPS-encrypted** value (``ENC[AES256_GCM,...]``) is a
+100% false positive and is likewise dropped (reason ``"sops-encrypted"``) when a
+:class:`~chargate.sarif.sops.SopsIndex` is supplied; a plaintext value in the same
+file matches nothing and still gates.
+
 The full input SARIF is never mutated; :func:`filter_sarif` returns a pruned deep
 copy containing only the net-new results, alongside per-result verdicts (with a
 human-readable reason for gate citations) and :class:`Counts`.
@@ -25,6 +30,7 @@ from urllib.parse import unquote
 from chargate.sarif.counts import Counts, count_results
 from chargate.sarif.diff import DiffIndex, FileDiff, normalize_path
 from chargate.sarif.model import (
+    is_secret_result,
     is_suppressed,
     iter_results,
     primary_message,
@@ -34,6 +40,7 @@ from chargate.sarif.model import (
     security_severity,
     severity_band,
 )
+from chargate.sarif.sops import SopsIndex
 
 
 class Precision(StrEnum):
@@ -67,6 +74,10 @@ class FilterPolicy:
     # Path prefixes (e.g. container workspace roots) stripped from SARIF URIs
     # before matching against diff paths. `chargate ci` sets these per runtime.
     strip_prefixes: tuple[str, ...] = ()
+    # Drop secret-scanner findings whose flagged line is a SOPS-encrypted value
+    # (`ENC[AES256_GCM,...]`) — a 100% false positive. Needs a SopsIndex passed to
+    # `filter_sarif`; a plaintext value in the same file still gates.
+    ignore_sops_encrypted: bool = True
 
 
 # `_classify_one` reasons whose result is guaranteed to sit on a RIGHT-side line
@@ -177,6 +188,7 @@ def classify_results(
     sarif: dict[str, Any],
     diff_index: DiffIndex,
     policy: FilterPolicy | None = None,
+    sops_index: SopsIndex | None = None,
 ) -> tuple[ResultVerdict, ...]:
     """Return a verdict for every result in document order."""
     policy = policy or FilterPolicy()
@@ -193,6 +205,18 @@ def classify_results(
         # whether it lands on a changed line.
         if is_suppressed(result):
             net_new, reason = False, "suppressed"
+        # A secret-scanner hit on a SOPS-encrypted value (ENC[AES256_GCM,...]) is a
+        # 100% false positive — the value is already encrypted. A plaintext value
+        # in the same file matches nothing here and still gates.
+        elif (
+            net_new
+            and policy.ignore_sops_encrypted
+            and sops_index is not None
+            and uri is not None
+            and is_secret_result(result, run)
+            and sops_index.is_encrypted(normalize_sarif_uri(uri, policy.strip_prefixes), start_line)
+        ):
+            net_new, reason = False, "sops-encrypted"
         verdicts.append(
             ResultVerdict(
                 run_index=run_index,
@@ -214,15 +238,17 @@ def filter_sarif(
     sarif: dict[str, Any],
     diff_index: DiffIndex,
     policy: FilterPolicy | None = None,
+    sops_index: SopsIndex | None = None,
 ) -> FilterResult:
     """Classify, then return a pruned deep copy with only net-new results.
 
     The input ``sarif`` is left untouched (it is the full report shipped to
     DefectDojo / uploaded as an artifact).
     """
-    verdicts = classify_results(sarif, diff_index, policy)
+    verdicts = classify_results(sarif, diff_index, policy, sops_index)
     keep = {(v.run_index, v.result_index) for v in verdicts if v.net_new}
     suppressed = {(v.run_index, v.result_index) for v in verdicts if v.reason == "suppressed"}
+    sops_ignored = {(v.run_index, v.result_index) for v in verdicts if v.reason == "sops-encrypted"}
 
     filtered = copy.deepcopy(sarif)
     for run_index, run in enumerate(filtered.get("runs") or []):
@@ -236,5 +262,5 @@ def filter_sarif(
     return FilterResult(
         filtered_sarif=filtered,
         verdicts=verdicts,
-        counts=count_results(sarif, keep, suppressed),
+        counts=count_results(sarif, keep, suppressed, sops_ignored),
     )

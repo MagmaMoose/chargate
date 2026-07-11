@@ -45,6 +45,90 @@ def is_suppressed(result: dict) -> bool:
     )
 
 
+def tool_driver_name(run: dict) -> str | None:
+    """The run's ``tool.driver.name`` (e.g. ``"gitleaks"``, ``"KICS"``), or None."""
+    driver = (run.get("tool") or {}).get("driver") or {}
+    name = driver.get("name")
+    return name if isinstance(name, str) and name else None
+
+
+# Dedicated secret/credential scanners: every finding is a secret. Matched as a
+# substring of the lowercased driver name, so versioned names ("gitleaks v8") hit.
+_SECRET_SCANNER_DRIVERS = (
+    "gitleaks",
+    "trufflehog",
+    "secretlint",
+    "ggshield",
+    "detect-secrets",
+    "detect_secrets",
+)
+
+# Phrases in a rule's name/description or the result message that mark a
+# hardcoded-secret finding from a general-purpose scanner. Verified against a real
+# MegaLinter run: KICS is the linter that flags SOPS files, emitting rule name
+# "Passwords And Secrets - Generic Password" and message "Hardcoded secret key
+# appears in source" — no driver hint, no `secret` tag, no snippet, UUID rule id.
+_SECRET_TEXT_MARKERS = ("passwords and secrets", "hardcoded secret", "hard-coded secret")
+_HARDCODED = ("hardcoded", "hard-coded", "hard coded")
+_CREDENTIAL_WORDS = (
+    "secret",
+    "password",
+    "credential",
+    "api key",
+    "api-key",
+    "private key",
+    "token",
+)
+
+
+def _finding_text(result: dict, run: dict) -> str:
+    """Lowercased rule name/description + result message, for keyword classification."""
+    parts: list[str] = []
+    message = result.get("message")
+    if isinstance(message, dict) and isinstance(message.get("text"), str):
+        parts.append(message["text"])
+    rule = _rule_for(result, run)
+    if rule is not None:
+        if isinstance(rule.get("name"), str):
+            parts.append(rule["name"])
+        for key in ("shortDescription", "fullDescription"):
+            desc = rule.get(key)
+            if isinstance(desc, dict) and isinstance(desc.get("text"), str):
+                parts.append(desc["text"])
+    return " ".join(parts).lower()
+
+
+def is_secret_result(result: dict, run: dict) -> bool:
+    """Best-effort: does this result report a hardcoded secret/credential?
+
+    True when the emitting tool is a dedicated secret scanner (gitleaks,
+    trufflehog, secretlint, ...), the rule id is one of checkov's ``CKV_SECRET_*``
+    checks, the result carries a ``secret`` tag, or the rule/message text names a
+    hardcoded secret — KICS' "Passwords And Secrets" queries (the linter that
+    actually flags SOPS files) plus generic "hardcoded password/credential"
+    wording. Used to scope the SOPS-encrypted-value false-positive filter to secret
+    findings, so a non-secret finding that merely lands on an encrypted line (e.g. a
+    yamllint line-length on the long blob) still gates.
+    """
+    driver = (tool_driver_name(run) or "").lower()
+    if any(hint in driver for hint in _SECRET_SCANNER_DRIVERS):
+        return True
+    rule_id = result.get("ruleId")
+    if isinstance(rule_id, str) and rule_id.upper().startswith("CKV_SECRET"):
+        return True
+    props = result.get("properties")
+    if isinstance(props, dict):
+        tags = props.get("tags")
+        if isinstance(tags, list) and any(
+            isinstance(tag, str) and "secret" in tag.lower() for tag in tags
+        ):
+            return True
+    text = _finding_text(result, run)
+    if any(marker in text for marker in _SECRET_TEXT_MARKERS):
+        return True
+    return any(h in text for h in _HARDCODED) and any(w in text for w in _CREDENTIAL_WORDS)
+
+
 def _primary_location(result: dict) -> dict | None:
     """The primary (first) location of a result, per SARIF convention.
 

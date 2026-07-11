@@ -39,6 +39,8 @@ def render_summary(
     lines.append(f"| Pre-existing (never blocking) | {counts.pre_existing} |")
     if counts.suppressed:
         lines.append(f"| Suppressed (accepted in-source) | {counts.suppressed} |")
+    if counts.sops_ignored:
+        lines.append(f"| SOPS-encrypted (false positive) | {counts.sops_ignored} |")
     lines.append(f"| Total in full SARIF | {counts.total} |")
     if counts.per_band_net_new:
         bands = ", ".join(f"{k}={v}" for k, v in sorted(counts.per_band_net_new.items()))
@@ -115,20 +117,23 @@ def render_pr_summary(
     """
     blocking_ids = {(v.run_index, v.result_index) for v in decision.blocking}
     gate = "❌ `fail`" if decision.failed else "✅ `pass`"
-    # Only widen the headline table with a Suppressed column when there's something
-    # to show, so the common (no-suppression) summary stays unchanged.
+    # Only widen the headline table with the Suppressed / SOPS-encrypted columns
+    # when there's something to show, so the common (clean) summary stays compact.
+    headers = ["Net-new", "Pre-existing"]
+    values = [counts.net_new, counts.pre_existing]
     if counts.suppressed:
-        table = [
-            "| Net-new | Pre-existing | Suppressed | Total in full SARIF |",
-            "|--------|--------------|------------|---------------------|",
-            f"| {counts.net_new} | {counts.pre_existing} | {counts.suppressed} | {counts.total} |",
-        ]
-    else:
-        table = [
-            "| Net-new | Pre-existing | Total in full SARIF |",
-            "|--------|--------------|---------------------|",
-            f"| {counts.net_new} | {counts.pre_existing} | {counts.total} |",
-        ]
+        headers.append("Suppressed")
+        values.append(counts.suppressed)
+    if counts.sops_ignored:
+        headers.append("SOPS-encrypted")
+        values.append(counts.sops_ignored)
+    headers.append("Total in full SARIF")
+    values.append(counts.total)
+    table = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+        "| " + " | ".join(str(v) for v in values) + " |",
+    ]
     lines: list[str] = [
         SUMMARY_MARKER,
         "## Chargate: Security & Linting",
@@ -168,8 +173,9 @@ def render_pr_summary(
 
     lines.append(
         "<sub>Pre-existing findings never block; in-source suppressions (accepted "
-        "risks) are reported but never gate. The full, unfiltered SARIF ships to "
-        "the Security tab or as an artifact.</sub>"
+        "risks) and SOPS-encrypted secret false positives are reported but never "
+        "gate. The full, unfiltered SARIF ships to the Security tab or as an "
+        "artifact.</sub>"
     )
     return "\n".join(lines)
 

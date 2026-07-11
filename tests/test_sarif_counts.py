@@ -75,9 +75,40 @@ def test_count_results_breaks_out_suppressed(make_sarif, make_result):
     assert counts.pre_existing == 1
 
 
+def test_count_results_breaks_out_sops_ignored(make_sarif, make_result):
+    results = [
+        make_result("a.py", 1, level="error"),  # net-new
+        make_result("secret.yaml", 2, level="error"),  # SOPS-encrypted false positive
+        make_result("a.py", 3, level="note"),  # truly pre-existing
+    ]
+    sarif = make_sarif(results)
+    counts = count_results(sarif, {(0, 0)}, sops_keys={(0, 1)})
+
+    assert counts.total == 3
+    assert counts.net_new == 1
+    assert counts.sops_ignored == 1
+    # SOPS-ignored is its own bucket: total == net_new + sops_ignored + pre_existing.
+    assert counts.pre_existing == 1
+
+
+def test_count_results_suppressed_and_sops_are_disjoint_buckets(make_sarif, make_result):
+    results = [
+        make_result("a.py", 1, level="error"),  # net-new
+        make_result("a.py", 2, level="warning"),  # suppressed
+        make_result("secret.yaml", 3, level="error"),  # SOPS-ignored
+        make_result("a.py", 4, level="note"),  # pre-existing
+    ]
+    sarif = make_sarif(results)
+    counts = count_results(sarif, {(0, 0)}, suppressed_keys={(0, 1)}, sops_keys={(0, 2)})
+
+    assert (counts.total, counts.net_new, counts.suppressed, counts.sops_ignored) == (4, 1, 1, 1)
+    assert counts.pre_existing == 1
+
+
 def test_count_results_empty():
     counts = count_results({"runs": []}, set())
     assert counts.total == 0
     assert counts.net_new == 0
     assert counts.suppressed == 0
+    assert counts.sops_ignored == 0
     assert counts.per_level_total == {}

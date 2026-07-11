@@ -15,6 +15,15 @@
 - **Net-new edge policies live in `FilterPolicy`** (`sarif/filter.py`). Defaults:
   line precision; no-location (project-level) results do NOT block; changed-file
   results with no `startLine` fall back to file-level (catches SCA on lockfiles).
+- **Secret findings often come from KICS, not gitleaks.** On a real run the merged
+  SARIF was a single `KICS` run with UUID rule ids and NO snippet; the
+  hardcoded-secret signal lived only in the rule name (`Passwords And Secrets - …`)
+  and message (`Hardcoded secret key appears in source`). So `model.is_secret_result`
+  classifies by driver name **+ `CKV_SECRET_*` + `secret` tag + rule/message text** —
+  don't narrow it to a driver allowlist or it silently no-ops. The SOPS false-positive
+  filter (`sarif/sops.py`) reads the **working-tree** file at the finding's line
+  (snippets are unreliable/redacted) and drops only secret findings whose value is
+  `ENC[AES256_GCM,...]`; a plaintext value in the same file still gates.
 - **Net-new needs full history.** merge-base requires `fetch-depth: 0`; a shallow
   clone fails loudly by design — don't paper over it.
 - **Core stays stdlib-only** (no runtime deps; DefectDojo client uses `urllib`).
