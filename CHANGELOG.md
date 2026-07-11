@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.8.0 (2026-07-11)
+
+### Chores
+
+- Update chargate image
+  ([`57d337e`](https://github.com/MagmaMoose/chargate/commit/57d337e372b3b090466168ff586517f79909a2d8))
+
+### Features
+
+- **sarif**: Ignore SOPS-encrypted values in secret-scanner findings
+  ([`92826d6`](https://github.com/MagmaMoose/chargate/commit/92826d68750cc2aaa022281bfe5a684524e4cc15))
+
+
 ## v2.7.0 (2026-07-04)
 
 ### Bug Fixes
