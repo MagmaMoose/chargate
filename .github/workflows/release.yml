@@ -125,6 +125,68 @@ jobs:
             "refs/tags/${major_tag}" \
             --force
 
+  # Supply-chain: sign the released container image (cosign keyless / Sigstore) and
+  # attach SLSA build provenance (GitHub Artifact Attestations). Runs only when a
+  # stable release actually built + pushed an image. The image is multi-arch, so we
+  # sign the index digest resolved from the registry — never the mutable version tag.
+  # This makes the cluster's Kyverno `verify-images` policy enforceable for chargate.
+  # (Kept in-repo/chargate-scoped; could later move into the shared Diatreme action
+  # so every MagmaMoose image is signed by default.)
+  sign-image:
+    needs: diatreme
+    if: needs.diatreme.outputs.released == 'true' && !contains(needs.diatreme.outputs.version, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # push the cosign signature + provenance to GHCR
+      id-token: write      # keyless signing (Fulcio) + attestation OIDC
+      attestations: write  # actions/attest-build-provenance
+    env:
+      IMAGE: ghcr.io/magmamoose/chargate   # matches docker-bake.hcl (lowercase, GHCR)
+      VERSION: ${{ needs.diatreme.outputs.version }}
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve the pushed image digest
+        id: digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Sign by immutable digest, never the mutable version tag. The image is a
+          # multi-arch manifest list; imagetools reports the index (top-level) digest.
+          # Retry: the registry can lag briefly behind Diatreme's push.
+          digest=""
+          for attempt in 1 2 3 4 5 6; do
+            digest="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" 2>/dev/null \
+              | awk '/^Digest:/{print $2; exit}')" || true
+            [ -n "${digest}" ] && break
+            echo "digest not yet available (attempt ${attempt}); retrying in 5s..."
+            sleep 5
+          done
+          if [ -z "${digest}" ]; then
+            echo "::error::could not resolve digest for ${IMAGE}:${VERSION}" >&2
+            exit 1
+          fi
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${IMAGE}:${VERSION} -> ${digest}"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign the image (keyless)
+        shell: bash
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+
   # Event-driven Homebrew bump: when a stable release is cut, open a PR on the tap
   # bumping the chargate formula to the new tag (url + sha256 recomputed). This
   # replaces polling the tap on a cron. Requires HOMEBREW_TAP_TOKEN — a fine-grained
