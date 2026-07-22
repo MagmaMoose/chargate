@@ -1,6 +1,12 @@
 # Chargate
 
-[![License](https://img.shields.io/github/license/magmamoose/chargate)](LICENSE)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Chargate-2ea44f?logo=github)](https://github.com/marketplace/actions/chargate)
+[![CI](https://github.com/MagmaMoose/chargate/actions/workflows/ci.yml/badge.svg)](https://github.com/MagmaMoose/chargate/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/MagmaMoose/chargate?sort=semver&logo=github)](https://github.com/MagmaMoose/chargate/releases)
+[![License: MIT](https://img.shields.io/github/license/MagmaMoose/chargate)](LICENSE)
+[![Python](https://img.shields.io/badge/python-%E2%89%A53.11-blue?logo=python&logoColor=white)](pyproject.toml)
+
+> **Gate pull requests on the findings _this PR_ introduced — not your whole backlog.**
 
 Chargate is a security + lint gate built on [MegaLinter](https://megalinter.io).
 MegaLinter does **all** the scanning; Chargate adds the one thing that matters for
@@ -13,6 +19,20 @@ still sees everything, including inherited debt.
 > **v2 is a ground-up re-platform.** Chargate no longer hand-rolls a 12-tool
 > scanner orchestration — MegaLinter does that. If you used `magmamoose/chargate@v1`,
 > see [Migrating from v1](#migrating-from-v1).
+
+## Contents
+
+- [Why net-new?](#why-net-new)
+- [Two surfaces](#two-surfaces) · [Composite action](#1-composite-action-recommended) · [pre-commit hook](#2-pre-commit-hook)
+- [Permissions](#permissions)
+- [Inputs](#inputs) · [Outputs](#outputs)
+- [Net-new semantics](#net-new-semantics)
+- [PR comments](#pr-comments-ghas-style)
+- [Sinks: DefectDojo & Dependency-Track](#sinks-defectdojo--dependency-track)
+- [Modes](#modes) · [CLI](#cli)
+- [Versioning & pinning](#versioning--pinning) · [Security](#security)
+- [What MegaLinter covers](#what-megalinter-covers-vs-the-old-hand-rolled-set) · [Migrating from v1](#migrating-from-v1)
+- [Documentation & contributing](#documentation--contributing)
 
 ## Why net-new?
 
@@ -149,6 +169,120 @@ git config --global core.hooksPath  "$tpl/hooks"
 git config --global init.templateDir "$tpl"
 ```
 
+## Permissions
+
+Grant the job the least privilege it needs:
+
+```yaml
+permissions:
+  contents: read           # checkout
+  pull-requests: write     # PR comments (drop to `read`, or omit, if pr_comment: false)
+  security-events: write   # upload the full SARIF to the Security tab
+  id-token: write          # OPTIONAL — author PR comments as Chargate[bot] via the token broker
+```
+
+- `contents: read` is the only hard requirement.
+- `pull-requests: write` enables the GHAS-style PR comments (on by default).
+- `security-events: write` enables the Security-tab SARIF upload (needs GHAS on private repos).
+- `id-token: write` is optional — it lets the action mint a `Chargate[bot]` token; without it, comments fall back to `github-actions[bot]`.
+
+## Inputs
+
+All inputs are optional. **DefectDojo / Dependency-Track are each active iff their
+`*_url` is set** — there is no separate on/off toggle.
+
+### Checkout
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `checkout` | `true` | Run `actions/checkout` first. Net-new gating needs full history. Set `false` if you already checked out with `fetch-depth: 0`. |
+| `fetch_depth` | `0` | Checkout fetch-depth. **Must be `0`** for net-new gating (merge-base). |
+
+### Gate behaviour
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `mode` | `auto` | `auto` (from the event) · `pr` (net-new gate) · `baseline` (full scan, no gate). |
+| `fail_on` | `any` | Severity that blocks: `any` · `critical` · `high` · `medium` · `low` · `none`. |
+| `precision` | `line` | Net-new precision: `line` · `file`. |
+| `base_ref` | `''` | Override the base ref/SHA (default: PR base SHA from the event). |
+| `head_ref` | `''` | Override the head ref/SHA (default: PR head SHA, else `github.sha`). |
+| `strict` | `false` | Fail the job if MegaLinter itself errors (a tool error, not a finding). |
+
+### MegaLinter
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `flavor` | `all` | MegaLinter flavor: `all` · `security` · `python` · `go` · … |
+| `megalinter_tag` | `v8` | MegaLinter image tag or digest to pin. |
+| `enable_linters` | `''` | Comma-separated MegaLinter linter keys to enable (others off). |
+| `disable_linters` | `''` | Comma-separated MegaLinter linter keys to disable. |
+| `incremental` | `false` | PR events only: scan just the changed files (`VALIDATE_ALL_CODEBASE=false`). Faster on large repos; the net-new gate still uses Chargate's own diff. |
+| `ignore_sops_encrypted` | `true` | Ignore secret-scanner hits on SOPS-encrypted (`ENC[AES256_GCM,...]`) values — 100% false positives. A plaintext secret in the same file still gates. |
+
+### SARIF output
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `emit_sarif_artifact` | `true` | Upload the full SARIF as a build artifact. |
+| `sarif_artifact_name` | `chargate-sarif` | Artifact name for the full SARIF. |
+| `upload_github_sarif` | `true` | Upload the full SARIF to the GitHub Security tab (non-PR events; needs GHAS on private repos). |
+| `github_token` | `${{ github.token }}` | Token for the Security-tab upload + PR comments. |
+
+### PR comments (GHAS-style, net-new only)
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `pr_comment` | `true` | Post GHAS-style PR comments for net-new findings (PR events only). Needs `pull-requests: write`. |
+| `pr_comment_mode` | `both` | `summary` (one updatable comment) · `inline` (per-line) · `both`. |
+| `pr_comment_max_inline` | `50` | Cap on inline comments per run; the rest are listed in the summary. |
+| `pr_comment_token` | `''` | Override token used **only** to author the comments (BYO GitHub App). Usually unset — see [PR comments](#pr-comments-ghas-style). |
+| `token_broker_url` | `https://chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship. Set empty to disable (fall back to `github-actions[bot]`). |
+| `oidc_audience` | `chargate` | OIDC audience requested for the broker exchange (advanced). |
+
+### DefectDojo (optional sink)
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `defectdojo_url` | `''` | DefectDojo base URL. **Set to enable** import of the full SARIF. |
+| `defectdojo_token` | `''` | DefectDojo API token (pass a secret). |
+| `defectdojo_product` | repo name | DefectDojo product name (auto-created if missing). |
+| `defectdojo_product_type` | `Research and Development` | Product type (used to auto-create a new product). |
+| `defectdojo_engagement` | `ci` | Engagement name (auto-created if missing). |
+| `defectdojo_close_old` | `true` | Close findings no longer present on reimport. |
+
+### Dependency-Track (optional sink)
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `dependency_track_url` | `''` | Dependency-Track base URL. **Set to enable** the CycloneDX BOM upload. |
+| `dependency_track_api_key` | `''` | Dependency-Track API key (pass a secret). Needs `BOM_UPLOAD` (+ `PROJECT_CREATION_UPLOAD`, + `VIEW_PORTFOLIO` for the PR-comment link). |
+| `dependency_track_project_name` | `${{ github.repository }}` | Project name (auto-created if missing). |
+| `dependency_track_project_version` | `${{ github.ref_name }}` | Project version. |
+| `dependency_track_auto_create` | `true` | Auto-create the project/version on first upload. |
+
+### Runtime
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `python_version` | `3.12` | Python version used to run the Chargate CLI. |
+
+## Outputs
+
+| Output | Description |
+| --- | --- |
+| `mode` | Resolved run mode: `pr` or `baseline`. |
+| `gate_result` | `pass` or `fail`. |
+| `net_new_count` | Number of net-new (PR-introduced) findings. |
+| `total_count` | Total findings in the full SARIF (net-new + pre-existing). |
+| `sarif_path` | Path to the full (unfiltered) SARIF report. |
+
+```yaml
+- uses: magmamoose/chargate@v2
+  id: gate
+- run: echo "Gate ${{ steps.gate.outputs.gate_result }} — ${{ steps.gate.outputs.net_new_count }} net-new / ${{ steps.gate.outputs.total_count }} total"
+```
+
 ## Net-new semantics
 
 A SARIF result is **net-new** iff its primary location's file is in the PR diff
@@ -172,6 +306,32 @@ rebases and force-pushes.
 `high`, `medium`, `low`, or `none` (report-only). Severity uses the SARIF
 `security-severity` band when present, else the SARIF `level`
 (error→high, warning→medium, note→low).
+
+## PR comments (GHAS-style)
+
+On pull requests Chargate reports the way GitHub Advanced Security does — scoped to
+**net-new findings only**, so it stays quiet:
+
+- **One summary comment**, updated in place on every push (found by a hidden marker
+  and `PATCH`ed, never duplicated).
+- **Inline review comments** on each net-new finding that sits on a changed line;
+  prior Chargate inline comments are deleted and re-posted each run so they never stack.
+
+It is **on by default** and needs `pull-requests: write`. Disable with
+`pr_comment: false`; tune with `pr_comment_mode` / `pr_comment_max_inline` (see
+[Inputs → PR comments](#pr-comments-ghas-style-net-new-only)).
+
+**Comment as `Chargate[bot]` (opt-in, zero key management).** By default comments
+are authored by `github-actions[bot]`. To post as **`Chargate[bot]`** instead:
+(1) install the Chargate GitHub App on your org/repo, and (2) add `id-token: write`
+to the job's `permissions`. The action then exchanges the run's OIDC token at the
+[token broker](https://github.com/MagmaMoose/chargate/tree/main/broker) for a
+short-lived, repo-scoped token — no App keys to manage. It is **fail-soft**: without
+`id-token: write`, or if the App isn't installed, comments simply fall back to
+`github-actions[bot]`. Prefer to self-host? Bring your own App token via
+`actions/create-github-app-token` and pass it as `pr_comment_token`.
+
+Full walkthrough: **[docs — PR comments](https://github.com/MagmaMoose/chargate/blob/main/docs/setup.md#pr-comments-ghas-style)**.
 
 ## Sinks (DefectDojo & Dependency-Track)
 
@@ -240,6 +400,43 @@ chargate local path/to/file.py        # what the pre-commit hook runs
 
 Exit codes: `0` pass · `1` blocking net-new findings · `2` setup/usage error.
 
+## Versioning & pinning
+
+Chargate follows [Semantic Versioning](https://semver.org), released automatically
+from [Conventional Commits](https://www.conventionalcommits.org). Pick a pin by how
+much you value stability vs. immutability:
+
+| Reference | Example | Gets | Use when |
+| --- | --- | --- | --- |
+| **Moving major** | `magmamoose/chargate@v2` | Non-breaking updates within v2 | **Recommended default.** |
+| **Exact release** | `magmamoose/chargate@v2.8.0` | Nothing until you bump | You want reproducible, opt-in updates. |
+| **Commit SHA** | `magmamoose/chargate@<sha>` | Nothing until you bump | Highest supply-chain assurance (pair with Dependabot/Renovate). |
+
+Breaking changes bump the **major**; the **`v1` tag is frozen** on the old runtime,
+so existing v1 pins keep working until you migrate (see [Migrating from v1](#migrating-from-v1)).
+
+## Security
+
+Chargate is a security tool and is built to be one:
+
+- **Least privilege by default.** See [Permissions](#permissions). The optional
+  `Chargate[bot]` token is short-lived, scoped to the calling repo, and carries
+  `pull_requests: write` **only**.
+- **Injection-hardened.** Every action input is passed to the gate step through the
+  environment, never interpolated into a shell body, so a malicious input value
+  can't break out via `${{ }}` template injection.
+- **Pinned supply chain.** Every third-party action Chargate calls (`checkout`,
+  `setup-python`, `codeql-action/upload-sarif`, `upload-artifact`, `sbom-action`) is
+  **SHA-pinned** with a `# vX.Y.Z` comment; the core CLI has **no runtime
+  dependencies** (stdlib only).
+- **Fail-safe integrations.** DefectDojo, Dependency-Track, PR comments, and the
+  token broker are all failure-isolated — an outage is logged and **never** changes
+  the gate outcome.
+
+**Reporting a vulnerability:** please use [GitHub private vulnerability
+reporting](https://github.com/MagmaMoose/chargate/security/advisories/new) or see
+[`SECURITY.md`](SECURITY.md). Please do not open a public issue for security reports.
+
 ## What MegaLinter covers (vs the old hand-rolled set)
 
 Trivy, Semgrep, Checkov, Hadolint, ShellCheck, actionlint, ESLint, kubeconform/
@@ -264,10 +461,17 @@ v1 was a composite action that fetched a hand-rolled scanner runtime from
 The **`v1` tag is frozen** on the old runtime, so existing pins keep working until
 you migrate. Move to the `v2` composite action when ready.
 
-## Conventions
+## Documentation & contributing
 
-Python (uv + Ruff + pytest, type-hinted). External actions are SHA-pinned. MIT.
+- **Full docs** (MkDocs): [architecture](docs/architecture.md) ·
+  [net-new gating](docs/net-new.md) · [setup & usage](docs/setup.md) ·
+  [CLI reference](docs/cli.md). Preview locally with `uv run --group docs mkdocs serve`.
+- **Contributing:** issues and PRs are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+  Dev stack: Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only core.
+  External GitHub Actions are SHA-pinned; releases are automated (Conventional Commits
+  → semantic-release), so never bump the version by hand.
+- **Security policy:** [`SECURITY.md`](SECURITY.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT © Caleb Sargeant. See [LICENSE](LICENSE).

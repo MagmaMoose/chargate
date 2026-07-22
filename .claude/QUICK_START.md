@@ -6,9 +6,13 @@ uv run pytest -q              # run the test suite (add a path for one module)
 uv run ruff check .          # lint
 uv run ruff format .         # format (CI gates on `--check`)
 
+# The broker/ FastAPI service is a separate deployable (own dep-group):
+uv run --group broker python -m pytest broker/tests   # token-broker tests
+
 # Exercise the CLI (full flag reference: docs/cli.md):
 uv run chargate ci --mode auto --flavor all --sarif-out full.sarif
 uv run chargate local path/to/file.py   # what the pre-commit hook runs
+uv run chargate install-hooks           # wire hooks globally across all repos
 
 # Docs (docs group: mkdocs-material):
 uv run --group docs mkdocs serve   # live preview at :8000
