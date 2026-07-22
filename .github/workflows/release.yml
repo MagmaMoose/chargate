@@ -42,7 +42,7 @@ on:
 
 permissions:
   contents: write     # version bump + tag on release
-  id-token: write     # OIDC for the Diatreme public-app token broker + cosign keyless
+  id-token: write     # OIDC for the Diatreme public-app token broker + cosign keyless  # gitleaks:allow
   packages: write     # push the PR/release container image to GHCR
   attestations: write # SLSA build provenance for the signed release image (image-sign)
 
