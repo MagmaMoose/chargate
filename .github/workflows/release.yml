@@ -42,7 +42,7 @@ on:
 
 permissions:
   contents: write     # version bump + tag on release
-  id-token: write     # OIDC for the Diatreme public-app token broker + cosign keyless  # gitleaks:allow
+  id-token: write     # OIDC for the Diatreme public-app token broker
   packages: write     # push the PR/release container image to GHCR
   attestations: write # SLSA build provenance for the signed release image (image-sign)
 
@@ -99,7 +99,7 @@ jobs:
           prerelease-identifiers: '{}'
           version-override: ${{ github.event_name == 'workflow_dispatch' && inputs.version-override || '' }}
           image_name: ${{ steps.detect.outputs.image_name }}
-          # Sign the released image (cosign keyless) + attach SLSA build provenance.
+          # Sign the released image (cosign / Sigstore) + attach SLSA build provenance.
           # Diatreme owns this now (v2.5.0+); replaces chargate's old inline job (#29).
           image-sign: 'true'
 
