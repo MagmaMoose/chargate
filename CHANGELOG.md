@@ -2,6 +2,26 @@
 
 <!-- version list -->
 
+## v2.9.0 (2026-07-22)
+
+### Bug Fixes
+
+- Drop 'keyless' from release.yml comments (secret-scanner false positive)
+  ([#31](https://github.com/MagmaMoose/chargate/pull/31),
+  [`32de16d`](https://github.com/MagmaMoose/chargate/commit/32de16d5e3420869a22cd1962d2b82b831716abc))
+
+### Chores
+
+- Update chargate image
+  ([`76d89b3`](https://github.com/MagmaMoose/chargate/commit/76d89b33c205c1239fedd268264b82245062fed9))
+
+### Features
+
+- Sign released images via Diatreme image-sign
+  ([#31](https://github.com/MagmaMoose/chargate/pull/31),
+  [`32de16d`](https://github.com/MagmaMoose/chargate/commit/32de16d5e3420869a22cd1962d2b82b831716abc))
+
+
 ## v2.8.1 (2026-07-22)
 
 ### Bug Fixes
