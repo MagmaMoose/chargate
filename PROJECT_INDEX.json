@@ -1,21 +1,22 @@
 {
-  "generated": "2026-06-24T00:00:00Z",
-  "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact). One `chargate` CLI backs three GitHub surfaces: a composite action (action.yml), a reusable workflow (gate.yml), and a pre-commit hook. The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary.",
+  "generated": "2026-07-22T00:00:00Z",
+  "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact) and a CycloneDX BOM (Syft) is shipped to Dependency-Track. One `chargate` CLI backs TWO GitHub surfaces: a composite action (action.yml) and a pre-commit hook (.pre-commit-hooks.yaml). The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary. A SEPARATE in-repo FastAPI service (broker/, deployed via k8s/) mints Chargate[bot] tokens for PR-comment authorship via GitHub Actions OIDC — it is NOT part of the stdlib-only CLI wheel (own `broker` dep-group).",
   "entrypoints": [
-    "src/chargate/cli.py:main",
-    "action.yml (composite action: install CLI -> `chargate ci`)",
-    ".pre-commit-hooks.yaml (hook id `chargate`, entry: `chargate local`)"
+    "src/chargate/cli.py:main (subcommands: filter-sarif | ci | local | install-hooks | uninstall-hooks | version)",
+    "action.yml (composite action: install CLI -> `chargate ci`; also Syft SBOM + OIDC token-broker steps)",
+    ".pre-commit-hooks.yaml (hooks: `chargate` [entry `chargate local`], `actions-pin-sha`, `conventional-branch-name`)",
+    "broker/app.py:create_app (SEPARATE deployable: OIDC -> Chargate App installation token; FastAPI; deployed via k8s/, image ghcr.io/magmamoose/chargate)"
   ],
   "modules": {
     "cli": {
       "path": "src/chargate/cli.py",
-      "purpose": "argparse dispatch for the 4 subcommands (filter-sarif | ci | local | version); wires git -> filter -> gate -> report -> DefectDojo. The only module that touches os.environ + file writes for the CLI flow.",
-      "exports": ["main", "build_parser", "cmd_filter_sarif", "cmd_ci", "cmd_local", "cmd_version", "counts_to_dict"],
-      "depends_on": ["git", "megalinter", "defectdojo", "github_comment", "report", "modes", "gate", "sarif.diff", "sarif.filter", "sarif.model", "sarif.sops", "__init__"]
+      "purpose": "argparse dispatch for the 6 subcommands; wires git -> filter -> gate -> report -> DefectDojo/Dependency-Track/PR-comments, and the standalone install-hooks/uninstall-hooks. The only module that touches os.environ + file writes + working-tree reads (SOPS) for the CLI flow.",
+      "exports": ["main", "build_parser", "cmd_filter_sarif", "cmd_ci", "cmd_local", "cmd_install_hooks", "cmd_uninstall_hooks", "cmd_version", "counts_to_dict"],
+      "depends_on": ["git", "megalinter", "defectdojo", "dependencytrack", "github_comment", "install_hooks", "report", "modes", "gate", "sarif.diff", "sarif.filter", "sarif.model", "sarif.sops", "__init__"]
     },
     "sarif.filter": {
       "path": "src/chargate/sarif/filter.py",
-      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O. ResultVerdict carries the finding `message` + an `inline_safe` flag (added-line/new-file only) for picking valid inline PR-comment targets. A secret-scanner hit on a SOPS-encrypted value (via an optional SopsIndex + FilterPolicy.ignore_sops_encrypted, default on) is dropped as a false positive (reason `sops-encrypted`).",
+      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O. ResultVerdict carries the finding `message` + an `inline_safe` flag (added-line/new-file only) for picking valid inline PR-comment targets. A secret-scanner hit on a SOPS-encrypted value (via an optional SopsIndex + FilterPolicy.ignore_sops_encrypted, default on) is dropped as a false positive (reason `sops-encrypted`). In-source suppressed results are surfaced as a distinct count and never gate.",
       "exports": ["filter_sarif", "classify_results", "FilterPolicy", "FilterResult", "ResultVerdict", "Precision", "NoLocationPolicy", "normalize_sarif_uri"],
       "depends_on": ["sarif.counts", "sarif.diff", "sarif.model", "sarif.sops"]
     },
@@ -57,20 +58,32 @@
     },
     "megalinter": {
       "path": "src/chargate/megalinter.py",
-      "purpose": "Build the MegaLinter env (DISABLE_ERRORS=true so it never gates; SARIF/JSON reporters on; normalized URIs) + docker run command, run it (runner injectable), and locate the merged SARIF tolerating filename ambiguity. Command assembly is pure/testable.",
+      "purpose": "Build the MegaLinter env (DISABLE_ERRORS=true so it never gates; SARIF/JSON reporters on; normalized URIs; incremental VALIDATE_ALL_CODEBASE=false opt-in) + docker run command, run it (runner injectable), and locate the merged SARIF tolerating filename ambiguity. Command assembly is pure/testable.",
       "exports": ["run", "build_env", "build_docker_command", "locate_sarif", "MegaLinterConfig", "MegaLinterRun", "MegaLinterError", "DEFAULT_TAG", "CONTAINER_WORKSPACE"],
       "depends_on": []
     },
     "defectdojo": {
       "path": "src/chargate/defectdojo.py",
-      "purpose": "Optional, first-class DefectDojo import/reimport client (urllib + multipart). Always ships the FULL SARIF. Failure-isolated: import_sarif NEVER raises, returns ok=False so a DD failure can't fail the gate.",
+      "purpose": "Optional, first-class DefectDojo import/reimport client (urllib + multipart). Always ships the FULL SARIF. Failure-isolated: import_sarif NEVER raises, returns ok=False so a DD failure can't fail the gate. Sends a chargate/<version> User-Agent (Cloudflare BIC workaround).",
       "exports": ["import_sarif", "build_request", "build_form_fields", "encode_multipart", "DefectDojoConfig", "DefectDojoResult"],
+      "depends_on": []
+    },
+    "dependencytrack": {
+      "path": "src/chargate/dependencytrack.py",
+      "purpose": "Optional CycloneDX BOM upload client (urllib + multipart) — the supply-chain analog of defectdojo.py. POSTs the Syft-generated BOM to `/api/v1/bom` (strips the UTF-8 BOM marker), auto-creates the project/version, and resolves a project link for the PR-comment footer. Failure-isolated: upload_bom NEVER raises, returns ok=False. Upload runs on push/tags only (DT tracks shipped artifacts).",
+      "exports": ["upload_bom", "build_request", "build_form_fields", "encode_multipart", "strip_bom_marker", "lookup_project_uuid", "project_url", "resolve_project_link", "DependencyTrackConfig", "DependencyTrackResult"],
       "depends_on": []
     },
     "github_comment": {
       "path": "src/chargate/github_comment.py",
       "purpose": "Optional GHAS-style PR review-comment client (urllib, JSON). Posts net-new findings as ONE updatable summary comment (hidden-marker upsert) + inline review comments (delete-then-recreate, no stacking). Failure-isolated: post_pr_feedback NEVER raises, returns ok=False so a GitHub API error can't fail the gate. Pure transport; comment bodies are rendered by report.py.",
       "exports": ["post_pr_feedback", "GitHubCommentConfig", "GitHubCommentResult", "InlineComment", "SUMMARY_MARKER", "FINDING_MARKER"],
+      "depends_on": []
+    },
+    "install_hooks": {
+      "path": "src/chargate/install_hooks.py",
+      "purpose": "Global git-hook installer (backs `chargate install-hooks`/`uninstall-hooks`). Generates pre-commit + pre-push + commit-msg dispatchers repointed at a global ~/.pre-commit-config.yaml, sets core.hooksPath (retroactive across existing repos) + init.templateDir (new clones), inside a regenerated `>>> chargate-managed >>>` block that preserves the user's own repos. uninstall restores/unsets the prior config. Runner + git-config probes injectable for tests.",
+      "exports": ["install_hooks", "uninstall_hooks", "HookInstallError"],
       "depends_on": []
     },
     "modes": {
@@ -90,13 +103,19 @@
       "purpose": "Fast pre-commit staged-file runner (gitleaks + ruff, each skipped if the tool is absent). Data-driven check registry; runner + which probes injectable. Deliberately narrower than CI.",
       "exports": ["run_local", "staged_files", "LocalCheck", "CheckOutcome", "DEFAULT_CHECKS"],
       "depends_on": []
+    },
+    "broker (separate deployable)": {
+      "path": "broker/",
+      "purpose": "OIDC token broker for Chargate[bot] PR-comment authorship — a FastAPI service, NOT part of the CLI wheel (own `broker` dep-group; tests under broker/tests). `POST /token` verifies a GitHub Actions OIDC token (issuer-pinned, audience `chargate`, `repository` claim must equal owner/repo) and mints a short-lived Chargate App installation token scoped to that repo with `pull_requests: write` only. Fail-soft on the action side. app.py=routes, config.py=BrokerConfig (env/ExternalSecret), oidc.py=verify_oidc_token, github.py=app_jwt+mint_installation_token. Deploys to firefly k8s via Flux; k8s/ holds the Deployment/Service/Ingress/ExternalSecret.",
+      "exports": ["broker.app:create_app", "broker.config:BrokerConfig", "broker.oidc:verify_oidc_token", "broker.github:mint_installation_token", "broker.github:app_jwt"],
+      "depends_on": ["fastapi", "httpx", "pyjwt[crypto]", "pydantic-settings"]
     }
   },
   "callgraph_highlights": [
     {
       "caller": "cli.cmd_ci",
-      "calls": ["modes.resolve_mode", "megalinter.run", "megalinter.locate_sarif", "git.compute_changed_lines", "sarif.filter.filter_sarif", "gate.decide_gate", "defectdojo.import_sarif", "github_comment.post_pr_feedback", "report.render_pr_summary", "report.render_inline_body", "report.render_summary", "report.append_step_summary", "report.write_outputs"],
-      "note": "The full CI flow. Baseline mode skips the diff + gate (filters against an empty DiffIndex, fail_on=none). PR comments (net-new only) post on gate mode and never fail the gate. A MegaLinter tool error only fails the job under --strict."
+      "calls": ["modes.resolve_mode", "megalinter.run", "megalinter.locate_sarif", "git.compute_changed_lines", "sarif.sops.scan_encrypted_lines", "sarif.filter.filter_sarif", "gate.decide_gate", "defectdojo.import_sarif", "dependencytrack.upload_bom", "github_comment.post_pr_feedback", "report.render_pr_summary", "report.render_inline_body", "report.render_summary", "report.append_step_summary", "report.write_outputs"],
+      "note": "The full CI flow. Baseline mode skips the diff + gate (filters against an empty DiffIndex, fail_on=none) and uploads the BOM to Dependency-Track (push/tags only). PR comments (net-new only) post on gate mode and never fail the gate. A MegaLinter tool error only fails the job under --strict. Both external sinks are active iff their host/URL is set and never fail the gate."
     },
     {
       "caller": "cli.cmd_filter_sarif",
@@ -114,9 +133,9 @@
       "note": "The handoff from the IO boundary to the pure core: diff text in, DiffIndex out."
     },
     {
-      "caller": "gate.decide_gate",
-      "calls": ["gate.effective_band"],
-      "note": "effective_band unifies security-severity band and SARIF level (error->high, warning->medium, note->low) for threshold comparison."
+      "caller": "broker.app./token",
+      "calls": ["broker.oidc.verify_oidc_token", "broker.github.mint_installation_token"],
+      "note": "OIDC verify (issuer/audience/repository claim) -> app JWT -> installation token scoped to the caller's repo with pull_requests: write. Separate service; not on the CLI path."
     }
   ],
   "hotspots": [
@@ -131,5 +150,5 @@
     "action.yml",
     "README.md"
   ],
-  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: sarif/ stays pure (no subprocess/os/Actions imports) so it is unit-tested with synthetic diff text + SARIF dicts. Exit codes: 0 pass, 1 blocking net-new, 2 setup/tool error (a broken scanner is a tool error, never a finding). Tests mirror modules 1:1 under tests/ (e.g. test_sarif_filter.py, test_gate.py)."
+  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: sarif/ stays pure (no subprocess/os/Actions imports) so it is unit-tested with synthetic diff text + SARIF dicts. Exit codes: 0 pass, 1 blocking net-new, 2 setup/tool error (a broken scanner is a tool error, never a finding). Tests mirror modules 1:1 under tests/ (e.g. test_sarif_filter.py, test_gate.py, test_dependencytrack.py, test_install_hooks.py). The broker/ FastAPI service is a separate deployable (own dep-group + tests under broker/tests) deployed via k8s/ + Flux — keep its deps out of the stdlib-only CLI. hooks/ holds the non-Docker file-hygiene hook scripts (actions-pin-sha, conventional-branch-name) fetched by pre-commit at the pinned rev; scripts/request-app-token.sh is the action-side OIDC->broker exchange."
 }

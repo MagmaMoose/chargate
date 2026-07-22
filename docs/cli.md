@@ -4,7 +4,7 @@ Both GitHub surfaces drive the same `chargate` CLI. Exit codes: `0` pass ·
 `1` blocking net-new findings · `2` setup/usage error.
 
 ```sh
-chargate <filter-sarif | ci | local | version> [options]
+chargate <filter-sarif | ci | local | install-hooks | uninstall-hooks | version> [options]
 ```
 
 ## `chargate filter-sarif`
@@ -83,6 +83,34 @@ is absent). A first line, deliberately narrower than the full CI net.
 ```sh
 chargate local path/to/file.py     # pre-commit passes the staged files
 chargate local                      # no args -> checks staged files
+```
+
+## `chargate install-hooks`
+
+Wire Chargate's git hooks into **every** repo globally, using the
+[pre-commit](https://pre-commit.com) framework (which must be installed). It
+generates `pre-commit` + `pre-push` + `commit-msg` dispatchers pointed at a global
+`~/.pre-commit-config.yaml`, sets `core.hooksPath` (so the hooks apply to existing
+repos immediately) and `init.templateDir` (so new clones inherit them).
+
+```sh
+chargate install-hooks          # refuses to clobber a hand-maintained config
+chargate install-hooks --force  # overwrite a non-chargate ~/.pre-commit-config.yaml
+```
+
+Chargate's hooks live inside a regenerated `>>> chargate-managed >>>` block; any
+repos you add outside that block are preserved on reinstall. Installed via Homebrew,
+`brew install calebsargeant/tap/chargate` brings `pre-commit` along. See
+[Setup → Global hook install](setup.md#global-hook-install-all-repos) for the full
+walkthrough.
+
+## `chargate uninstall-hooks`
+
+Revert `install-hooks`, restoring (or unsetting) the prior global `core.hooksPath`
+and `init.templateDir`.
+
+```sh
+chargate uninstall-hooks
 ```
 
 ## `chargate version`

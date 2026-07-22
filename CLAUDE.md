@@ -4,8 +4,11 @@ Chargate wraps **MegaLinter** (which does all the scanning) and adds **net-new
 (PR-diff) finding gating**: on a PR the gate is decided only by findings the diff
 introduced vs the merge-base; pre-existing findings never block. The full,
 unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab /
-artifact). One `chargate` CLI backs two surfaces: `action.yml` (composite
-action) and `.pre-commit-hooks.yaml` (local hook).
+artifact) and a CycloneDX BOM (Syft) goes to Dependency-Track; on PRs it posts
+GHAS-style comments for net-new findings. One `chargate` CLI backs two surfaces:
+`action.yml` (composite action) and `.pre-commit-hooks.yaml` (local hook). A
+separate FastAPI service under `broker/` (own dep-group; deployed via `k8s/` +
+Flux) mints the `Chargate[bot]` token those PR comments are authored with.
 
 @.claude/QUICK_START.md
 @.claude/ARCHITECTURE_MAP.md
@@ -13,9 +16,10 @@ action) and `.pre-commit-hooks.yaml` (local hook).
 
 ## Conventions
 
-Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only core (no
-runtime deps — the DefectDojo client uses `urllib`). SHA-pin external GitHub
-Actions with a `# vX.Y.Z` comment. MIT. Tests mirror modules 1:1 under `tests/`.
+Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only **core** (no
+runtime deps — the DefectDojo/Dependency-Track clients use `urllib`); the `broker/`
+service keeps its FastAPI deps in a separate `broker` dep-group. SHA-pin external
+GitHub Actions with a `# vX.Y.Z` comment. MIT. Tests mirror modules 1:1 under `tests/`.
 
 **Releases** are automated: pushing to `main` runs Diatreme + python-semantic-release
 (single-env TBD, `.github/workflows/release.yml`), which cuts the next stable

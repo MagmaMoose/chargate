@@ -56,6 +56,34 @@ The hook (`language: python`, no Docker) runs a **fast staged-file subset**
 first line, deliberately narrower than the CI whole-repo net. Local/CI disparity
 is intended.
 
+## Global hook install (all repos)
+
+Rather than adding `.pre-commit-config.yaml` to each repo, install Chargate's hooks
+**once, globally** so they apply to every existing and future repo:
+
+```sh
+brew install calebsargeant/tap/chargate   # brings pre-commit along as a dependency
+chargate install-hooks
+```
+
+`install-hooks` generates `pre-commit` + `pre-push` + `commit-msg` dispatchers
+pointed at a global `~/.pre-commit-config.yaml`, sets `core.hooksPath` (retroactive
+across existing repos) and `init.templateDir` (new clones inherit them). It also
+installs the file-hygiene hooks (`actions-pin-sha`, `conventional-branch-name`).
+
+Chargate's entries live inside a regenerated `>>> chargate-managed >>>` block —
+**add your own repos/hooks outside that block and they're preserved** on every
+reinstall. It refuses to clobber a hand-maintained config unless you pass `--force`,
+and `chargate uninstall-hooks` reverts everything (restoring any prior
+`core.hooksPath`).
+
+!!! warning "It repoints your global `core.hooksPath`"
+    If you already have global hooks at another path they stop running (intended —
+    that's how Chargate takes over); the prior path is saved and restored on
+    `uninstall-hooks`.
+
+See the [CLI reference](cli.md#chargate-install-hooks) for flags.
+
 ## PR comments (GHAS-style)
 
 On pull requests Chargate posts feedback the way GitHub Advanced Security does —
