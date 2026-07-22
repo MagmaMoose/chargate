@@ -62,7 +62,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # full history + tags for the floating major-tag move below
       - id: detect
@@ -77,7 +77,7 @@ jobs:
           fi
       # PR: verify the image builds (image repos only).
       - if: github.event_name == 'pull_request' && steps.detect.outputs.image_name != ''
-        uses: magmamoose/diatreme@f31adec7d62907cc81b9b880cd776e24fcdcbaf1 # v2.0.0
+        uses: magmamoose/diatreme@5164c12da6541b76df02311f260b82a7db793750 # v2.4.7
         with:
           mode: ci
           # Build for arm64 too (OCI Ampere nodes), not just amd64. The bake file
@@ -88,7 +88,7 @@ jobs:
       # Default-branch push (or manual dispatch): version + release.
       - id: release
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: magmamoose/diatreme@f31adec7d62907cc81b9b880cd776e24fcdcbaf1 # v2.0.0
+        uses: magmamoose/diatreme@5164c12da6541b76df02311f260b82a7db793750 # v2.4.7
         with:
           mode: release
           platforms: linux/amd64,linux/arm64
@@ -143,7 +143,7 @@ jobs:
       - name: Trust the MagmaMoose tap
         run: brew trust --tap magmamoose/tap
       - name: Bump chargate formula in the tap
-        uses: dawidd6/action-homebrew-bump-formula@1446dca236b0440c6f02723a3f14f13be2c04ab0 # v7
+        uses: dawidd6/action-homebrew-bump-formula@a0e064e08103c01870c6d1b05168d1b726aab119 # v8
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           tap: MagmaMoose/homebrew-tap
