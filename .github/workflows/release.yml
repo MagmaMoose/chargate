@@ -44,6 +44,7 @@ permissions:
   contents: write     # version bump + tag on release
   id-token: write     # OIDC for the Diatreme public-app token broker
   packages: write     # push the PR/release container image to GHCR
+  attestations: write # SLSA build provenance for the signed release image (image-sign)
 
 # Serialize releases per ref so two pushes to main can't race the tag write.
 # Never cancel a release mid-flight.
@@ -77,7 +78,7 @@ jobs:
           fi
       # PR: verify the image builds (image repos only).
       - if: github.event_name == 'pull_request' && steps.detect.outputs.image_name != ''
-        uses: magmamoose/diatreme@5164c12da6541b76df02311f260b82a7db793750 # v2.4.7
+        uses: magmamoose/diatreme@c0825f6732f9e471c4d7c0e6d1ac7e4cfc0738a1 # v2.5.1
         with:
           mode: ci
           # Build for arm64 too (OCI Ampere nodes), not just amd64. The bake file
@@ -88,7 +89,7 @@ jobs:
       # Default-branch push (or manual dispatch): version + release.
       - id: release
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: magmamoose/diatreme@5164c12da6541b76df02311f260b82a7db793750 # v2.4.7
+        uses: magmamoose/diatreme@c0825f6732f9e471c4d7c0e6d1ac7e4cfc0738a1 # v2.5.1
         with:
           mode: release
           platforms: linux/amd64,linux/arm64
@@ -98,6 +99,9 @@ jobs:
           prerelease-identifiers: '{}'
           version-override: ${{ github.event_name == 'workflow_dispatch' && inputs.version-override || '' }}
           image_name: ${{ steps.detect.outputs.image_name }}
+          # Sign the released image (cosign / Sigstore) + attach SLSA build provenance.
+          # Diatreme owns this now (v2.5.0+); replaces chargate's old inline job (#29).
+          image-sign: 'true'
 
       # chargate is consumed by floating major tag (magmamoose/chargate@v2); Diatreme
       # only pushes the full vX.Y.Z tag, so move the major alias onto each stable
