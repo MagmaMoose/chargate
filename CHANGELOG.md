@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v2.8.1 (2026-07-22)
+
+### Bug Fixes
+
+- Bump the actions-version group across 1 directory with 6 updates
+  ([`bdd4993`](https://github.com/MagmaMoose/chargate/commit/bdd4993845e60c41d31e6bb36abdfcb0845331dd))
+
+### Chores
+
+- Sync uv.lock to current package version (2.8.0)
+  ([`3464426`](https://github.com/MagmaMoose/chargate/commit/34644260a00627ba08964bb325fe173e25ad5d54))
+
+- Update chargate image
+  ([`73dd4b8`](https://github.com/MagmaMoose/chargate/commit/73dd4b838e0f56fdabed7acd293ca56646c177e1))
+
+### Documentation
+
+- Harden README for GitHub Marketplace; add SECURITY and CONTRIBUTING
+  ([`aa34e8d`](https://github.com/MagmaMoose/chargate/commit/aa34e8d7e066bea38bb8d7764d0732a1bb1b2856))
+
+- Refresh context stack and sync MkDocs docs
+  ([`cb18ca1`](https://github.com/MagmaMoose/chargate/commit/cb18ca1846706b53225a45c2dc88d656e8acd80c))
+
+
 ## v2.8.0 (2026-07-11)
 
 ### Chores
