@@ -44,9 +44,9 @@ inputs:
 
   # ── MegaLinter ───────────────────────────────────────────────────────────
   flavor:
-    description: 'MegaLinter flavor: all (full image) | security | python | go | ...'
+    description: 'MegaLinter flavor: security (default) | all (full lint image) | python | go | ...'
     required: false
-    default: 'all'
+    default: 'security'
   megalinter_tag:
     description: 'MegaLinter image tag or digest to pin.'
     required: false
@@ -61,12 +61,13 @@ inputs:
     default: ''
   incremental:
     description: >-
-      PR events only: run MegaLinter over just the files the PR changes
+      PR events only: ask MegaLinter to analyze just the files the PR changes
       (VALIDATE_ALL_CODEBASE=false) instead of the whole repo — faster on large
-      repos. The net-new gate still uses chargate's own diff. Baseline (push)
-      scans are always whole-repo. Default off.
+      repos. Repository-level scanners may still read the whole repo or history.
+      The net-new gate still uses Chargate's own diff. Baseline (push) scans are
+      always whole-repo. Default on.
     required: false
-    default: 'false'
+    default: 'true'
   ignore_sops_encrypted:
     description: >-
       Ignore secret-scanner hits on SOPS-encrypted values (ENC[AES256_GCM,...]) —

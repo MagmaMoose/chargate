@@ -30,10 +30,13 @@ jobs:
           # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
 ```
 
-On PRs it runs MegaLinter whole-repo, gates on net-new findings, and ships the
-full SARIF; on push to the default branch it runs a non-gating baseline scan. The
-action checks out with `fetch-depth: 0` by default (net-new needs the merge-base) —
-set `checkout: 'false'` if you already checked out with full history.
+On PRs it uses MegaLinter's focused `security` flavor and requests changed-files
+analysis, gates on net-new findings, and ships the full SARIF. Repository-level
+security scanners may still inspect the whole repo or history. On push to the default
+branch it runs a non-gating whole-repo baseline scan. Set `flavor: all` for the full
+lint image, or `incremental: 'false'` for a whole-repo PR scan. The action checks out
+with `fetch-depth: 0` by default (net-new needs the merge-base) — set
+`checkout: 'false'` if you already checked out with full history.
 
 ## 2. pre-commit hook
 
