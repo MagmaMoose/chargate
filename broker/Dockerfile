@@ -1,9 +1,13 @@
 # syntax=docker/dockerfile:1
 #
 # Image for the Chargate token-broker service (broker/). Built + pushed by the
-# release workflow once docker-bake.hcl exists (PR -> pr-<N>, push -> release).
-# This is the deployable that runs in the firefly cluster; the chargate CLI is a
-# separate, stdlib-only PyPI-style package and is NOT in this image.
+# release workflow (PR -> pr-<N>, push -> release). The chargate CLI is a separate,
+# stdlib-only PyPI-style package and is NOT in this image.
+#
+# This is the container target. The same source tree also deploys as a Cloudflare
+# Python Worker from broker/wrangler.toml — see docs/deployment.md. Nothing below is
+# needed by that path: the Workers runtime supplies the ASGI server, which is why
+# uvicorn lives in the `server` extra rather than in the base dependency set.
 ARG PYTHON_VERSION=3.12
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -12,13 +16,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-WORKDIR /app
+WORKDIR /srv
 
-# Install deps from the broker's own requirements (the CLI's pyproject has none).
-COPY broker/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-COPY broker /app/broker
+# The broker's own pyproject is the single source of dependency truth for both
+# targets; `[server]` adds the uvicorn the Worker does not use.
+COPY broker/pyproject.toml /srv/pyproject.toml
+COPY broker/app /srv/app
+RUN pip install --no-cache-dir '.[server]'
 
 # Non-root; no writable app state (readOnlyRootFilesystem is enforced in k8s).
 RUN useradd --create-home --home-dir /home/app --shell /usr/sbin/nologin app
@@ -31,4 +35,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"]
 
-CMD ["uvicorn", "broker.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

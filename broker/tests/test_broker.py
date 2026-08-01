@@ -7,11 +7,12 @@ import time
 import httpx
 import jwt
 import pytest
-from broker.app import create_app
-from broker.config import GITHUB_OIDC_ISSUER, BrokerConfig
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
+
+from app.config import GITHUB_OIDC_ISSUER, BrokerConfig
+from app.main import create_app
 
 
 @pytest.fixture(scope="module")

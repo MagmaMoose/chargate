@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chargate-broker"
+version = "0.1.0"
+description = "Chargate token broker — GitHub Actions OIDC → repo-scoped App installation token"
+requires-python = ">=3.12"
+# pywrangler vendors exactly this list for the Worker, resolved against
+# cpython-3.13-emscripten-wasm32. Every entry here must have a wasm32 wheel on the
+# runtime named by wrangler.toml's compatibility_date.
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "pyjwt>=2.9",
+    # Listed explicitly rather than left to pyjwt[crypto] so the wasm32 wheel
+    # requirement is visible at the point someone would bump the runtime date.
+    "cryptography>=43.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# uvicorn is how the container serves the app; on Workers the runtime's ASGI bridge
+# does that job and nothing imports uvicorn at all. It is out of the base dependency
+# set because uvicorn[standard] drags in httptools, which has no wasm32 wheel — one
+# unresolvable transitive dependency fails the whole vendor step.
+server = ["uvicorn[standard]>=0.30"]
+dev = [
+    # Repeated rather than referenced as chargate-broker[server]: a self-referential
+    # extra does not resolve for an editable local install.
+    "uvicorn[standard]>=0.30",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+# `app` and `entry` are imported as top-level modules, exactly as the Worker runtime
+# and uvicorn resolve them, so the test suite exercises the real import shape.
+pythonpath = ["."]
+testpaths = ["tests"]
+# The JWKS resolver is async, so its tests are coroutines; auto mode saves marking
+# every one of them.
+asyncio_mode = "auto"
