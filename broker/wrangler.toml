@@ -4,9 +4,9 @@ name = "chargate-broker"
 # `CLOUDFLARE_HOSTNAME` repository variable and passed to `wrangler deploy --routes` by
 # .github/workflows/deploy-cloudflare.yml, so this file stays the same across environments.
 workers_dev = false
-# Independent of workers_dev, and required for `versions upload --preview-alias` to hand
-# back a reachable per-pull-request URL.
-preview_urls = true
+# workers_dev is false and no PR preview is ever uploaded (see deploy-cloudflare.yml), so a
+# preview URL would only be a second public front door to the live token minter. Keep it off.
+preview_urls = false
 main = "entry.py"
 # Selects the Pyodide build the Worker runs on, and therefore which package wheels exist
 # for it. pyjwt[crypto] pulls in `cryptography`, which has no wasm32 wheel on older

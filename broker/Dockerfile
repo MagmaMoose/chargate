@@ -5,7 +5,7 @@
 # stdlib-only PyPI-style package and is NOT in this image.
 #
 # This is the container target. The same source tree also deploys as a Cloudflare
-# Python Worker from broker/wrangler.toml — see docs/deployment.md. Nothing below is
+# Python Worker from broker/wrangler.toml, see docs/broker-deployment.md. Nothing below is
 # needed by that path: the Workers runtime supplies the ASGI server, which is why
 # uvicorn lives in the `server` extra rather than in the base dependency set.
 ARG PYTHON_VERSION=3.12
