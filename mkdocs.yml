@@ -36,6 +36,7 @@ nav:
   - Net-new gating: net-new.md
   - Setup & usage: setup.md
   - CLI reference: cli.md
+  - Broker deployment: broker-deployment.md
 
 markdown_extensions:
   - admonition
