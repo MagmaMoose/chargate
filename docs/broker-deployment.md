@@ -13,7 +13,7 @@ Consumers are unaffected by which one is live: same hostname, same `POST /token`
 | Entry | `broker/entry.py` → `Default.fetch` | `uvicorn app.main:app` |
 | Config | `wrangler.toml` `[vars]` + `wrangler secret put` | ExternalSecret → Secret → `envFrom` |
 | TLS | Terminated by Cloudflare | Ingress + cert-manager |
-| Cost at this volume | Free tier | A cluster |
+| Cost at this volume | Workers Paid — see §1.3 | A cluster |
 
 ---
 
@@ -88,14 +88,30 @@ Everything else is non-secret and lives in `wrangler.toml` `[vars]`: `OIDC_AUDIE
 
 ### 1.3 Cost and limits
 
-At this volume the broker fits the **Workers Free** tier. Each `POST /token` is a handful of
-milliseconds of RS256 verify plus two GitHub round-trips, and I/O wait is not billed. The
-figures that matter if it ever moves to Paid:
+**This Worker requires the Workers Paid plan ($5/month), and the reason is script size, not
+traffic.** The vendored bundle measures **4.30 MiB gzipped** (18.3 MiB raw, 1055 modules)
+against a **3 MB ceiling on Workers Free** and **10 MB on Paid**. `cryptography` is the bulk of
+it — 4.5 MiB of wheel before any application code — and it is not optional: `pyjwt[crypto]`
+needs it to verify RS256 and to sign the App JWT.
 
-- **Requests**: 10M/month included. The broker sees roughly 1.5–15k.
-- **CPU**: 30M CPU-ms/month included — the two quotas balance at 3 ms of CPU per request.
-- **Script size**: 3 MB gzipped on Free, 10 MB on Paid. Check the total Wrangler prints on every
-  build; `cryptography` is the bulk of it.
+Getting under 3 MB would mean dropping `cryptography` for the runtime's WebCrypto, which cannot
+load the PKCS#1 key GitHub issues without a pkcs8 conversion, and would mean hand-rolling both
+the verify and the sign. That is a large rewrite to save $5/month; it is not worth it.
+
+Everything *else* fits Free comfortably, and none of it is close to a paid overage:
+
+| | Included/month | Broker's usage |
+|---|---|---|
+| Requests | 10,000,000 | ~1.5–15k |
+| CPU time | 30,000,000 CPU-ms | ~5 ms per request; the two quotas balance at 3 ms/request |
+| Duration | not billed, no limit | two GitHub round-trips of I/O wait, free |
+
+So the marginal cost of this Worker on an account that already has Workers Paid is **zero**.
+
+`/token` is public and unauthenticated at the edge (it authenticates callers itself, by
+verifying their Actions OIDC token). There is no account-level spend cap on Workers, and a
+rejected request still bills, so put a WAF rate-limiting rule in front of it — blocked requests
+never invoke the Worker and are therefore never billed.
 
 `/token` is public and unauthenticated at the edge (it authenticates callers itself, by
 verifying their Actions OIDC token). There is no account-level spend cap on Workers, and a
