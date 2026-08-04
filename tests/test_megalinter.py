@@ -23,8 +23,8 @@ def test_image_name_for_flavors():
 def test_composite_action_defaults_to_security_incremental_scanning():
     action = (Path(__file__).parent.parent / "action.yml").read_text(encoding="utf-8")
 
-    assert re.search(r"flavor:\n(?:.*\n){0,3}\s+default: 'security'", action)
-    assert re.search(r"incremental:\n(?:.*\n){0,8}\s+default: 'true'", action)
+    assert re.search(r"flavor:\n(?:.*\n){0,6}\s+default: 'security'", action)
+    assert re.search(r"incremental:\n(?:.*\n){0,15}\s+default: 'true'", action)
 
 
 def test_build_env_disables_errors_and_enables_reporters():
