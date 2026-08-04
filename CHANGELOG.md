@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v2.11.0 (2026-08-04)
+
+### Chores
+
+- Update chargate image
+  ([`b705859`](https://github.com/MagmaMoose/chargate/commit/b7058596e5612c41e26c51ab26db771175bca754))
+
+### Features
+
+- **action**: Default to focused PR security scans
+  ([#33](https://github.com/MagmaMoose/chargate/pull/33),
+  [`034cc40`](https://github.com/MagmaMoose/chargate/commit/034cc40a4d90eb9e731456a7f7f64e4af22bfba2))
+
+### Testing
+
+- Widen regex slack in action defaults test ([#33](https://github.com/MagmaMoose/chargate/pull/33),
+  [`034cc40`](https://github.com/MagmaMoose/chargate/commit/034cc40a4d90eb9e731456a7f7f64e4af22bfba2))
+
+
 ## v2.10.0 (2026-08-01)
 
 ### Bug Fixes
