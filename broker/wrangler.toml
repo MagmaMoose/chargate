@@ -1,0 +1,42 @@
+name = "chargate-broker"
+
+# Routes are NOT declared here. The hostname is a deployment-time choice, supplied by the
+# `CLOUDFLARE_HOSTNAME` repository variable and passed to `wrangler deploy --routes` by
+# .github/workflows/deploy-cloudflare.yml, so this file stays the same across environments.
+workers_dev = false
+# workers_dev is false and no PR preview is ever uploaded (see deploy-cloudflare.yml), so a
+# preview URL would only be a second public front door to the live token minter. Keep it off.
+preview_urls = false
+main = "entry.py"
+# Selects the Pyodide build the Worker runs on, and therefore which package wheels exist
+# for it. pyjwt[crypto] pulls in `cryptography`, which has no wasm32 wheel on older
+# runtimes — this is the same date platform2's backend pins for the same reason.
+compatibility_date = "2026-01-15"
+compatibility_flags = ["python_workers"]
+
+# Non-secret configuration only. Anything here is visible in the dashboard and in
+# `wrangler deployments`, so only values that are safe to read live in this block.
+# Workers surface these on the request `env` object rather than os.environ, which is
+# why app/config.py overlays it.
+[vars]
+OIDC_AUDIENCE = "chargate"
+GITHUB_API_URL = "https://api.github.com"
+# Least privilege: minted tokens can only comment on PRs.
+TOKEN_PERMISSIONS_JSON = '{"pull_requests": "write"}'
+# Empty = allow any repo the Chargate App is installed on (the public-app model).
+# Set to a comma-separated owner/repo list to narrow it.
+ALLOWED_REPOSITORIES = ""
+
+# Secrets are set out of band and never committed:
+#   wrangler secret put APP_ID
+#   wrangler secret put PRIVATE_KEY      # the Chargate App PEM, PKCS#1 is fine
+#
+# PRIVATE_KEY is multi-line. Pipe it rather than pasting:
+#   wrangler secret put PRIVATE_KEY < chargate-app.private-key.pem
+#
+# Deploy before setting secrets — Cloudflare has no API for a secret on a script
+# that was never uploaded. /healthz answers without either secret, so the first
+# deploy is healthy and the second one is functional.
+
+[observability]
+enabled = true

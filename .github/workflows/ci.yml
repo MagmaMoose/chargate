@@ -25,3 +25,26 @@ jobs:
         run: uv run ruff format --check .
       - name: Pytest
         run: uv run pytest -q
+
+  # The broker is a separate deployable with its own dependency set and its own
+  # pyproject, so it gets its own job rather than being swept into the CLI's `uv sync`
+  # — the CLI is deliberately stdlib-only and must stay installable without FastAPI.
+  broker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: broker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: '3.12'
+      - name: Sync
+        run: uv sync --extra dev
+      - name: Ruff (lint)
+        run: uv run ruff check .
+      - name: Ruff (format)
+        run: uv run ruff format --check .
+      - name: Pytest
+        run: uv run pytest -q

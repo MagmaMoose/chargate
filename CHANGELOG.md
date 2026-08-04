@@ -2,6 +2,38 @@
 
 <!-- version list -->
 
+## v2.10.0 (2026-08-01)
+
+### Bug Fixes
+
+- **broker**: Disable Worker preview URLs and fix Dockerfile doc path
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+### Chores
+
+- Update chargate image
+  ([`6511cc8`](https://github.com/MagmaMoose/chargate/commit/6511cc8bfa773322366881889639a86e136eb448))
+
+### Documentation
+
+- **broker**: Correct the plan requirement — 4.30 MiB needs Workers Paid
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+### Features
+
+- **broker**: Run the token broker as a Cloudflare Python Worker
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+### Testing
+
+- **broker**: Add Worker config overlay tests (addresses review comment from nievah)
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+
 ## v2.9.0 (2026-07-22)
 
 ### Bug Fixes
