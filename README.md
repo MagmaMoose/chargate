@@ -81,10 +81,13 @@ jobs:
           # dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
 ```
 
-On PRs it runs MegaLinter whole-repo, gates on net-new findings, and ships the
-full SARIF; on push to the default branch it runs a non-gating baseline scan. The
-action checks out with `fetch-depth: 0` by default (net-new needs the merge-base) —
-set `checkout: 'false'` if you already checked out with full history.
+On PRs it uses MegaLinter's focused `security` flavor and requests changed-files
+analysis, gates on net-new findings, and ships the full SARIF. Repository-level
+security scanners may still inspect the whole repo or history. On push to the default
+branch it runs a non-gating whole-repo baseline scan. Set `flavor: all` for the full
+lint image, or `incremental: 'false'` for a whole-repo PR scan. The action checks out
+with `fetch-depth: 0` by default (net-new needs the merge-base) — set
+`checkout: 'false'` if you already checked out with full history.
 
 ### 2. pre-commit hook
 
@@ -213,11 +216,11 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `flavor` | `all` | MegaLinter flavor: `all` · `security` · `python` · `go` · … |
+| `flavor` | `security` | MegaLinter flavor: `security` (focused default) · `all` (full lint image) · `python` · `go` · … |
 | `megalinter_tag` | `v8` | MegaLinter image tag or digest to pin. |
 | `enable_linters` | `''` | Comma-separated MegaLinter linter keys to enable (others off). |
 | `disable_linters` | `''` | Comma-separated MegaLinter linter keys to disable. |
-| `incremental` | `false` | PR events only: scan just the changed files (`VALIDATE_ALL_CODEBASE=false`). Faster on large repos; the net-new gate still uses Chargate's own diff. |
+| `incremental` | `true` | PR events only: ask MegaLinter to scan just the changed files (`VALIDATE_ALL_CODEBASE=false`). Faster on large repos; repository-level scanners may still read the whole repo or history. The net-new gate still uses Chargate's own diff. |
 | `ignore_sops_encrypted` | `true` | Ignore secret-scanner hits on SOPS-encrypted (`ENC[AES256_GCM,...]`) values — 100% false positives. A plaintext secret in the same file still gates. |
 
 ### SARIF output
