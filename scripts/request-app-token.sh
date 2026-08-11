@@ -15,6 +15,14 @@ emit_empty() {
   exit 0
 }
 
+# jq and curl ship on every GitHub-hosted runner but are routinely absent from minimal
+# self-hosted / ARC images. Without this check the script dies on the first `jq` with a
+# "command not found" and no explanation of why PR comments lost their Chargate[bot]
+# identity — so treat a missing tool as one more fail-soft condition.
+for tool in jq curl; do
+  command -v "${tool}" >/dev/null 2>&1 || emit_empty "${tool} not installed on this runner"
+done
+
 broker_url="${TOKEN_BROKER_URL:-https://chargate.magmamoose.com}"
 audience="${OIDC_AUDIENCE:-chargate}"
 [ -n "${broker_url}" ] || emit_empty "broker disabled"

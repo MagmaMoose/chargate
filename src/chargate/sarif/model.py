@@ -55,7 +55,9 @@ def tool_driver_name(run: dict) -> str | None:
 # Dedicated secret/credential scanners: every finding is a secret. Matched as a
 # substring of the lowercased driver name, so versioned names ("gitleaks v8") hit.
 _SECRET_SCANNER_DRIVERS = (
-    "gitleaks",
+    "gitleaks",  # removed in MegaLinter v10; kept for repos pinned to v8/v9
+    "betterleaks",  # v10's replacement for gitleaks (same rules, same config files)
+    "kingfisher",
     "trufflehog",
     "secretlint",
     "ggshield",
@@ -65,9 +67,13 @@ _SECRET_SCANNER_DRIVERS = (
 
 # Phrases in a rule's name/description or the result message that mark a
 # hardcoded-secret finding from a general-purpose scanner. Verified against a real
-# MegaLinter run: KICS is the linter that flags SOPS files, emitting rule name
+# MegaLinter run: KICS was the linter that flagged SOPS files, emitting rule name
 # "Passwords And Secrets - Generic Password" and message "Hardcoded secret key
 # appears in source" — no driver hint, no `secret` tag, no snippet, UUID rule id.
+# MegaLinter v10 removed KICS outright (Checkmarx supply-chain compromise) in favour
+# of checkov, whose equivalent findings are already caught by the CKV_SECRET* rule-id
+# branch below; these markers stay because they are driver-agnostic and still fire for
+# repos pinned to v8/v9 and for any other scanner that words it the same way.
 _SECRET_TEXT_MARKERS = ("passwords and secrets", "hardcoded secret", "hard-coded secret")
 _HARDCODED = ("hardcoded", "hard-coded", "hard coded")
 _CREDENTIAL_WORDS = (

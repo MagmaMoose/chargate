@@ -5,7 +5,14 @@
 #   DISABLE_ERRORS=true                       # MegaLinter never sets the exit code
 #   SARIF_REPORTER=true  JSON_REPORTER=true   # emit the reports chargate consumes
 #   SARIF_REPORTER_NORMALIZE_LINTERS_OUTPUT=true   # repo-relative URIs for net-new
-#   REPORT_OUTPUT_FOLDER=megalinter-reports
+#   REPORT_OUTPUT_FOLDER=/tmp/lint/megalinter-reports
+#
+# That last one is ABSOLUTE on purpose and must stay absolute. MegaLinter uses the
+# value verbatim and its images declare WORKDIR "/", so a relative value resolves to
+# /megalinter-reports INSIDE the container — outside the bind mount, and destroyed by
+# `docker run --rm`. Chargate shipped the relative form for months and gated on an
+# empty report the whole time, because the only .sarif that reached the workspace was
+# a stray per-linter file.
 #
 # This file is MegaLinter's config for the repo being scanned. Drop it at a
 # consumer repo root to tune which linters run. Anything here is additive to the
@@ -21,8 +28,12 @@ VALIDATE_ALL_CODEBASE: true
 
 # Security / repository scanners worth enabling (verify availability per flavor):
 #   REPOSITORY_TRIVY, REPOSITORY_SEMGREP, REPOSITORY_CHECKOV,
-#   REPOSITORY_GITLEAKS, REPOSITORY_SECRETLINT, REPOSITORY_KINGFISHER (secrets),
+#   REPOSITORY_BETTERLEAKS, REPOSITORY_SECRETLINT, REPOSITORY_KINGFISHER (secrets),
 #   REPOSITORY_OSV_SCANNER, REPOSITORY_GRYPE (SCA: pip/npm/go lockfiles).
+#
+# MegaLinter v10 removed REPOSITORY_GITLEAKS (-> REPOSITORY_BETTERLEAKS, same author
+# and config files) and REPOSITORY_KICS (-> REPOSITORY_CHECKOV, after the Checkmarx
+# supply-chain compromise). Naming a removed key does nothing — silently.
 #
 # Example: run security + Python + common lint only (uncomment to use a subset):
 # ENABLE:
@@ -35,4 +46,4 @@ VALIDATE_ALL_CODEBASE: true
 # Speed: skip noisy or irrelevant linters here, e.g.:
 # DISABLE_LINTERS:
 #   - SPELL_CSPELL
-#   - COPYPASTE_JSCPD
+#   - COPYPASTE_JSCPD   # amd64-only upstream; auto-skipped by name on an arm64 runner

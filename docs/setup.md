@@ -208,6 +208,43 @@ Chargate injects the critical env (`DISABLE_ERRORS`, `SARIF_REPORTER`,
 so the gate is always Chargate's. Drop a `.mega-linter.yml` at your repo root to
 tune which linters run; it is additive to the injected env.
 
+`REPORT_OUTPUT_FOLDER` is injected as an **absolute container path**
+(`/tmp/lint/megalinter-reports`) and must stay one. MegaLinter uses the value
+verbatim and its images declare `WORKDIR /`, so a relative value resolves to
+`/megalinter-reports` *inside* the container — outside the bind mount, and destroyed
+by `docker run --rm`. Do not override it to a relative path in `.mega-linter.yml`.
+
+Images come from `ghcr.io/oxsecurity` at `v10.0.0` by default. MegaLinter froze Docker
+Hub publishing at `v9.4.0`, so `docker.io` cannot serve any current version — point
+`megalinter_registry` / `megalinter_namespace` at a mirror if you need one, or
+`megalinter_image` at a full reference to bypass name composition entirely.
+
+## Troubleshooting
+
+**`exec /bin/bash: exec format error`** — the runner is arm64 and MegaLinter's flavor
+images are `linux/amd64` only. Chargate's default `arch_strategy: auto` avoids this by
+running the multi-arch per-linter images instead; you see this error only with
+`arch_strategy: flavor`, and Chargate replaces it with a message naming the alternatives.
+See [Architecture support](https://github.com/MagmaMoose/chargate#architecture-support).
+
+**"MegaLinter linted 0 files" on a containerised (ARC / docker-in-docker) runner** — the
+`-v` bind mount is resolved by the *host* Docker daemon, not by the job container, so the
+workspace path must exist on the host with the same path. Mount the runner's work
+directory through at an identical path, or run Chargate on a runner with a local daemon.
+
+**The gate reports `net-new 0 / 0 total` on every PR** — the scan produced nothing.
+Chargate now prints `WARNING: MegaLinter's SARIF contains no runs` and, under `strict`,
+fails the job. Check `REPORT_OUTPUT_FOLDER` (above) first.
+
+**`actions/setup-python` fails with "version not found" on arm64** — `setup-python`
+publishes `linux/arm64` builds only for the Ubuntu 22.04/24.04/26.04 images. Set
+`setup_python: 'false'` and provide Python 3.11+ on the runner image; Chargate is
+stdlib-only pure Python and needs nothing else.
+
+**PR comments are authored by `github-actions[bot]` instead of `Chargate[bot]`** — the
+token broker step is fail-soft and logs a `::warning::` with the reason. On a minimal
+self-hosted image the usual reason is a missing `jq` or `curl`.
+
 ## Migrating from v1
 
 v1 was a composite action that fetched a hand-rolled scanner runtime from

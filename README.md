@@ -29,7 +29,7 @@ still sees everything, including inherited debt.
 - [Net-new semantics](#net-new-semantics)
 - [PR comments](#pr-comments-ghas-style)
 - [Sinks: DefectDojo & Dependency-Track](#sinks-defectdojo--dependency-track)
-- [Modes](#modes) · [CLI](#cli)
+- [Modes](#modes) · [CLI](#cli) · [Architecture support](#architecture-support)
 - [Versioning & pinning](#versioning--pinning) · [Security](#security)
 - [What MegaLinter covers](#what-megalinter-covers-vs-the-old-hand-rolled-set) · [Migrating from v1](#migrating-from-v1)
 - [Documentation & contributing](#documentation--contributing)
@@ -217,7 +217,13 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 | Input | Default | Description |
 | --- | --- | --- |
 | `flavor` | `security` | MegaLinter flavor: `security` (focused default) · `all` (full lint image) · `python` · `go` · … |
-| `megalinter_tag` | `v8` | MegaLinter image tag or digest to pin. |
+| `megalinter_registry` | `ghcr.io` | Registry host for the MegaLinter images. MegaLinter froze Docker Hub publishing at `v9.4.0`, so `docker.io` cannot serve `v9.5.0+`. Point this at a mirror / pull-through cache if you have one. |
+| `megalinter_namespace` | `oxsecurity` | Image namespace under the registry. |
+| `megalinter_image` | `''` | **Full image reference**, overriding registry + namespace + flavor + tag entirely (e.g. a [custom flavor](https://megalinter.io/latest/custom-flavors/): `ghcr.io/you/repo/megalinter-custom-flavor:v10.0.0`). When set, Chargate never composes an image name. |
+| `megalinter_tag` | `v10.0.0` | MegaLinter image tag, or a `sha256:…` digest to pin. |
+| `docker_platform` | `''` | Value for `docker run --platform`, e.g. `linux/amd64` on an arm64 runner with qemu/binfmt installed. |
+| `arch_strategy` | `auto` | How to run on a non-amd64 daemon: `auto` (flavor image on amd64, per-linter images on arm64) · `flavor` · `standalone` · `fail`. See [Architecture support](#architecture-support). |
+| `standalone_linters` | `''` | Comma-separated linter keys for standalone mode. Default: the SARIF-emitting linters of the selected flavor. |
 | `enable_linters` | `''` | Comma-separated MegaLinter linter keys to enable (others off). |
 | `disable_linters` | `''` | Comma-separated MegaLinter linter keys to disable. |
 | `incremental` | `true` | PR events only: ask MegaLinter to scan just the changed files (`VALIDATE_ALL_CODEBASE=false`). Faster on large repos; repository-level scanners may still read the whole repo or history. The net-new gate still uses Chargate's own diff. |
@@ -268,6 +274,7 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 
 | Input | Default | Description |
 | --- | --- | --- |
+| `setup_python` | `true` | Run `actions/setup-python`. Set `false` on a runner that already has Python 3.11+ — `setup-python` only publishes `linux/arm64` builds for the Ubuntu 22.04/24.04/26.04 images. |
 | `python_version` | `3.12` | Python version used to run the Chargate CLI. |
 
 ## Outputs
@@ -279,6 +286,8 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 | `net_new_count` | Number of net-new (PR-introduced) findings. |
 | `total_count` | Total findings in the full SARIF (net-new + pre-existing). |
 | `sarif_path` | Path to the full (unfiltered) SARIF report. |
+| `scan_mode` | How MegaLinter actually ran: `flavor` · `standalone` · `provided`. Assert on it to refuse a release built on a reduced scan. |
+| `linters_skipped` | Linters standalone mode could not run, with a reason for each (empty otherwise). |
 
 ```yaml
 - uses: magmamoose/chargate@v2
@@ -398,10 +407,62 @@ uploads it to your Dependency-Track server:
 chargate filter-sarif --sarif report.sarif --base "$BASE" --head "$HEAD" \
     --out net-new.sarif --counts-json counts.json --fail-on any
 chargate ci --mode auto --flavor all --sarif-out full.sarif
+chargate ci --arch-strategy standalone --jobs 4   # per-linter images (the arm64 path)
 chargate local path/to/file.py        # what the pre-commit hook runs
 ```
 
 Exit codes: `0` pass · `1` blocking net-new findings · `2` setup/usage error.
+
+## Architecture support
+
+MegaLinter's **flavor** images (`megalinter`, `megalinter-security`, …) are published
+for `linux/amd64` **only** — upstream ships no arm64 manifest for any flavor at any tag.
+On an arm64 runner Docker fails with the famously unhelpful `exec /bin/bash: exec format
+error`. MegaLinter's **per-linter** images (`megalinter-only-<key>`) *are* multi-arch as
+of `v10.0.0`, so Chargate substitutes them:
+
+| `arch_strategy` | amd64 daemon | arm64 daemon |
+| --- | --- | --- |
+| `auto` (default) | flavor image | per-linter `megalinter-only-*` images |
+| `flavor` | flavor image | **error** naming the architecture and every way out |
+| `standalone` | per-linter images | per-linter images |
+| `fail` | flavor image | **error** — refuse to run rather than degrade |
+
+Standalone runs say so, in the job summary *and* on the PR, and list every linter they
+skipped with a reason — a reduced scan that finds nothing otherwise looks exactly like a
+clean repo. The `scan_mode` output lets a release job refuse to ship on one.
+
+For the `security` flavor the arm64 substitution covers **all 18** of its SARIF-emitting
+linters (trivy, semgrep, checkov, grype, syft, bandit, betterleaks, kingfisher, secretlint,
+devskim, dustilock, kubescape, tflint, hadolint, shellcheck, cfn-lint, ansible-lint,
+trivy-sbom). Upstream's 13 amd64-only linters are all style/language tooling (jscpd,
+powershell, chktex, …); those are skipped by name, never silently.
+
+Two other routes, both supported:
+
+```yaml
+# 1. Your own arm64 flavor — one image, one pull, one container start.
+#    https://megalinter.io/latest/custom-flavors/
+- uses: magmamoose/chargate@v2
+  with:
+    megalinter_image: ghcr.io/you/your-flavor-repo/megalinter-custom-flavor:v10.0.0
+
+# 2. Emulate amd64 (needs qemu-user-static + binfmt on the runner). Correct, but
+#    roughly 5-10x slower.
+- uses: magmamoose/chargate@v2
+  with:
+    docker_platform: linux/amd64
+```
+
+Both also switch off the substitution: setting either tells Chargate you have taken
+responsibility for the architecture.
+
+> **Registry note.** MegaLinter froze Docker Hub publishing at `v9.4.0`; `v9.5.0`,
+> `v9.6.0` and `v10.x` exist only on `ghcr.io`, which is why Chargate defaults there.
+> `megalinter_registry` / `megalinter_namespace` / `megalinter_image` retarget it at a
+> mirror or pull-through cache, and each is also readable from a `CHARGATE_*` env var
+> (`CHARGATE_MEGALINTER_REGISTRY`, …) so a self-hosted fleet can redirect every repo
+> without editing a single workflow.
 
 ## Versioning & pinning
 
@@ -446,7 +507,7 @@ Trivy, Semgrep, Checkov, Hadolint, ShellCheck, actionlint, ESLint, kubeconform/
 kube-score all map to MegaLinter linters. Dependency/SCA scanning (formerly
 pip-audit / npm audit / govulncheck) is covered by `REPOSITORY_OSV_SCANNER` +
 `REPOSITORY_TRIVY` + `REPOSITORY_GRYPE`. Secrets scanning moved from TruffleHog to
-MegaLinter's native `gitleaks` / `secretlint` / `kingfisher`.
+MegaLinter's native `betterleaks` (v10's gitleaks successor) / `secretlint` / `kingfisher`.
 
 ## Migrating from v1
 

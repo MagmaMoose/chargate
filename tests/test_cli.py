@@ -478,6 +478,128 @@ def test_ci_incremental_ignored_in_baseline_mode(pr_repo, monkeypatch):
     assert captured["config"].validate_all_codebase is True
 
 
+def test_ci_defaults_to_the_ghcr_flavor_image(pr_repo, monkeypatch):
+    # The headline fix: Docker Hub is frozen at v9.4.0, so a docker.io default cannot
+    # reach any current MegaLinter at all.
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--flavor", "security", "--quiet"])  # fmt: skip
+    assert captured["config"].image() == "ghcr.io/oxsecurity/megalinter-security:v10.0.0"
+
+
+def test_ci_megalinter_image_flag_overrides_everything(pr_repo, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--flavor", "security", "--megalinter-registry", "registry.internal",
+          "--megalinter-image", "registry.internal/acme/megalinter-custom-flavor:2026.1",
+          "--quiet"])  # fmt: skip
+    config = captured["config"]
+    assert config.image() == "registry.internal/acme/megalinter-custom-flavor:2026.1"
+
+
+def test_ci_registry_and_tag_fall_back_to_env(pr_repo, monkeypatch):
+    # A self-hosted fleet redirects every repo at an internal mirror with two env vars
+    # on the runner, without editing any workflow — which only works because the
+    # action appends these flags conditionally.
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    monkeypatch.setenv("CHARGATE_MEGALINTER_REGISTRY", "mirror.internal:5000")
+    monkeypatch.setenv("CHARGATE_MEGALINTER_NAMESPACE", "proxy/oxsecurity")
+    monkeypatch.setenv("CHARGATE_MEGALINTER_TAG", "v10")
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--flavor", "security", "--quiet"])  # fmt: skip
+    assert captured["config"].image() == (
+        "mirror.internal:5000/proxy/oxsecurity/megalinter-security:v10"
+    )
+
+
+def test_ci_explicit_flag_beats_the_env_default(pr_repo, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    monkeypatch.setenv("CHARGATE_MEGALINTER_REGISTRY", "mirror.internal:5000")
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--megalinter-registry", "ghcr.io", "--quiet"])  # fmt: skip
+    assert captured["config"].image().startswith("ghcr.io/")
+
+
+def test_ci_passes_arch_strategy_and_standalone_linters_through(pr_repo, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--arch-strategy", "standalone", "--standalone-linter", "PYTHON_BANDIT",
+          "--standalone-linter", "REPOSITORY_TRIVY", "--docker-platform", "linux/amd64",
+          "--jobs", "2", "--quiet"])  # fmt: skip
+    config = captured["config"]
+    assert config.strategy == "standalone"
+    assert config.standalone_linters == ("PYTHON_BANDIT", "REPOSITORY_TRIVY")
+    assert config.platform == "linux/amd64"
+    assert config.jobs == 2
+
+
+def test_ci_arch_guard_reports_a_clean_actionable_error(pr_repo, capsys, monkeypatch):
+    # Replaces Docker's `exec /bin/bash: exec format error` with something that names
+    # the architecture and every way out.
+    repo, base, head, _sarif_path = pr_repo
+    from chargate import megalinter as ml
+
+    def boom(config, *, runner=None):
+        image = "ghcr.io/oxsecurity/megalinter-security:v10.0.0"
+        raise ml.MegaLinterError(ml.ARM64_HELP.format(image=image, arch="arm64"))
+
+    monkeypatch.setattr(ml, "run", boom)
+    code = main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+                 "--quiet"])  # fmt: skip
+    assert code == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "arm64" in err
+    assert "arch_strategy: standalone" in err
+
+
+def test_ci_standalone_run_reports_the_reduced_scan(pr_repo, capsys, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    from chargate import megalinter as ml
+
+    def fake_run(config, *, runner=None):
+        return ml.MegaLinterRun(
+            returncode=0,
+            command=("docker",),
+            sarif_path=sarif_path,
+            strategy="standalone",
+            arch="arm64",
+            linters_run=("REPOSITORY_TRIVY",),
+            linters_skipped=(("COPYPASTE_JSCPD", "upstream image is linux/amd64 only"),),
+        )
+
+    monkeypatch.setattr(ml, "run", fake_run)
+    monkeypatch.setattr(ml, "locate_sarif", lambda config: sarif_path)
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo)])
+    err = capsys.readouterr().err
+    assert "arm64 runner — ran 1 MegaLinter standalone linter image(s)" in err
+    assert "skipped COPYPASTE_JSCPD" in err
+
+
+def test_ci_empty_sarif_is_reported_as_a_scan_failure(pr_repo, capsys, monkeypatch, tmp_path: Path):
+    # The shape the relative-REPORT_OUTPUT_FOLDER bug took: a well-formed document that
+    # had scanned nothing, so the gate passed everything. --strict must fail on it.
+    repo, base, head, _sarif_path = pr_repo
+    empty = tmp_path / "empty.sarif"
+    empty.write_text(json.dumps({"version": "2.1.0", "runs": []}), encoding="utf-8")
+    from chargate import megalinter as ml
+
+    monkeypatch.setattr(
+        ml,
+        "run",
+        lambda config, *, runner=None: ml.MegaLinterRun(0, ("docker",), empty),
+    )
+    monkeypatch.setattr(ml, "locate_sarif", lambda config: empty)
+    code = main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+                 "--strict", "--quiet"])  # fmt: skip
+    assert code == EXIT_ERROR
+    assert "contains no runs" in capsys.readouterr().err
+
+
 def test_local_no_staged_files_passes(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -47,10 +47,54 @@ inputs:
     description: 'MegaLinter flavor: security (default) | all (full lint image) | python | go | ...'
     required: false
     default: 'security'
-  megalinter_tag:
-    description: 'MegaLinter image tag or digest to pin.'
+  megalinter_registry:
+    description: >-
+      Registry host for the MegaLinter images. Default ghcr.io — MegaLinter froze Docker
+      Hub publishing at v9.4.0, so docker.io cannot serve v9.5.0+ at all. Point this at a
+      mirror or pull-through cache if you have one.
     required: false
-    default: 'v8'
+    default: ''
+  megalinter_namespace:
+    description: 'Image namespace under the registry. Default oxsecurity.'
+    required: false
+    default: ''
+  megalinter_image:
+    description: >-
+      Full image reference, overriding registry + namespace + flavor + tag entirely. Use
+      it for a MegaLinter custom flavor (e.g. ghcr.io/you/repo/megalinter-custom-flavor:v10.0.0
+      — the supported way to get a single-image arm64 build) or an internal mirror. When
+      set, Chargate never composes an image name.
+    required: false
+    default: ''
+  megalinter_tag:
+    description: >-
+      MegaLinter image tag, or a `sha256:...` digest to pin. Default v10.0.0 (the
+      immutable release tag, not the floating `v10` alias).
+    required: false
+    default: ''
+  docker_platform:
+    description: >-
+      Value for `docker run --platform`. Only needed to force emulation, e.g. linux/amd64
+      on an arm64 runner that has qemu-user-static + binfmt installed. Setting it also
+      tells Chargate you have taken responsibility for the architecture, so it stops
+      substituting the per-linter images.
+    required: false
+    default: ''
+  arch_strategy:
+    description: >-
+      How to run MegaLinter when the Docker daemon is not linux/amd64. auto (default):
+      the flavor image on amd64, MegaLinter's per-linter `megalinter-only-*` images
+      (multi-arch from v10.0.0) on arm64. flavor: always the flavor image — fails fast
+      with an actionable error on arm64 instead of `exec format error`. standalone:
+      always per-linter images. fail: refuse to run rather than degrade.
+    required: false
+    default: 'auto'
+  standalone_linters:
+    description: >-
+      Comma-separated MegaLinter linter keys to run in standalone mode. Default: the
+      SARIF-emitting linters of the selected flavor.
+    required: false
+    default: ''
   enable_linters:
     description: 'Comma-separated MegaLinter linter keys to enable (others off).'
     required: false
@@ -168,6 +212,14 @@ inputs:
     required: false
     default: 'true'
 
+  setup_python:
+    description: >-
+      Run actions/setup-python. Set false on a runner that already has a suitable Python
+      3.11+ — setup-python only publishes linux/arm64 builds for the Ubuntu 22.04/24.04/26.04
+      images, so on any other arm64 self-hosted/ARC image it fails with "version not found".
+      Chargate itself is stdlib-only pure Python and runs anywhere.
+    required: false
+    default: 'true'
   python_version:
     description: 'Python version used to run the chargate CLI.'
     required: false
@@ -189,6 +241,15 @@ outputs:
   sarif_path:
     description: 'Path to the full (unfiltered) SARIF report.'
     value: ${{ steps.chargate.outputs.sarif_path }}
+  scan_mode:
+    description: >-
+      How MegaLinter actually ran: flavor (the flavor image) | standalone (per-linter
+      megalinter-only-* images, the arm64 path) | provided (an existing SARIF was passed
+      in). Assert on this to fail a release job that would otherwise ship on a reduced scan.
+    value: ${{ steps.chargate.outputs.scan_mode }}
+  linters_skipped:
+    description: 'Linters standalone mode could not run, with the reason for each (empty otherwise).'
+    value: ${{ steps.chargate.outputs.linters_skipped }}
 
 runs:
   using: composite
@@ -200,6 +261,7 @@ runs:
         fetch-depth: ${{ inputs.fetch_depth }}
 
     - name: Set up Python
+      if: ${{ inputs.setup_python == 'true' }}
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ inputs.python_version }}
@@ -264,6 +326,12 @@ runs:
         STRICT_IN: ${{ inputs.strict }}
         FLAVOR_IN: ${{ inputs.flavor }}
         ML_TAG_IN: ${{ inputs.megalinter_tag }}
+        ML_REGISTRY_IN: ${{ inputs.megalinter_registry }}
+        ML_NAMESPACE_IN: ${{ inputs.megalinter_namespace }}
+        ML_IMAGE_IN: ${{ inputs.megalinter_image }}
+        ML_PLATFORM_IN: ${{ inputs.docker_platform }}
+        ARCH_STRATEGY_IN: ${{ inputs.arch_strategy }}
+        STANDALONE_LINTERS_IN: ${{ inputs.standalone_linters }}
         ENABLE_LINTERS_IN: ${{ inputs.enable_linters }}
         DISABLE_LINTERS_IN: ${{ inputs.disable_linters }}
         INCREMENTAL_IN: ${{ inputs.incremental }}
@@ -295,10 +363,21 @@ runs:
           --fail-on "$FAIL_ON_IN"
           --precision "$PRECISION_IN"
           --flavor "$FLAVOR_IN"
-          --megalinter-tag "$ML_TAG_IN"
           --repo "."
           --head "$head"
           --sarif-out "$sarif_abs")
+        # Image-selection inputs default to EMPTY and are appended only when set, so
+        # the CLI's own defaults (and its CHARGATE_* env fallbacks, which let a
+        # self-hosted fleet redirect every repo at once) stay reachable. Passing the
+        # action's default unconditionally would silently shadow both.
+        [ -n "$ML_TAG_IN" ] && args+=(--megalinter-tag "$ML_TAG_IN")
+        [ -n "$ML_REGISTRY_IN" ] && args+=(--megalinter-registry "$ML_REGISTRY_IN")
+        [ -n "$ML_NAMESPACE_IN" ] && args+=(--megalinter-namespace "$ML_NAMESPACE_IN")
+        [ -n "$ML_IMAGE_IN" ] && args+=(--megalinter-image "$ML_IMAGE_IN")
+        [ -n "$ML_PLATFORM_IN" ] && args+=(--docker-platform "$ML_PLATFORM_IN")
+        [ -n "$ARCH_STRATEGY_IN" ] && args+=(--arch-strategy "$ARCH_STRATEGY_IN")
+        IFS=',' read -ra _sa <<< "$STANDALONE_LINTERS_IN"
+        for l in "${_sa[@]}"; do [ -n "$l" ] && args+=(--standalone-linter "$l"); done
         [ -n "$base" ] && args+=(--base "$base")
         [ "$STRICT_IN" = "true" ] && args+=(--strict)
         # SOPS-encrypted secret false positives are ignored by default; opt out here.

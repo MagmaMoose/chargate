@@ -44,6 +44,13 @@ Each sink is active iff its host/URL flag is set.
 chargate ci --mode auto --flavor all --sarif-out full.sarif
 ```
 
+Every image-selection flag also reads a `CHARGATE_*` env var when the flag is
+omitted (`CHARGATE_MEGALINTER_REGISTRY`, `CHARGATE_MEGALINTER_NAMESPACE`,
+`CHARGATE_MEGALINTER_IMAGE`, `CHARGATE_MEGALINTER_TAG`, `CHARGATE_DOCKER_PLATFORM`,
+`CHARGATE_ARCH_STRATEGY`, `CHARGATE_JOBS`), so a self-hosted runner fleet can point
+every repo at an internal mirror without editing any workflow. Explicit flag beats
+env var beats built-in default.
+
 Key flags beyond the shared filter options:
 
 | Flag | Default | Purpose |
@@ -51,7 +58,14 @@ Key flags beyond the shared filter options:
 | `--mode` | `auto` | `auto` (from `GITHUB_EVENT_NAME`), `pr` (net-new gate), or `baseline` (no gate). |
 | `--sarif` | — | Use an existing SARIF instead of running MegaLinter. |
 | `--flavor` | `all` | MegaLinter flavor (`all` = full image). |
-| `--megalinter-tag` | `v8` | MegaLinter image tag/digest. |
+| `--megalinter-tag` | `v10.0.0` | MegaLinter image tag, or a `sha256:…` digest to pin. |
+| `--megalinter-registry` | `ghcr.io` | Registry host. Docker Hub is frozen at `v9.4.0`, so it cannot serve `v9.5.0+`. |
+| `--megalinter-namespace` | `oxsecurity` | Image namespace (set for a mirror / pull-through cache). |
+| `--megalinter-image` | — | Full image reference, overriding registry/namespace/flavor/tag entirely. |
+| `--docker-platform` | — | Value for `docker run --platform` (e.g. `linux/amd64` to force emulation). |
+| `--arch-strategy` | `auto` | `auto` (flavor image on amd64, per-linter images on arm64) · `flavor` · `standalone` · `fail`. |
+| `--standalone-linter` | — | Linter key for standalone mode (repeatable). Default: the flavor's SARIF-emitting set. |
+| `--jobs` | `4` | Standalone mode: concurrent linter containers. |
 | `--enable-linter` / `--disable-linter` | — | Toggle a linter (repeatable). |
 | `--sarif-out` / `--filtered-out` / `--counts-json` | — | Write the full / net-new / counts outputs. |
 | `--strict` | off | Fail the job if MegaLinter itself errors. |

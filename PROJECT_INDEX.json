@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-22T00:00:00Z",
+  "generated": "2026-08-12T00:00:00Z",
   "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact) and a CycloneDX BOM (Syft) is shipped to Dependency-Track. One `chargate` CLI backs TWO GitHub surfaces: a composite action (action.yml) and a pre-commit hook (.pre-commit-hooks.yaml). The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary. A SEPARATE in-repo FastAPI service (broker/, deployed via k8s/) mints Chargate[bot] tokens for PR-comment authorship via GitHub Actions OIDC — it is NOT part of the stdlib-only CLI wheel (own `broker` dep-group).",
   "entrypoints": [
     "src/chargate/cli.py:main (subcommands: filter-sarif | ci | local | install-hooks | uninstall-hooks | version)",
@@ -58,8 +58,14 @@
     },
     "megalinter": {
       "path": "src/chargate/megalinter.py",
-      "purpose": "Build the MegaLinter env (DISABLE_ERRORS=true so it never gates; SARIF/JSON reporters on; normalized URIs; incremental VALIDATE_ALL_CODEBASE=false opt-in) + docker run command, run it (runner injectable), and locate the merged SARIF tolerating filename ambiguity. Command assembly is pure/testable.",
-      "exports": ["run", "build_env", "build_docker_command", "locate_sarif", "MegaLinterConfig", "MegaLinterRun", "MegaLinterError", "DEFAULT_TAG", "CONTAINER_WORKSPACE"],
+      "purpose": "Build the MegaLinter env (DISABLE_ERRORS=true so it never gates; SARIF/JSON reporters on; normalized URIs; REPORT_OUTPUT_FOLDER ABSOLUTE under /tmp/lint, or the merged SARIF is written inside the container and destroyed by --rm) + the docker run command; detect the Docker DAEMON architecture and plan the run: the amd64-only flavor image, or MegaLinter multi-arch per-linter megalinter-only-* images merged back into one SARIF (arm64), or a precise error naming every way out. Images default to ghcr.io because Docker Hub is frozen at v9.4.0. Planning/env/command assembly are pure/testable; the runner is injectable.",
+      "exports": ["run", "resolve_plan", "merge_sarif", "docker_arch", "build_env", "build_docker_command", "locate_sarif", "MegaLinterConfig", "MegaLinterRun", "RunPlan", "RunStep", "MegaLinterError", "DEFAULT_REGISTRY", "DEFAULT_NAMESPACE", "DEFAULT_TAG", "CONTAINER_WORKSPACE", "ARCH_STRATEGIES", "ARM64_HELP"],
+      "depends_on": ["linters"]
+    },
+    "linters": {
+      "path": "src/chargate/linters.py",
+      "purpose": "Version-pinned table of MegaLinter standalone (megalinter-only-*) images: which linters have an arm64 manifest at DEFAULT_TAG, and which can emit SARIF (one that cannot is invisible to the gate, so running it is pure cost). Plus the per-flavor substitution set used when the amd64-only flavor image cannot run. Re-verified against the live registry by tests/test_linters_registry.py.",
+      "exports": ["STANDALONE_LINTERS", "FLAVOR_STANDALONE_SETS", "LinterImage"],
       "depends_on": []
     },
     "defectdojo": {

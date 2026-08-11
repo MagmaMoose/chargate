@@ -8,8 +8,6 @@ tests in ``test_readiness.py`` never exercise this path because they never set
 
 from __future__ import annotations
 
-import pytest
-
 from app.config import BrokerConfig, _worker_overlay, cf_env, load_config
 
 
@@ -53,7 +51,9 @@ def test_load_config_worker_overlay_wins_over_env(monkeypatch):
     monkeypatch.setenv("APP_ID", "env-value")
     monkeypatch.setenv("PRIVATE_KEY", "env-key")
 
-    token = cf_env.set(_FakeCfEnv(APP_ID="cf-value", PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nx\n"))
+    token = cf_env.set(
+        _FakeCfEnv(APP_ID="cf-value", PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nx\n")
+    )
     try:
         config = load_config()
     finally:
