@@ -22,6 +22,10 @@ APPLY_FIXES: none
 SHOW_ELAPSED_TIME: true
 FLAVOR_SUGGESTIONS: false
 
+# B101 (assert in test code) is correct pytest style; skip it globally so test files
+# don't drown real findings in noise. All other bandit rules remain active.
+PYTHON_BANDIT_ARGUMENTS: --skip B101
+
 # Whole-repo scan on every run; chargate decides net-new from the git diff, not
 # MegaLinter's incremental mode, so the full SARIF is always complete for DD.
 VALIDATE_ALL_CODEBASE: true
