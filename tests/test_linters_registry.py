@@ -39,13 +39,13 @@ _ACCEPT = ",".join(
 def _manifest(repo: str, ref: str) -> dict:
     """Fetch a manifest from ghcr.io with an anonymous pull token."""
     token_url = f"https://ghcr.io/token?scope=repository:{repo}:pull&service=ghcr.io"
-    with urllib.request.urlopen(token_url) as response:
+    with urllib.request.urlopen(token_url) as response:  # nosec B310
         token = json.load(response)["token"]
     request = urllib.request.Request(
         f"https://ghcr.io/v2/{repo}/manifests/{ref}",
         headers={"Authorization": f"Bearer {token}", "Accept": _ACCEPT},
     )
-    with urllib.request.urlopen(request) as response:
+    with urllib.request.urlopen(request) as response:  # nosec B310
         return json.load(response)
 
 

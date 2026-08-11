@@ -62,6 +62,7 @@ jobs:
           # Author PR comments as Chargate[bot] when the app is configured; the
           # Security-tab upload keeps using the default github_token.
           pr_comment_token: ${{ steps.app-token.outputs.token }}
+          strict: 'true'      # fail hard on a runs-less SARIF (empty-gate regression guard)
           # DefectDojo — full-SARIF sink. product / product_type / engagement
           # default to the repo name / "Research and Development" / "ci".
           defectdojo_url: ${{ vars.MM_DEFECTDOJO_URL }}

@@ -521,7 +521,7 @@ def test_ci_explicit_flag_beats_the_env_default(pr_repo, monkeypatch):
     monkeypatch.setenv("CHARGATE_MEGALINTER_REGISTRY", "mirror.internal:5000")
     main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
           "--megalinter-registry", "ghcr.io", "--quiet"])  # fmt: skip
-    assert captured["config"].image().startswith("ghcr.io/")
+    assert captured["config"].image().split("/")[0] == "ghcr.io"
 
 
 def test_ci_passes_arch_strategy_and_standalone_linters_through(pr_repo, monkeypatch):

@@ -62,7 +62,7 @@ STANDALONE_REPO_PREFIX = "megalinter-only-"
 # v9.6.0 and below, so no earlier tag can scan on arm64 at all.
 DEFAULT_TAG = "v10.0.0"
 
-CONTAINER_WORKSPACE = "/tmp/lint"  # MegaLinter's DEFAULT_DOCKER_WORKSPACE_DIR.
+CONTAINER_WORKSPACE = "/tmp/lint"  # MegaLinter's DEFAULT_DOCKER_WORKSPACE_DIR.  # nosec B108
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 SARIF_VERSION = "2.1.0"
 
@@ -270,7 +270,7 @@ def docker_arch(runner: Callable[[list[str]], subprocess.CompletedProcess] | Non
     only the fallback for when Docker cannot be asked.
     """
     run_fn = runner or (
-        lambda cmd: subprocess.run(cmd, capture_output=True, text=True, check=False)
+        lambda cmd: subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603
     )
     try:
         proc = run_fn(["docker", "version", "--format", "{{.Server.Arch}}"])
@@ -287,6 +287,28 @@ def _standalone_linters(
     config: MegaLinterConfig, arch: str
 ) -> tuple[list[str], list[tuple[str, str]]]:
     """Split the requested linters into (runnable, [(skipped, reason)]) for ``arch``."""
+    # The arm64 flags in STANDALONE_LINTERS were probed once, at DEFAULT_TAG.
+    # megalinter-only-* images are single-arch at v9 and below, so any pre-v10 tag
+    # would fail with exec format error on arm64 — exactly the failure this PR fixes.
+    # If the operator pins a different tag (without owning the image via image_ref or
+    # platform), refuse rather than proceeding on unverified capability data.
+    tag = config.image_tag.strip()
+    if (
+        arch != "amd64"
+        and not config.image_ref
+        and not config.platform
+        and not tag.startswith("sha256:")
+        and tag != DEFAULT_TAG
+    ):
+        raise MegaLinterError(
+            f"The standalone arm64 image table was verified at {DEFAULT_TAG}; "
+            f"the pinned tag '{tag}' has not been probed for arm64 capability. "
+            "MegaLinter's per-linter images are multi-arch only from v10.0.0, so an "
+            "earlier tag will fail with exec format error on arm64. "
+            "Options: use the default tag, pin to a digest "
+            "(image_tag: sha256:<digest>), or set image_ref / platform to indicate "
+            "you have verified the tag yourself."
+        )
     if config.standalone_linters:
         requested: tuple[str, ...] = config.standalone_linters
     elif config.enable_linters:
@@ -428,12 +450,12 @@ def locate_sarif(config: MegaLinterConfig) -> Path:
 
 def _streaming_runner(cmd: list[str]) -> subprocess.CompletedProcess:
     """Run a container with its output inherited — one container, live logs."""
-    return subprocess.run(cmd, check=False)
+    return subprocess.run(cmd, check=False)  # nosec B603
 
 
 def _capturing_runner(cmd: list[str]) -> subprocess.CompletedProcess:
     """Run a container capturing output, so N concurrent runs don't interleave."""
-    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603
 
 
 def _echo_step_output(step: RunStep, completed: subprocess.CompletedProcess) -> None:

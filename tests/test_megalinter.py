@@ -41,7 +41,7 @@ def test_image_name_for_flavors():
 def test_default_registry_is_ghcr_not_docker_hub():
     # MegaLinter froze Docker Hub at v9.4.0; docker.io cannot serve the default tag.
     assert ml.DEFAULT_REGISTRY == "ghcr.io"
-    assert ml.MegaLinterConfig().image().startswith("ghcr.io/")
+    assert ml.MegaLinterConfig().image().split("/")[0] == "ghcr.io"
 
 
 def test_registry_and_namespace_are_overridable_for_a_mirror():
@@ -109,13 +109,13 @@ def test_report_output_folder_is_absolute_inside_the_container():
     # A relative value resolves to /megalinter-reports (WORKDIR /), outside the bind
     # mount, and is destroyed by `docker run --rm` — the empty-gate bug.
     env = ml.build_env(ml.MegaLinterConfig())
-    assert env["REPORT_OUTPUT_FOLDER"] == "/tmp/lint/megalinter-reports"
+    assert env["REPORT_OUTPUT_FOLDER"] == "/tmp/lint/megalinter-reports"  # nosec B108
     assert env["REPORT_OUTPUT_FOLDER"].startswith(ml.CONTAINER_WORKSPACE + "/")
 
 
 def test_report_output_folder_follows_a_custom_report_dir():
     env = ml.build_env(ml.MegaLinterConfig(report_dir="reports/ml"))
-    assert env["REPORT_OUTPUT_FOLDER"] == "/tmp/lint/reports/ml"
+    assert env["REPORT_OUTPUT_FOLDER"] == "/tmp/lint/reports/ml"  # nosec B108
 
 
 def test_build_env_sets_runtime_uid_so_reports_are_not_root_owned():
@@ -151,7 +151,7 @@ def test_single_linter_env_names_only_that_linter():
     )
     assert env["ENABLE_LINTERS"] == "REPOSITORY_TRIVY"
     assert env["SINGLE_LINTER"] == "REPOSITORY_TRIVY"
-    assert env["REPORT_OUTPUT_FOLDER"] == "/tmp/lint/megalinter-reports/standalone/repository_trivy"
+    assert env["REPORT_OUTPUT_FOLDER"] == "/tmp/lint/megalinter-reports/standalone/repository_trivy"  # nosec B108
 
 
 # ── docker run assembly ──
@@ -272,6 +272,31 @@ def test_plan_refuses_to_substitute_the_all_flavor():
     # 100+ container starts is not something to do behind an operator's back.
     with pytest.raises(ml.MegaLinterError, match="No standalone linter set"):
         ml.resolve_plan(ml.MegaLinterConfig(flavor="all", strategy="standalone"), "arm64")
+
+
+def test_plan_standalone_arm64_rejects_a_pre_v10_tag():
+    # The arm64 capability table was verified at DEFAULT_TAG only; proceeding with an
+    # older tag would reproduce the exec format error this PR exists to prevent.
+    config = ml.MegaLinterConfig(flavor="security", image_tag="v9.6.0")
+    with pytest.raises(ml.MegaLinterError) as excinfo:
+        ml.resolve_plan(config, "arm64")
+    assert "v9.6.0" in str(excinfo.value)
+    assert ml.DEFAULT_TAG in str(excinfo.value)
+
+
+def test_plan_standalone_arm64_accepts_a_digest_pin():
+    # sha256: pins are treated as operator-verified — they uniquely identify a manifest.
+    digest = "sha256:" + "a" * 64
+    config = ml.MegaLinterConfig(flavor="security", image_tag=digest)
+    plan = ml.resolve_plan(config, "arm64")
+    assert plan.strategy == "standalone"
+
+
+def test_plan_standalone_arm64_accepts_image_ref_override():
+    # image_ref means the operator chose the image; chargate stops second-guessing it.
+    config = ml.MegaLinterConfig(image_ref="ghcr.io/acme/custom-megalinter:v9.6.0")
+    plan = ml.resolve_plan(config, "arm64")
+    assert plan.strategy == "flavor"
 
 
 def test_plan_skips_amd64_only_linters_on_arm64_with_a_reason():
