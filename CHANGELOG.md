@@ -2,6 +2,27 @@
 
 <!-- version list -->
 
+## v2.11.1 (2026-08-12)
+
+### Bug Fixes
+
+- **gate**: Restore B101 coverage and repair the DefectDojo sink
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+- **megalinter**: Chargate has been gating on an empty SARIF
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+- **megalinter**: Gate arm64 standalone on DEFAULT_TAG, suppress bandit false positives
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+- **megalinter**: Skip bandit B101 via PYTHON_BANDIT_ARGUMENTS in mega-linter config
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+
 ## v2.11.0 (2026-08-04)
 
 ### Chores
