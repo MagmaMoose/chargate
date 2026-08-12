@@ -580,9 +580,16 @@ def test_ci_standalone_run_reports_the_reduced_scan(pr_repo, capsys, monkeypatch
     assert "skipped COPYPASTE_JSCPD" in err
 
 
-def test_ci_empty_sarif_is_reported_as_a_scan_failure(pr_repo, capsys, monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("extra_args", [["--strict"], []], ids=["strict", "default"])
+def test_ci_empty_sarif_is_reported_as_a_scan_failure(
+    pr_repo, capsys, monkeypatch, tmp_path: Path, extra_args
+):
     # The shape the relative-REPORT_OUTPUT_FOLDER bug took: a well-formed document that
-    # had scanned nothing, so the gate passed everything. --strict must fail on it.
+    # had scanned nothing, so the gate passed everything.
+    #
+    # It must fail WITHOUT --strict too. strict defaults to false, so gating this on it
+    # would leave every consumer of the org-wide required check green on an empty
+    # report — the bug itself, reintroduced as the fix for the bug.
     repo, base, head, _sarif_path = pr_repo
     empty = tmp_path / "empty.sarif"
     empty.write_text(json.dumps({"version": "2.1.0", "runs": []}), encoding="utf-8")
@@ -595,9 +602,29 @@ def test_ci_empty_sarif_is_reported_as_a_scan_failure(pr_repo, capsys, monkeypat
     )
     monkeypatch.setattr(ml, "locate_sarif", lambda config: empty)
     code = main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
-                 "--strict", "--quiet"])  # fmt: skip
+                 "--quiet", *extra_args])  # fmt: skip
     assert code == EXIT_ERROR
     assert "contains no runs" in capsys.readouterr().err
+
+
+def test_ci_megalinter_tool_error_still_only_fails_under_strict(
+    pr_repo, capsys, monkeypatch, tmp_path: Path
+):
+    # The other half of the split: a non-zero MegaLinter exit with a real SARIF is a
+    # tool error, and whether that gates stays the caller's call via --strict.
+    repo, base, head, sarif_path = pr_repo
+    from chargate import megalinter as ml
+
+    monkeypatch.setattr(
+        ml,
+        "run",
+        lambda config, *, runner=None: ml.MegaLinterRun(2, ("docker",), sarif_path),
+    )
+    monkeypatch.setattr(ml, "locate_sarif", lambda config: sarif_path)
+    argv = ["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo), "--quiet"]
+    assert main([*argv, "--strict"]) == EXIT_ERROR
+    assert "did not complete cleanly" in capsys.readouterr().err
+    assert main(argv) != EXIT_ERROR
 
 
 def test_local_no_staged_files_passes(tmp_path: Path):

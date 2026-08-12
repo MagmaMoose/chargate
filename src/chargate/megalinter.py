@@ -240,9 +240,18 @@ def build_env(config: MegaLinterConfig, *, single_linter: str = "") -> dict[str,
     # job's checkout cannot clean it up. entrypoint.sh drops to this uid/gid via
     # /usr/bin/setup-runtime-user.sh, which the flavor AND megalinter-only-* images both
     # ship. Not available on Windows, hence the guard.
+    #
+    # `env` is built from scratch above, so a bare setdefault() here could never have
+    # been overridden by anything — the caller's environment is not its seed. That
+    # matters on a containerised (ARC / docker-in-docker) runner where the job user and
+    # the workspace owner differ: dropping to the job's uid makes MegaLinter unable to
+    # write the report tree it was just told to write, and the failure looks exactly
+    # like a scan that produced nothing. So consult the process environment explicitly —
+    # `env: {MEGALINTER_UID: '0'}` on the step is the escape hatch, and it needs no new
+    # action input.
     if hasattr(os, "getuid"):
-        env.setdefault("MEGALINTER_UID", str(os.getuid()))
-        env.setdefault("MEGALINTER_GID", str(os.getgid()))
+        env["MEGALINTER_UID"] = os.environ.get("MEGALINTER_UID") or str(os.getuid())
+        env["MEGALINTER_GID"] = os.environ.get("MEGALINTER_GID") or str(os.getgid())
     env.update(config.extra_env)
     return env
 

@@ -22,12 +22,28 @@ APPLY_FIXES: none
 SHOW_ELAPSED_TIME: true
 FLAVOR_SUGGESTIONS: false
 
-# B101 (assert in test code) is correct pytest style; skip it globally so test files
-# don't drown real findings in noise. All other bandit rules remain active.
-PYTHON_BANDIT_ARGUMENTS: --skip B101
+# There is deliberately no PYTHON_BANDIT_ARGUMENTS here. B101 ("assert used") fires on
+# every pytest assertion: it was 91 of the 100 net-new findings on the first run that
+# actually scanned anything, and 95 of 95 once the other rules were dealt with. But
+# `--skip B101` would disable the rule for src/ too, where `python -O` strips asserts
+# and a validation check written as one disappears — and this file is the template
+# consumers copy, so it would sell that blind spot as chargate's default. The skip is
+# scoped to test directories in `.bandit.yml`, which MegaLinter picks up on its own —
+# the PYTHON_BANDIT descriptor declares `config_file_name: .bandit.yml` and resolves it
+# repo-root-first, ahead of its packaged copy. Same rule for every linter: reach for the
+# linter's own config file before reaching for a global `--skip`. To confirm which file
+# won, read the `- Command:` line's `-c` path in the log; the `- Rules config:` label
+# above it prints `[.bandit.yml]` for the packaged default too.
 
-# Whole-repo scan on every run; chargate decides net-new from the git diff, not
-# MegaLinter's incremental mode, so the full SARIF is always complete for DD.
+# Whole-repo scan — but ONLY when chargate runs with `incremental: false`.
+# chargate injects VALIDATE_ALL_CODEBASE as an env var computed from that input, and
+# an env var beats this file, exactly like the four settings in the header. The action
+# defaults `incremental` to true, so on a PR the file-based linters (PYTHON_*, BASH_*,
+# ...) see only the changed files and the SARIF that ships to DefectDojo is a
+# changed-files report rather than a repo inventory — 12 Python files on the run that
+# wrote this comment, not 48. Project-mode scanners (REPOSITORY_*: trivy, checkov,
+# devskim, semgrep, grype, betterleaks) cover the whole repo either way. The gate is
+# unaffected in both cases: net-new comes from the git diff, never from this setting.
 VALIDATE_ALL_CODEBASE: true
 
 # Security / repository scanners worth enabling (verify availability per flavor):

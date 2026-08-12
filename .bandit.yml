@@ -1,0 +1,64 @@
+# bandit rules config. MegaLinter's PYTHON_BANDIT descriptor declares
+# `config_file_name: ".bandit.yml"` and Linter.py resolves it repo-root-first
+# (`if os.path.isfile(self.workspace + os.path.sep + self.config_file_name)`, tried before
+# `default_rules_location`), passing it as `-c .bandit.yml` — `cli_config_arg_name`
+# defaults to `-c`. So this file REPLACES the packaged default
+# (/action/lib/.automation/.bandit.yml, which ships `assert_used: skips: []`) with no
+# wiring in .mega-linter.yml at all.
+#
+# Verifying that from a CI log needs care: MegaLinter prints `- Rules config:
+# [.bandit.yml]` either way, because the label is the resolved path with the templates
+# directory stripped out (Linter.py: `.replace(self.TEMPLATES_DIR, "")`). The run that
+# had no repo-root file printed exactly that line while actually using the packaged
+# default. The honest tell is the `- Command:` line one row below it — look for
+# `-c .bandit.yml`, not `-c /action/lib/.automation/.bandit.yml`.
+#
+# WHY it exists: the first run after chargate stopped gating on an empty SARIF
+# reported 100 net-new findings, 91 of them B101 "assert used" — and once the handful
+# of B108/B310/B603 sites were annotated, the entire blocking set was 95 findings from
+# that one rule, all of them pytest assertions. `assert` IS the pytest idiom, so the
+# gate's first real day of work was spent almost entirely on noise. Both obvious fixes
+# are wrong, and this repo shipped each of them before landing here:
+#
+#   * `PYTHON_BANDIT_ARGUMENTS: --skip B101` in .mega-linter.yml turns B101 off
+#     everywhere, production code included — where a bare `assert` is a genuine
+#     defect, because `python -O` strips assert statements and a validation check
+#     written as one silently vanishes. .mega-linter.yml doubles as the template
+#     consumers copy into their own repos, so that line would have sold a global
+#     blind spot as chargate's recommended baseline.
+#
+#   * `[tool.bandit] skips = ["B101"]` in pyproject.toml does nothing at all.
+#     MegaLinter invokes bandit as `-c <config_file_name>` and never as
+#     `-c pyproject.toml`, so it is never read.
+#
+# bandit's B101 plugin (`assert_used`) fnmatches each skip entry against the filename
+# being scanned, which is the precision the other two options lack: the rule stays fully
+# armed on src/ and broker/app/ and goes quiet only under a tests/ directory. Measured
+# with bandit 1.9.4 (the version MegaLinter v10.0.0 ships) over
+# tests/ + broker/tests/ + src/ + broker/app/:
+#
+# KEEP BOTH PATTERNS. Which one fires depends on the SHAPE of the paths bandit is
+# handed, and that shape is decided by MegaLinter's cli_lint_mode, not by us. Two
+# independent measurements disagreed about which pattern does the work — one saw
+# `*/tests/*` carry it, the other saw `tests/*` carry it — because they invoked
+# bandit with differently-shaped targets. Both readings are correct for their own
+# invocation, which is exactly the point: bandit may see "./tests/test_cli.py",
+# "tests/test_cli.py", the nested "broker/tests/...", or the absolute
+# "/tmp/lint/tests/..." form, and no single pattern covers all four.
+#
+# Under every path shape measured, the two patterns TOGETHER give B101 = 0 inside
+# tests and B101 fully armed everywhere else. So do not delete either on the
+# assumption it is the redundant one — the odds are even that you would remove the
+# load-bearing half, and ~95 findings come straight back on a required org-wide
+# check. Probe before trusting either: dropping a file containing a bare `assert` into
+# src/chargate/ and broker/app/ still reports B101 on both under this config, and a
+# src/chargate/tests/ copy of the same file does not.
+#
+# Every other bandit plugin is deliberately absent. bandit falls back to its built-in
+# defaults for any plugin a config file does not mention, so omitting them does NOT
+# disarm them — verified against 1.9.4 by scanning this repo with this file: B105, B106,
+# B404, B603 and B607 all still fire, and only the B101 hits disappear.
+assert_used:
+  skips:
+    - "*/tests/*"
+    - "tests/*"

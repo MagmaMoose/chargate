@@ -62,7 +62,10 @@ jobs:
           # Author PR comments as Chargate[bot] when the app is configured; the
           # Security-tab upload keeps using the default github_token.
           pr_comment_token: ${{ steps.app-token.outputs.token }}
-          strict: 'true'      # fail hard on a runs-less SARIF (empty-gate regression guard)
+          # A runs-less SARIF already fails on its own, for every consumer. This adds the
+          # other half: any MegaLinter tool error fails chargate's own dogfood run too,
+          # so a linter that stops working here is not quietly tolerated.
+          strict: 'true'
           # DefectDojo — full-SARIF sink. product / product_type / engagement
           # default to the repo name / "Research and Development" / "ci".
           defectdojo_url: ${{ vars.MM_DEFECTDOJO_URL }}
@@ -126,18 +129,50 @@ jobs:
           assert any(drivers), "SARIF runs carry no tool.driver.name"
           PY
 
-  # Weekly (and on any change to the table itself): re-probe every standalone image
-  # against ghcr.io. Kept off the PR path so normal CI stays offline and fast.
+  # Re-probe every standalone image against ghcr.io: weekly on the schedule, AND on any
+  # PR that edits the table itself.
+  #
+  # That second half used to be a comment only — the job was `if: github.event_name ==
+  # 'schedule'`, so the single change most likely to invalidate the table (editing it)
+  # was the one change that never checked it. Same shape as the bug this repo is fixing:
+  # a guard that reads as armed and never fires. `on.pull_request.paths` cannot express
+  # "this job only", so the paths test is a step, and everything expensive hangs off it —
+  # an unrelated PR spends ~15s deciding to do nothing and never touches the network, so
+  # normal CI stays offline and fast.
   megalinter-image-table:
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # base...HEAD below needs both sides present
+      - name: Does this event touch the standalone-image table?
+        id: probe
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "schedule" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The table lives in linters.py; the probe itself lives in the registry test.
+          if git diff --name-only "$BASE_SHA...HEAD" \
+             | grep -qxE 'src/chargate/linters\.py|tests/test_linters_registry\.py'; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            echo "standalone-image table unchanged — skipping the live registry probe"
+          fi
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        if: ${{ steps.probe.outputs.run == 'true' }}
         with:
           python-version: '3.12'
-      - run: uv sync
+      - if: ${{ steps.probe.outputs.run == 'true' }}
+        run: uv sync
       - name: Verify the standalone-image table against ghcr.io
+        if: ${{ steps.probe.outputs.run == 'true' }}
         env:
           CHARGATE_REGISTRY_TESTS: '1'
         run: uv run pytest tests/test_linters_registry.py -q

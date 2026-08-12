@@ -68,7 +68,7 @@ Key flags beyond the shared filter options:
 | `--jobs` | `4` | Standalone mode: concurrent linter containers. |
 | `--enable-linter` / `--disable-linter` | — | Toggle a linter (repeatable). |
 | `--sarif-out` / `--filtered-out` / `--counts-json` | — | Write the full / net-new / counts outputs. |
-| `--strict` | off | Fail the job if MegaLinter itself errors. |
+| `--strict` | off | Fail the job if MegaLinter itself errors. (A SARIF with no runs fails without it — see [architecture](architecture.md).) |
 | `--defectdojo-url` | — | DefectDojo base URL (enables import of the full SARIF). |
 | `--defectdojo-token-env` | `DEFECTDOJO_TOKEN` | Env var holding the DD API token. |
 | `--dd-product` / `--dd-engagement` / `--dd-engagement-id` | — | DefectDojo targeting. |

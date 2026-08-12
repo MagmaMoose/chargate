@@ -124,6 +124,17 @@ def test_build_env_sets_runtime_uid_so_reports_are_not_root_owned():
     assert env["MEGALINTER_GID"].isdigit()
 
 
+def test_runtime_uid_can_be_overridden_from_the_environment(monkeypatch):
+    # The escape hatch for a containerised runner whose workspace is owned by a
+    # different user than the job: dropping to the job's uid there leaves MegaLinter
+    # unable to write its own report tree, which presents as a scan that found nothing.
+    monkeypatch.setenv("MEGALINTER_UID", "0")
+    monkeypatch.setenv("MEGALINTER_GID", "0")
+    env = ml.build_env(ml.MegaLinterConfig())
+    assert env["MEGALINTER_UID"] == "0"
+    assert env["MEGALINTER_GID"] == "0"
+
+
 def test_build_env_defaults_to_whole_repo_scan():
     env = ml.build_env(ml.MegaLinterConfig())
     assert env["VALIDATE_ALL_CODEBASE"] == "true"

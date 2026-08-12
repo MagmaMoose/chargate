@@ -174,6 +174,15 @@ to `ci`. Uses `reimport-scan` by default (one Test per engagement;
 `close_old_findings` mitigates findings that disappear) and auto-creates the
 product/engagement.
 
+The uploaded SARIF carries a leading findings-free `chargate` run. DefectDojo derives a
+Test's type from `runs[0].tool.driver.name` alone, and MegaLinter's merged report has no
+stable first run — whichever linter emitted first wins, which follows the file types in
+the diff. Without that stamp the derived type changes from PR to PR and `reimport-scan`
+returns HTTP 400 `Test type mismatch`, so the full SARIF silently stops arriving. Your
+Tests are therefore typed `chargate Scan (SARIF)`; if an engagement already holds a Test
+typed by an earlier tool, Chargate retries once against `import-scan` to create a
+correctly-typed one and reimports into that from then on.
+
 ### Dependency-Track
 
 Generates a CycloneDX BOM (Syft, any language) and uploads it to your
@@ -232,9 +241,23 @@ See [Architecture support](https://github.com/MagmaMoose/chargate#architecture-s
 workspace path must exist on the host with the same path. Mount the runner's work
 directory through at an identical path, or run Chargate on a runner with a local daemon.
 
+**"Permission denied" writing `megalinter-reports/` on a containerised runner** — Chargate
+passes `MEGALINTER_UID`/`MEGALINTER_GID` from the calling process so the report tree is not
+left root-owned on a self-hosted runner. Where the job user and the workspace owner differ,
+that drops MegaLinter to a uid that cannot write, and the symptom is an empty scan rather
+than an obvious error. Override on the step — no action input needed:
+
+```yaml
+- uses: magmamoose/chargate@v2
+  env:
+    MEGALINTER_UID: '0'
+    MEGALINTER_GID: '0'
+```
+
 **The gate reports `net-new 0 / 0 total` on every PR** — the scan produced nothing.
-Chargate now prints `WARNING: MegaLinter's SARIF contains no runs` and, under `strict`,
-fails the job. Check `REPORT_OUTPUT_FOLDER` (above) first.
+Chargate prints `ERROR: MegaLinter's SARIF contains no runs` and fails the job with
+exit `2` — with or without `strict`, because a gate that scanned nothing must not
+report a pass. Check `REPORT_OUTPUT_FOLDER` (above) first.
 
 **`actions/setup-python` fails with "version not found" on arm64** — `setup-python`
 publishes `linux/arm64` builds only for the Ubuntu 22.04/24.04/26.04 images. Set

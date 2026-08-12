@@ -268,6 +268,7 @@ def cmd_ci(args: argparse.Namespace) -> int:
 
     # 1. Obtain the full SARIF: use a provided one, or run MegaLinter.
     megalinter_ok = True
+    scanned_nothing = False
     scan_note: str | None = None
     scan_mode = "provided" if args.sarif else "flavor"
     linters_skipped: tuple[tuple[str, str], ...] = ()
@@ -326,12 +327,20 @@ def cmd_ci(args: argparse.Namespace) -> int:
     # A SARIF with no runs is indistinguishable from a clean repo at the gate, so say
     # so out loud. This is the exact shape the relative-REPORT_OUTPUT_FOLDER bug took:
     # a well-formed document that had scanned nothing, gating on nothing, for months.
+    #
+    # It is fatal on its own, NOT only under --strict. `--strict` means "a linter blew
+    # up, decide whether that counts"; this is a different claim — the gate scanned
+    # nothing at all, so a pass carries no information. Routing it through --strict
+    # (default false) would have left every consumer of the org-wide required check
+    # green on an empty report, which is the exact bug this repo spent months not
+    # noticing. A gate that cannot fail must not be allowed to pass.
     if not args.sarif and not (sarif.get("runs") or []):
         _eprint(
-            "chargate: WARNING: MegaLinter's SARIF contains no runs — nothing was scanned, "
+            "chargate: ERROR: MegaLinter's SARIF contains no runs — nothing was scanned, "
             "so the gate cannot block anything. Check the MegaLinter output above."
         )
         megalinter_ok = False
+        scanned_nothing = True
 
     # 2. Always preserve the full SARIF as the shippable artifact.
     if args.sarif_out:
@@ -422,7 +431,10 @@ def cmd_ci(args: argparse.Namespace) -> int:
         }
     )
 
-    # 6. Exit. A MegaLinter tool error only fails under --strict.
+    # 6. Exit. A scan that produced no runs always fails; a MegaLinter tool error only
+    #    fails under --strict (see the runs check above for why they differ).
+    if scanned_nothing:
+        return _fail("MegaLinter's SARIF contains no runs — the gate scanned nothing.")
     if not megalinter_ok and args.strict:
         return _fail("MegaLinter did not complete cleanly (strict mode).")
     return decision.exit_code

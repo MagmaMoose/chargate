@@ -58,10 +58,6 @@ addopts = "-ra"
 # conventional commits since the last tag and writes it to BOTH locations below,
 # so the hatchling package version and `chargate version` stay in lockstep — do
 # not bump these by hand.
-[tool.bandit]
-# B101 (assert in tests) is intentional pytest style — never a security concern here.
-skips = ["B101"]
-
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
 version_variables = ["src/chargate/__init__.py:__version__"]

@@ -210,7 +210,7 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 | `precision` | `line` | Net-new precision: `line` · `file`. |
 | `base_ref` | `''` | Override the base ref/SHA (default: PR base SHA from the event). |
 | `head_ref` | `''` | Override the head ref/SHA (default: PR head SHA, else `github.sha`). |
-| `strict` | `false` | Fail the job if MegaLinter itself errors (a tool error, not a finding). |
+| `strict` | `false` | Fail the job if MegaLinter itself errors (a tool error, not a finding). A scan that produced **no SARIF runs** fails either way — it scanned nothing, so a pass would be meaningless. |
 
 ### MegaLinter
 
@@ -368,6 +368,17 @@ Ships the **full** SARIF (never the filtered one) via DefectDojo's API:
 
 - Uses `reimport-scan` by default (one Test per engagement; `close_old_findings`
   mitigates findings that disappear). Auto-creates the product/engagement.
+- **The uploaded SARIF carries a leading `chargate` identity run.** DefectDojo's SARIF
+  parser takes the Test's type from `runs[0].tool.driver.name` **only** — and in
+  MegaLinter's merged report that first run is whichever linter emitted first, which
+  depends on the file types in the diff. Without a stable name the derived type changes
+  per PR and `reimport-scan` rejects the upload with HTTP 400 `Test type mismatch`. The
+  extra run carries no findings and hides none: DefectDojo aggregates findings from every
+  run. Your Tests will be typed `chargate Scan (SARIF)`.
+- **Falls back to `import-scan` once** if a reimport is rejected for that mismatch, which
+  is what happens the first time a correctly-typed report meets a Test some earlier tool
+  named. That creates one new Test and the sink resumes by itself; a manual DefectDojo
+  edit is not required.
 - **A DefectDojo failure never fails the gate** — it is logged and the run
   continues.
 - Prefer "emit artifact only" / "write to path"? Use the CLI's `--sarif-out` and
@@ -478,6 +489,30 @@ much you value stability vs. immutability:
 
 Breaking changes bump the **major**; the **`v1` tag is frozen** on the old runtime,
 so existing v1 pins keep working until you migrate (see [Migrating from v1](#migrating-from-v1)).
+
+### Behaviour changes a `@v2` pin picks up
+
+The release that fixed the empty-SARIF gate changes four defaults. None of them are
+breaking in the API sense — every input keeps its name and meaning — but a `@v2` pin
+adopts them without being asked, so they are listed rather than left to be discovered:
+
+- **MegaLinter defaults moved to `ghcr.io/oxsecurity` at `v10.0.0`** (from `docker.io` at
+  `v8`). MegaLinter froze Docker Hub at `v9.4.0`, so this is the only way to reach a
+  current version — but a runner behind an **egress allowlist that permits `docker.io`
+  only** will now fail to pull. Pin `megalinter_tag: v8` (or point `megalinter_registry`
+  at your mirror) if that is you; the older tags are still served from `ghcr.io` too.
+- **v10 removed `REPOSITORY_KICS` and `REPOSITORY_GITLEAKS`** (→ `REPOSITORY_CHECKOV` and
+  `REPOSITORY_BETTERLEAKS`). MegaLinter ignores a key it no longer knows **silently**, so
+  a `.mega-linter.yml` that names either in `ENABLE_LINTERS`/`DISABLE_LINTERS` changes
+  coverage with no error and no warning. Grep your config for both names.
+- **A SARIF with no `runs` now fails the job outright**, not only under `strict`. If a
+  repo has been passing on an empty report, it will now go red — which is the point; see
+  [architecture](docs/architecture.md). Chargate also no longer globs for a report file:
+  a MegaLinter writing an unexpected filename is an error (exit `2`) instead of a pass.
+- **DefectDojo Tests are typed `chargate Scan (SARIF)`.** The full SARIF now carries a
+  leading chargate identity run so the derived type stops changing per PR; the first
+  upload after upgrading creates one new Test in the engagement and reimports into it
+  from then on. See [the DefectDojo sink](#defectdojo-optional-sink).
 
 ## Security
 

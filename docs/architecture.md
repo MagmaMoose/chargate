@@ -83,6 +83,12 @@ Baseline mode skips steps 3–5's gating: it counts everything against an empty
 A *broken* scanner is a tool error (`2`), never a finding. A MegaLinter tool
 failure only fails the job under `--strict`.
 
+One condition is fatal **without** `--strict`: a SARIF carrying no `runs` at all.
+That is not a linter misbehaving, it is the gate having scanned nothing, so a pass
+carries no information — and since `strict` defaults to off, routing it through
+`strict` would leave a repo green on an empty report indefinitely. That is precisely
+how the relative-`REPORT_OUTPUT_FOLDER` bug survived for months.
+
 ## The token broker
 
 To author PR comments as `Chargate[bot]` rather than `github-actions[bot]`, the

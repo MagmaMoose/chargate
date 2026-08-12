@@ -114,8 +114,17 @@ class _GitHubAPI:
 def _default_opener(verify_ssl: bool) -> urllib.request.OpenerDirector:
     if verify_ssl:
         return urllib.request.build_opener()
+    # Reachable only via `chargate ci --pr-comment-insecure`: GitHubCommentConfig
+    # .verify_ssl defaults to True and the CLI passes `verify_ssl=not
+    # args.pr_comment_insecure`, so TLS verification is on for api.github.com and for
+    # every GHES host unless an operator turns it off by hand. The escape hatch exists
+    # for testing against a GHES instance whose certificate chain the runner lacks.
+    #
+    # DevSkim's DS130822 "Disabled certificate validation" matches the `check_hostname`
+    # assignment specifically (not the CERT_NONE line below it) and cannot see the
+    # `if verify_ssl` guard above, so the suppression sits on that one line.
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
+    ctx.check_hostname = False  # DevSkim: ignore DS130822
     ctx.verify_mode = ssl.CERT_NONE
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 

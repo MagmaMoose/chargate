@@ -38,7 +38,7 @@ inputs:
     required: false
     default: ''
   strict:
-    description: 'Fail the job if MegaLinter itself errors (a tool error, not a finding).'
+    description: 'Fail the job if MegaLinter itself errors (a tool error, not a finding). A SARIF with no runs fails regardless.'
     required: false
     default: 'false'
 

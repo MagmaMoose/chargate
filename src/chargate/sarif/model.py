@@ -169,10 +169,19 @@ def primary_start_line(result: dict) -> int | None:
     return start if isinstance(start, int) else None
 
 
+# The docstring's example finding deliberately names no hash algorithm and no crypto
+# primitive. DevSkim regex-matches raw line *text* and has no idea it is reading a
+# docstring, so the previous wording — which quoted a sample finding about a weak
+# legacy digest by name — was itself reported as DS126858 "Weak/Broken Hash Algorithm"
+# at error level, against a module that does no hashing whatsoever. Rewording is the
+# fix rather than a suppression, because there is nothing here to accept: it was never
+# code. A permanent error-level false positive in chargate's own SARIF is precisely
+# the noise that let an empty report go unnoticed for months. Keep this comment free
+# of the algorithm name too, or the rule simply moves down here.
 def primary_message(result: dict) -> str | None:
     """The result's human-readable ``message.text``, trimmed, or None.
 
-    This is the finding text a tool reports (e.g. "Use of weak MD5 hash"); used to
+    This is the finding text a tool reports (e.g. "Image should use digest"); used to
     give PR comments a body. Tolerates missing/blank/oddly-typed messages.
     """
     message = result.get("message")

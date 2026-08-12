@@ -70,8 +70,8 @@
     },
     "defectdojo": {
       "path": "src/chargate/defectdojo.py",
-      "purpose": "Optional, first-class DefectDojo import/reimport client (urllib + multipart). Always ships the FULL SARIF. Failure-isolated: import_sarif NEVER raises, returns ok=False so a DD failure can't fail the gate. Sends a chargate/<version> User-Agent (Cloudflare BIC workaround).",
-      "exports": ["import_sarif", "build_request", "build_form_fields", "encode_multipart", "DefectDojoConfig", "DefectDojoResult"],
+      "purpose": "Optional, first-class DefectDojo import/reimport client (urllib + multipart). Always ships the FULL SARIF, prefixed with a findings-free `chargate` identity run: DefectDojo types a Test from runs[0].tool.driver.name alone and MegaLinter's merged report has no stable first run, so without it reimport 400s with 'Test type mismatch'. Retries once against import-scan when an older, differently-typed Test is already in the engagement. Failure-isolated: import_sarif NEVER raises, returns ok=False so a DD failure can't fail the gate. Sends a chargate/<version> User-Agent (Cloudflare BIC workaround).",
+      "exports": ["import_sarif", "build_request", "build_form_fields", "encode_multipart", "with_identity_run", "identity_run", "is_test_type_mismatch", "test_url", "DefectDojoConfig", "DefectDojoResult"],
       "depends_on": []
     },
     "dependencytrack": {
