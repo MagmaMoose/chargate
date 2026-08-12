@@ -34,3 +34,30 @@
   FastAPI/httpx/pyjwt deps in the `broker` dep-group so the wheel stays dep-free.
   Ships as `ghcr.io/magmamoose/chargate`, deploys via `k8s/` + Flux; the App + OCI-Vault
   keys are operator-owned (see the token-broker design memory).
+- **DefectDojo types a Test from `runs[0]` and nothing else.** Its SARIF parser is a
+  *dynamic test type* parser: `get_tests()` makes one ParserTest per run named after
+  `run.tool.driver.name`, then `consolidate_dynamic_tests` does `test_raw = tests[0]` for
+  the Test's type while aggregating findings from *every* run — and on reimport it 400s
+  (`Test type mismatch`) if that derived name differs from the Test already there. We ship
+  MegaLinter's **merged** report, whose first run is whichever linter emitted first, which
+  follows the file types in the diff (`incremental` defaults to true). So the derived type
+  is a property of the PR, not the repo. That killed the sink the day it started carrying
+  real findings: the engagement was still typed `KICS Scan (SARIF)` from months of empty
+  reports, so every upload was rejected — non-blocking by design, therefore silent. Fix
+  shape: `defectdojo.with_identity_run` prepends a findings-free `chargate` run so the type
+  is constant everywhere, and `import_sarif` retries once via `import-scan` to get past a
+  Test some earlier tool named. Do not "simplify" either away.
+- **`skips: ["tests/*"]` in `.bandit.yml` matches nothing.** bandit fnmatches the *normalised*
+  filename, which carries a leading `./` — so only `*/tests/*` matches (it also covers
+  `broker/tests/...` and the absolute `/tmp/lint/tests/...` form). Measured on 1.9.4:
+  `tests/*` → 141 B101, `*/tests/*` → 0. More generally: reach for a linter's own config
+  file (MegaLinter resolves `config_file_name` repo-root-first, before its packaged
+  default) rather than `<LINTER>_ARGUMENTS: --skip X`, which is global and, in
+  `.mega-linter.yml`, ships to every consumer that copies the template. And to check which
+  config actually won, read the `- Command:` line's `-c` path — the `- Rules config:` label
+  prints `[.bandit.yml]` for the packaged default too, because the templates dir is
+  stripped out of it.
+- **A runs-less SARIF must fail on its own, never behind `--strict`.** `strict` defaults to
+  false and means "a linter blew up, you decide"; zero runs means the gate scanned nothing,
+  so a pass is meaningless. Gating the empty-report check on `strict` reintroduces the
+  original bug for every consumer who never set it.

@@ -29,6 +29,14 @@ def test_is_secret_result_by_driver(make_sarif, make_result):
         assert is_secret_result(run["results"][0], run), driver
 
 
+def test_is_secret_result_by_v10_secret_scanner_driver(make_sarif, make_result):
+    # MegaLinter v10 removed gitleaks in favour of betterleaks and promoted kingfisher;
+    # without these the SOPS false-positive filter silently degrades to keyword matching.
+    for driver in ("betterleaks", "Kingfisher", "betterleaks v1.7.3"):
+        run = _run(make_sarif([make_result("secrets.enc.yaml", 1)], tool_name=driver))
+        assert is_secret_result(run["results"][0], run), driver
+
+
 def test_is_secret_result_by_checkov_rule(make_sarif, make_result):
     run = _run(make_sarif([make_result("a.yaml", 1, rule_id="CKV_SECRET_6")], tool_name="checkov"))
     assert is_secret_result(run["results"][0], run)

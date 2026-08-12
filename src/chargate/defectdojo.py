@@ -3,7 +3,16 @@
 Always ships the **full** (unfiltered) SARIF so the security system sees the
 complete picture, including inherited debt. Uses ``reimport-scan`` by default
 (recurring gate → one Test per engagement, with ``close_old_findings`` mitigating
-findings that disappear), falling back to ``import-scan``.
+findings that disappear), falling back to ``import-scan`` when DefectDojo refuses
+the reimport because the target Test was typed by a different tool.
+
+Two mechanisms in this module exist solely to keep that reimport working against a
+*merged, multi-tool* SARIF; both are described in full at :func:`identity_run` and
+:func:`import_sarif`. In short: DefectDojo's SARIF parser is a "dynamic test type"
+parser that names the Test after ``runs[0].tool.driver.name`` **only**, and MegaLinter's
+merged report has no stable first run — so chargate prepends a findings-free run naming
+itself, and retries once against ``import-scan`` if an older, differently-typed Test is
+already in the way.
 
 Stdlib only (urllib): no third-party HTTP dependency. By contract a DefectDojo
 failure NEVER raises out of :func:`import_sarif` — it returns a result with
@@ -16,16 +25,25 @@ import json
 import ssl
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from chargate import __version__
 
+_PROJECT_URL = "https://github.com/MagmaMoose/chargate"
 _BOUNDARY = "----chargateDefectDojoBoundary7MA4YWxkTrZu0gW"
 # Identify ourselves instead of the default "Python-urllib/X.Y", which edge WAFs
 # (e.g. Cloudflare Bot Fight Mode / error 1010) commonly ban by client signature.
-_USER_AGENT = f"chargate/{__version__} (+https://github.com/MagmaMoose/chargate)"
+_USER_AGENT = f"chargate/{__version__} (+{_PROJECT_URL})"
+
+# The tool name DefectDojo will derive this report's Test_Type from. See identity_run().
+IDENTITY_TOOL_NAME = "chargate"
+
+# Substring of the ValidationError DefectDojo raises from
+# BaseImporter.consolidate_dynamic_tests when a reimport's derived Test_Type does not
+# match the one already on the target Test. Matched case-insensitively on the 400 body.
+_TEST_TYPE_MISMATCH = "test type mismatch"
 
 
 @dataclass(frozen=True)
@@ -138,12 +156,83 @@ def encode_multipart(
     return b"".join(parts)
 
 
+def identity_run() -> dict[str, Any]:
+    """A findings-free SARIF run naming chargate as the tool that produced the report."""
+    return {
+        "tool": {
+            "driver": {
+                "name": IDENTITY_TOOL_NAME,
+                "version": __version__,
+                "informationUri": _PROJECT_URL,
+            }
+        },
+        "results": [],
+    }
+
+
+def with_identity_run(sarif_bytes: bytes) -> bytes:
+    """Return the SARIF with :func:`identity_run` first, so DefectDojo types it stably.
+
+    DefectDojo's SARIF parser is a *dynamic test type* parser: ``get_tests()`` builds one
+    ``ParserTest`` per SARIF run named after ``run.tool.driver.name``, and the importer
+    then does ``test_raw = tests[0]`` — it takes the Test's type from the **first run
+    only**, while still aggregating findings from every run. On reimport it compares that
+    derived name against the Test already in the engagement and rejects the upload with
+    HTTP 400 ``Test type mismatch`` if they differ.
+
+    chargate ships MegaLinter's *merged* report, where run[0] is whichever linter happened
+    to emit a SARIF first — and which linters emit at all depends on the file types in the
+    diff, because the action's ``incremental`` default makes the file-based linters run
+    only over changed files. So the derived name is not a property of the repo, it is a
+    property of the PR: a JS-only PR types the Test after eslint, the next one after
+    shellcheck, and the reimport 400s. That is not hypothetical — chargate's own
+    engagement was typed ``KICS Scan (SARIF)`` by the months of empty reports this branch
+    fixes, so the first upload carrying real findings was rejected with
+    ``Test 1 has test_type 'KICS Scan (SARIF)', but the report contains test_type
+    'shellcheck (MegaLinter BASH_SHELLCHECK) Scan (SARIF)'`` and the full SARIF silently
+    never landed — the exact "sink looks configured, ships nothing" failure this branch
+    exists to end.
+
+    Prepending one run of our own makes the derived type ``chargate Scan (SARIF)`` for
+    every repo and every PR, permanently. It adds no findings (``results: []``) and
+    removes none: DefectDojo's ``consolidate_dynamic_tests`` walks *all* tests for
+    findings and only ``tests[0]`` for the name. The version travels with it, so the DD
+    Test records which chargate produced it.
+
+    Only the uploaded bytes are rewritten; the SARIF artifact on disk is untouched.
+    Anything we cannot confidently parse (not JSON, not an object, no ``runs`` list) is
+    passed through byte-for-byte — a report we do not understand is not a report we
+    should be editing, and DefectDojo's own error is more useful than a mangled upload.
+    """
+    try:
+        report = json.loads(sarif_bytes)
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+        return sarif_bytes
+    if not isinstance(report, dict):
+        return sarif_bytes
+    runs = report.get("runs")
+    if not isinstance(runs, list):
+        return sarif_bytes
+    if runs and _run_tool_name(runs[0]) == IDENTITY_TOOL_NAME:
+        return sarif_bytes  # already stamped (e.g. re-uploading a chargate --sarif-out copy)
+    report["runs"] = [identity_run(), *runs]
+    return json.dumps(report).encode("utf-8")
+
+
+def _run_tool_name(run: Any) -> str | None:
+    if not isinstance(run, dict):
+        return None
+    driver = run.get("tool", {}).get("driver", {}) if isinstance(run.get("tool"), dict) else {}
+    name = driver.get("name") if isinstance(driver, dict) else None
+    return name if isinstance(name, str) else None
+
+
 def build_request(config: DefectDojoConfig, sarif_path: Path) -> urllib.request.Request:
     body = encode_multipart(
         build_form_fields(config),
         file_field="file",
         filename=sarif_path.name,
-        file_bytes=sarif_path.read_bytes(),
+        file_bytes=with_identity_run(sarif_path.read_bytes()),
     )
     request = urllib.request.Request(config.endpoint_url(), data=body, method="POST")
     request.add_header("Authorization", f"Token {config.token}")
@@ -153,31 +242,90 @@ def build_request(config: DefectDojoConfig, sarif_path: Path) -> urllib.request.
     return request
 
 
+def _default_opener(verify_ssl: bool) -> urllib.request.OpenerDirector:
+    if verify_ssl:
+        return urllib.request.build_opener()
+    # Reachable only via `chargate ci --dd-insecure`: DefectDojoConfig.verify_ssl defaults
+    # to True and the CLI passes `verify_ssl=not args.dd_insecure`, so TLS verification is
+    # on unless an operator turns it off by hand. The escape hatch is for a self-hosted
+    # DefectDojo behind an internal CA the runner does not trust — without it the import
+    # fails and the full SARIF is silently never shipped.
+    #
+    # DevSkim's DS130822 "Disabled certificate validation" matches the `check_hostname`
+    # assignment specifically (not the CERT_NONE line below it) and cannot see the
+    # `if verify_ssl` guard above, so the suppression sits on that one line.
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False  # DevSkim: ignore DS130822
+    ctx.verify_mode = ssl.CERT_NONE
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+
+
+def is_test_type_mismatch(result: DefectDojoResult) -> bool:
+    """True for the HTTP 400 DefectDojo returns when the target Test is typed by another tool."""
+    return result.status == 400 and _TEST_TYPE_MISMATCH in result.message.lower()
+
+
 def import_sarif(
     config: DefectDojoConfig,
     sarif_path: str | Path,
     *,
     opener: urllib.request.OpenerDirector | None = None,
 ) -> DefectDojoResult:
-    """Upload the full SARIF to DefectDojo. Never raises — returns a result."""
+    """Upload the full SARIF to DefectDojo. Never raises — returns a result.
+
+    On ``reimport-scan``, retries **once** against ``import-scan`` if DefectDojo rejects
+    the reimport with its ``Test type mismatch`` 400. :func:`with_identity_run` keeps that
+    from recurring, but it cannot rename a Test that already exists: an engagement whose
+    Test was typed by an earlier tool (chargate's own said ``KICS Scan (SARIF)``, left
+    behind by months of empty reports) will otherwise refuse every reimport forever.
+    ``import-scan`` creates a correctly-typed Test in the same engagement, after which the
+    identity run means reimport matches it on every later run — so the sink heals itself
+    on the next scan instead of staying silently dead until someone edits DefectDojo by
+    hand. The retry is deliberately narrow: only this one 400, only when we were
+    reimporting. Any other rejection is a real error and creating a duplicate Test would
+    hide it.
+    """
     endpoint = config.endpoint_url()
     path = Path(sarif_path)
     if not path.is_file():
         return DefectDojoResult(False, endpoint, message=f"SARIF file not found: {path}")
 
+    if opener is None:
+        opener = _default_opener(config.verify_ssl)
+
+    result = _post(config, path, opener)
+    if not config.reimport or not is_test_type_mismatch(result):
+        return result
+
+    retry = _post(replace(config, reimport=False), path, opener)
+    if retry.ok:
+        return replace(
+            retry,
+            message=(
+                f"{retry.message} to a new test — the engagement's existing test is typed "
+                f"by another tool, so reimport was rejected ({result.message})"
+            ),
+        )
+    return replace(
+        retry,
+        message=(
+            f"reimport rejected ({result.message}); "
+            f"import-scan fallback also failed: {retry.message}"
+        ),
+    )
+
+
+def _post(
+    config: DefectDojoConfig,
+    path: Path,
+    opener: urllib.request.OpenerDirector,
+) -> DefectDojoResult:
+    """One (re)import request. Never raises — every failure becomes a result."""
+    endpoint = config.endpoint_url()
     try:
         request = build_request(config, path)
     except OSError as exc:  # reading the file
         return DefectDojoResult(False, endpoint, message=f"could not read SARIF: {exc}")
-
-    if opener is None:
-        if config.verify_ssl:
-            opener = urllib.request.build_opener()
-        else:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 
     try:
         with opener.open(request, timeout=config.timeout) as response:

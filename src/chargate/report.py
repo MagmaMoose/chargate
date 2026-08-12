@@ -26,6 +26,7 @@ def render_summary(
     dd_message: str | None = None,
     dt_message: str | None = None,
     pr_message: str | None = None,
+    scan_note: str | None = None,
 ) -> str:
     """Render the Markdown job summary for a CI run."""
     lines: list[str] = ["## Chargate", ""]
@@ -46,6 +47,12 @@ def render_summary(
         bands = ", ".join(f"{k}={v}" for k, v in sorted(counts.per_band_net_new.items()))
         lines.append(f"| Net-new by severity | {bands} |")
     lines.append("")
+
+    # How the scan ran, when that wasn't the plain flavor image. A reduced scan that
+    # finds nothing looks exactly like a clean repo, so it has to announce itself.
+    if scan_note:
+        lines.append(f"> 🔎 {scan_note}")
+        lines.append("")
 
     if not megalinter_ok:
         lines.append(
@@ -107,6 +114,7 @@ def render_pr_summary(
     note: str | None = None,
     defectdojo_url: str | None = None,
     dependency_track_url: str | None = None,
+    scan_note: str | None = None,
 ) -> str:
     """Render the updatable PR summary comment (carries :data:`SUMMARY_MARKER`).
 
@@ -160,6 +168,12 @@ def render_pr_summary(
 
     if note:
         lines.append(note)
+        lines.append("")
+
+    # Same reasoning as in render_summary: a degraded scan must be visible on the PR
+    # itself, not only in the job log nobody opens when the gate is green.
+    if scan_note:
+        lines.append(f"_{scan_note}_")
         lines.append("")
 
     uploads: list[str] = []

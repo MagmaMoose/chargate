@@ -55,6 +55,31 @@ def test_render_summary_notes_megalinter_tool_error(make_sarif, make_result):
     assert "tool error" in md
 
 
+def test_render_summary_announces_a_reduced_scan(make_sarif, make_result):
+    # A degraded scan that finds nothing looks exactly like a clean repo, so the
+    # summary has to say how the scan actually ran.
+    result, decision = _result_and_decision(make_sarif, make_result, fail_on="none")
+    md = render_summary(
+        result.counts,
+        decision,
+        Mode.PR,
+        scan_note="Ran on a `arm64` runner using MegaLinter's per-linter images.",
+    )
+    assert "per-linter images" in md
+
+
+def test_render_pr_summary_announces_a_reduced_scan(make_sarif, make_result):
+    result, decision = _result_and_decision(make_sarif, make_result, fail_on="none")
+    md = render_pr_summary(
+        result.counts,
+        decision,
+        Mode.PR,
+        list(result.net_new),
+        scan_note="Ran on a `arm64` runner using MegaLinter's per-linter images.",
+    )
+    assert "_Ran on a `arm64` runner" in md
+
+
 def test_render_summary_includes_sink_messages(make_sarif, make_result):
     result, decision = _result_and_decision(make_sarif, make_result, fail_on="none")
     md = render_summary(
