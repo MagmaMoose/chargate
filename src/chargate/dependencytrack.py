@@ -144,8 +144,19 @@ def build_request(config: DependencyTrackConfig, bom_path: Path) -> urllib.reque
 def _build_opener(verify_ssl: bool) -> urllib.request.OpenerDirector:
     if verify_ssl:
         return urllib.request.build_opener()
+    # Reachable only via `chargate ci --dt-insecure`: DependencyTrackConfig.verify_ssl
+    # defaults to True and the CLI passes `verify_ssl=not args.dt_insecure`, so TLS
+    # verification is on unless an operator turns it off by hand. The escape hatch is
+    # for a self-hosted Dependency-Track behind an internal CA the runner does not
+    # trust — without it the BOM upload fails and the SBOM is silently never shipped.
+    #
+    # DevSkim's DS130822 "Disabled certificate validation" matches the `check_hostname`
+    # assignment specifically (not the CERT_NONE line below it) and cannot see the
+    # `if verify_ssl` guard above, so the suppression sits on that one line. It is a
+    # correct pattern match on an intentional opt-out, not a defect: do not "resolve"
+    # it by deleting the escape hatch.
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
+    ctx.check_hostname = False  # DevSkim: ignore DS130822
     ctx.verify_mode = ssl.CERT_NONE
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 

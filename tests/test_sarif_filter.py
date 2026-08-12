@@ -118,10 +118,15 @@ def test_file_precision_treats_any_changed_file_result_as_net_new(make_sarif, ma
 
 
 def test_verdict_carries_finding_message(make_sarif, make_result):
+    # The sample message is inert on purpose — see the note above `primary_message` in
+    # sarif/model.py. The previous fixture named a weak legacy digest, which DevSkim
+    # matched as DS126858 on both lines below, adding two error-level false positives
+    # to chargate's own SARIF for a string that is only ever carried around as data.
+    # Do not reintroduce the algorithm name here either; the rule matches line text.
     diff = _index(FileDiff(path="src/a.py", status="modified", added_ranges=((21, 22),)))
-    sarif = make_sarif([make_result("src/a.py", 21, message="Use of weak MD5 hash")])
+    sarif = make_sarif([make_result("src/a.py", 21, message="Image should use digest")])
     [v] = classify_results(sarif, diff)
-    assert v.message == "Use of weak MD5 hash"
+    assert v.message == "Image should use digest"
 
 
 def test_inline_safe_only_for_added_line_and_new_file(make_sarif, make_result):

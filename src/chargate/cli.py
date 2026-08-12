@@ -51,6 +51,28 @@ def _eprint(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+def _env_default(name: str, fallback: str) -> str:
+    """Env-var default for a CLI flag, so an operator can override fleet-wide.
+
+    Precedence: an explicit flag (i.e. an action input) > the ``CHARGATE_*`` env var >
+    the built-in. This is what lets a self-hosted fleet point every repo at an internal
+    mirror by exporting one variable on the runner, without editing 40 workflows — and
+    it only works because ``action.yml`` appends these flags conditionally rather than
+    always passing its own default.
+    """
+    return os.environ.get(name, "").strip() or fallback
+
+
+def _env_int_default(name: str, fallback: int) -> int:
+    """:func:`_env_default` for an integer flag, ignoring a non-numeric value.
+
+    Parser construction happens before any subcommand runs, so a typo'd env var must
+    not turn `chargate version` into a traceback.
+    """
+    raw = os.environ.get(name, "").strip()
+    return int(raw) if raw.isdigit() else fallback
+
+
 def _load_sarif(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -219,11 +241,37 @@ def _policy_from_args(
     )
 
 
+def _render_scan_note(ml_run: ml.MegaLinterRun) -> str | None:
+    """One line for the job summary / PR comment describing a non-standard scan.
+
+    A degraded scan that reports nothing is indistinguishable from a clean repo, so
+    standalone runs say so on the PR — including which linters were skipped and why.
+    """
+    if ml_run.strategy != "standalone":
+        return None
+    note = (
+        f"Ran on a `{ml_run.arch}` runner using MegaLinter's per-linter images "
+        f"(`megalinter-only-*`) — the flavor image is `linux/amd64` only. "
+        f"{len(ml_run.linters_run)} linter(s) ran."
+    )
+    if ml_run.linters_skipped:
+        note += (
+            " Skipped: "
+            + ", ".join(f"`{key}` ({reason})" for key, reason in ml_run.linters_skipped)
+            + "."
+        )
+    return note
+
+
 def cmd_ci(args: argparse.Namespace) -> int:
     mode = resolve_mode(args.mode, os.environ.get("GITHUB_EVENT_NAME"))
 
     # 1. Obtain the full SARIF: use a provided one, or run MegaLinter.
     megalinter_ok = True
+    scanned_nothing = False
+    scan_note: str | None = None
+    scan_mode = "provided" if args.sarif else "flavor"
+    linters_skipped: tuple[tuple[str, str], ...] = ()
     if args.sarif:
         sarif_path = Path(args.sarif)
     else:
@@ -242,18 +290,57 @@ def cmd_ci(args: argparse.Namespace) -> int:
             disable_linters=tuple(args.disable_linter or ()),
             validate_all_codebase=not incremental,
             extra_env=extra_env,
+            registry=args.megalinter_registry,
+            namespace=args.megalinter_namespace,
+            image_ref=args.megalinter_image,
+            platform=args.docker_platform,
+            strategy=args.arch_strategy,
+            standalone_linters=tuple(args.standalone_linter or ()),
+            jobs=args.jobs,
         )
         try:
             ml_run = ml.run(ml_config)
+        except ml.MegaLinterError as exc:
+            # The architecture guard lands here: a multi-line, actionable message that
+            # replaces Docker's `exec /bin/bash: exec format error`.
+            return _fail(str(exc))
         except OSError as exc:
             return _fail(f"could not run MegaLinter (is Docker available?): {exc}")
         megalinter_ok = ml_run.returncode == 0
+        scan_mode = ml_run.strategy
+        linters_skipped = ml_run.linters_skipped
+        scan_note = _render_scan_note(ml_run)
+        if ml_run.strategy == "standalone" and not args.quiet:
+            _eprint(
+                f"chargate: {ml_run.arch} runner — ran {len(ml_run.linters_run)} MegaLinter "
+                f"standalone linter image(s): {', '.join(ml_run.linters_run)}"
+            )
+            for key, reason in ml_run.linters_skipped:
+                _eprint(f"chargate: skipped {key} — {reason}")
         try:
             sarif_path = ml.locate_sarif(ml_config)
         except ml.MegaLinterError as exc:
             return _fail(str(exc))
 
     sarif = _load_sarif(sarif_path)
+
+    # A SARIF with no runs is indistinguishable from a clean repo at the gate, so say
+    # so out loud. This is the exact shape the relative-REPORT_OUTPUT_FOLDER bug took:
+    # a well-formed document that had scanned nothing, gating on nothing, for months.
+    #
+    # It is fatal on its own, NOT only under --strict. `--strict` means "a linter blew
+    # up, decide whether that counts"; this is a different claim — the gate scanned
+    # nothing at all, so a pass carries no information. Routing it through --strict
+    # (default false) would have left every consumer of the org-wide required check
+    # green on an empty report, which is the exact bug this repo spent months not
+    # noticing. A gate that cannot fail must not be allowed to pass.
+    if not args.sarif and not (sarif.get("runs") or []):
+        _eprint(
+            "chargate: ERROR: MegaLinter's SARIF contains no runs — nothing was scanned, "
+            "so the gate cannot block anything. Check the MegaLinter output above."
+        )
+        megalinter_ok = False
+        scanned_nothing = True
 
     # 2. Always preserve the full SARIF as the shippable artifact.
     if args.sarif_out:
@@ -300,7 +387,13 @@ def cmd_ci(args: argparse.Namespace) -> int:
     # 4c. Optional GHAS-style PR comments — net-new only (never fails the gate).
     #     The footer links to wherever the SARIF / BOM just landed.
     pr_message = _maybe_comment_pr(
-        args, result, decision, mode, defectdojo_url=dd.url, dependency_track_url=dt.url
+        args,
+        result,
+        decision,
+        mode,
+        defectdojo_url=dd.url,
+        dependency_track_url=dt.url,
+        scan_note=scan_note,
     )
 
     # 5. Report.
@@ -312,6 +405,7 @@ def cmd_ci(args: argparse.Namespace) -> int:
         dd_message=dd.message,
         dt_message=dt.message,
         pr_message=pr_message,
+        scan_note=scan_note,
     )
     report_mod.append_step_summary(summary)
     if not args.quiet:
@@ -329,10 +423,18 @@ def cmd_ci(args: argparse.Namespace) -> int:
             "total_count": str(result.counts.total),
             "gate_failed": "true" if decision.failed else "false",
             "gate_result": "fail" if decision.failed else "pass",
+            # How the scan actually ran, so a consumer can assert it was NOT degraded
+            # (e.g. fail a release job on scan_mode != 'flavor'). Kept single-line:
+            # write_outputs emits bare key=value, which cannot carry a newline.
+            "scan_mode": scan_mode,
+            "linters_skipped": "; ".join(f"{key} ({reason})" for key, reason in linters_skipped),
         }
     )
 
-    # 6. Exit. A MegaLinter tool error only fails under --strict.
+    # 6. Exit. A scan that produced no runs always fails; a MegaLinter tool error only
+    #    fails under --strict (see the runs check above for why they differ).
+    if scanned_nothing:
+        return _fail("MegaLinter's SARIF contains no runs — the gate scanned nothing.")
     if not megalinter_ok and args.strict:
         return _fail("MegaLinter did not complete cleanly (strict mode).")
     return decision.exit_code
@@ -427,6 +529,7 @@ def _maybe_comment_pr(
     *,
     defectdojo_url: str | None = None,
     dependency_track_url: str | None = None,
+    scan_note: str | None = None,
 ) -> str | None:
     """Post GHAS-style PR comments for net-new findings. Never fails the gate."""
     if not args.pr_comment or not mode.gates:
@@ -470,6 +573,7 @@ def _maybe_comment_pr(
             note=note,
             defectdojo_url=defectdojo_url,
             dependency_track_url=dependency_track_url,
+            scan_note=scan_note,
         )
 
     config = ghc.GitHubCommentConfig(
@@ -608,7 +712,60 @@ def build_parser() -> argparse.ArgumentParser:
     ci.add_argument(
         "--flavor", default="all", help="MegaLinter flavor (default: all = full image)."
     )
-    ci.add_argument("--megalinter-tag", default=ml.DEFAULT_TAG, help="MegaLinter image tag/digest.")
+    ci.add_argument(
+        "--megalinter-tag",
+        default=_env_default("CHARGATE_MEGALINTER_TAG", ml.DEFAULT_TAG),
+        help=f"MegaLinter image tag, or a sha256: digest to pin (default: {ml.DEFAULT_TAG}).",
+    )
+    ci.add_argument(
+        "--megalinter-registry",
+        default=_env_default("CHARGATE_MEGALINTER_REGISTRY", ml.DEFAULT_REGISTRY),
+        help=(
+            "Registry host for the MegaLinter images (default: ghcr.io). MegaLinter froze "
+            "Docker Hub publishing at v9.4.0, so docker.io cannot serve v9.5.0+."
+        ),
+    )
+    ci.add_argument(
+        "--megalinter-namespace",
+        default=_env_default("CHARGATE_MEGALINTER_NAMESPACE", ml.DEFAULT_NAMESPACE),
+        help="Image namespace (default: oxsecurity). Set for a mirror / pull-through cache.",
+    )
+    ci.add_argument(
+        "--megalinter-image",
+        default=_env_default("CHARGATE_MEGALINTER_IMAGE", ""),
+        help=(
+            "Full image reference, overriding registry/namespace/flavor/tag entirely — e.g. a "
+            "custom flavor: ghcr.io/you/repo/megalinter-custom-flavor:v10.0.0."
+        ),
+    )
+    ci.add_argument(
+        "--docker-platform",
+        default=_env_default("CHARGATE_DOCKER_PLATFORM", ""),
+        help="Value for `docker run --platform` (e.g. linux/amd64 to force qemu emulation).",
+    )
+    ci.add_argument(
+        "--arch-strategy",
+        choices=list(ml.ARCH_STRATEGIES),
+        default=_env_default("CHARGATE_ARCH_STRATEGY", "auto"),
+        help=(
+            "auto (default): the flavor image on amd64, MegaLinter's per-linter "
+            "megalinter-only-* images on arm64. flavor: always the flavor image. "
+            "standalone: always per-linter images. fail: refuse to run on a non-amd64 "
+            "daemon rather than degrading."
+        ),
+    )
+    ci.add_argument(
+        "--standalone-linter",
+        action="append",
+        metavar="KEY",
+        help="Linter key to run in standalone mode (repeatable). Default: the flavor's set.",
+    )
+    ci.add_argument(
+        "--jobs",
+        type=int,
+        default=_env_int_default("CHARGATE_JOBS", 4),
+        help="Standalone mode: how many linter containers to run at once (default: 4).",
+    )
     ci.add_argument(
         "--enable-linter", action="append", metavar="KEY", help="Enable a linter (repeatable)."
     )
