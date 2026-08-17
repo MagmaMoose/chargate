@@ -1,17 +1,22 @@
-# Chargate/KICS suppressions (reviewed false positives, not vulnerabilities):
+# Chargate/KICS suppressions (reviewed false positives, not vulnerabilities).
+# The same decisions are restated for Checkov in .checkov.yml and for Trivy in
+# .trivyignore — neither reads `kics-scan disable=`. Keep the three in sync.
 #   611ab018... `metadata.namespace is undefined` — kustomize base; the namespace
 #     is set by the overlay (k8s/overlays/prod/kustomization.yaml: `namespace: chargate`).
-#   02323c00... runAsUser low UID — intentional: matches the image's `app` user
-#     (uid 1000). Running as a higher UID would mismatch the image filesystem.
-#   7c81d34c... / 583053b7... image lacks digest / tag is `latest` — placeholder
-#     for Flux ImagePolicy, which rewrites the tag (and pins to the released
-#     `vX.Y.Z`) on reconcile. See the overlay's `images:` block.
+#   7c81d34c... image lacks digest — the base pins a concrete released tag and
+#     Flux ImagePolicy rewrites that *tag* on reconcile (see the overlay's
+#     `images:` block). A digest is mutually exclusive with that automation;
+#     provenance is covered by cosign signatures instead.
 #   4a20ebac... / 48a5beba... no LimitRange / ResourceQuota — those are cluster-
 #     namespace policies, not Deployment-level fields. Out of scope here.
 #   3d658f8b... envFrom.secretRef is defined — this is the correct pattern: the
 #     Secret is created by an ExternalSecret synced from OCI Vault (see
 #     externalsecret.yaml). Inlining the values would be the actual vulnerability.
-# kics-scan disable=611ab018-c4aa-4ba2-b0f6-a448337509a6,02323c00-cdc3-4fdc-a310-4f2b3e7a1660,7c81d34c-8e5a-402b-9798-9f442630e678,583053b7-e632-46f0-b989-f81ff8045385,4a20ebac-1060-4c81-95d1-1f7f620e983b,48a5beba-e4c0-4584-a2aa-e6894e4cf424,3d658f8b-d988-41a0-a841-40043121de1e
+#
+# Previously suppressed, now genuinely fixed — do NOT re-add:
+#   02323c00 (low UID) — runAsUser/runAsGroup are 10001, matching the image's
+#     APP_UID/APP_GID; 583053b7 (`latest` tag) — the base pins vX.Y.Z.
+# kics-scan disable=611ab018-c4aa-4ba2-b0f6-a448337509a6,7c81d34c-8e5a-402b-9798-9f442630e678,4a20ebac-1060-4c81-95d1-1f7f620e983b,48a5beba-e4c0-4584-a2aa-e6894e4cf424,3d658f8b-d988-41a0-a841-40043121de1e
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,10 +41,12 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        # Numeric UID/GID so the kubelet can verify non-root (the image's `app`
-        # user is uid/gid 1000; a name alone fails the non-root check).
-        runAsUser: 1000
-        runAsGroup: 1000
+        # Numeric UID/GID so the kubelet can verify non-root (a name alone fails
+        # the check). Must match the image's `app` user — see APP_UID/APP_GID in
+        # broker/Dockerfile. Above 10000 so it cannot collide with a host account
+        # (Checkov CKV_K8S_40, Trivy KSV-0020/KSV-0021).
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       imagePullSecrets:
@@ -49,7 +56,10 @@ spec:
         # token and mints a repo-scoped Chargate App installation token so the
         # PR comment is authored by Chargate[bot].
         - name: chargate
-          image: ghcr.io/magmamoose/chargate:latest
+          # A concrete released tag, not `latest`: the overlay's `images:` block is
+          # what Flux's ImagePolicy rewrites on reconcile, so the base never needs
+          # a floating tag (Checkov CKV_K8S_14, Trivy KSV-0013).
+          image: ghcr.io/magmamoose/chargate:v2.9.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

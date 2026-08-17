@@ -13,13 +13,17 @@ token is scoped to the caller's own repo with ``pull_requests: write`` only.
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from broker.config import BrokerConfig
-from broker.github import mint_installation_token
+from broker.github import InvalidRepositoryError, mint_installation_token, validate_repository
 from broker.oidc import KeyResolver, OidcError, verify_oidc_token
+
+_log = logging.getLogger("chargate.broker")
 
 
 def create_app(
@@ -51,6 +55,15 @@ def create_app(
         repo = body.get("repo")
         if not (oidc_token and owner and repo):
             return JSONResponse({"error": "missing_fields"}, status_code=400)
+        if not (isinstance(owner, str) and isinstance(repo, str)):
+            return JSONResponse({"error": "invalid_repository"}, status_code=400)
+        # Reject anything that isn't a plain GitHub owner/repo identifier before it
+        # reaches an API URL or a claim comparison. A value containing '/' or '..'
+        # would otherwise let the caller steer the request path (py/partial-ssrf).
+        try:
+            owner, repo = validate_repository(owner, repo)
+        except InvalidRepositoryError:
+            return JSONResponse({"error": "invalid_repository"}, status_code=400)
         repository = f"{owner}/{repo}"
 
         allowlist = config.allowed()
@@ -60,7 +73,12 @@ def create_app(
         try:
             claims = verify_oidc_token(oidc_token, config.oidc_audience, key_resolver=key_resolver)
         except OidcError as exc:
-            return JSONResponse({"error": "invalid_oidc", "detail": str(exc)}, status_code=401)
+            # The exception text comes from PyJWT and can carry key ids, expected
+            # audiences and other internals. It goes to the broker's own log (where
+            # an operator debugging a consumer's OIDC setup needs it) and never to
+            # the unauthenticated caller (CodeQL py/stack-trace-exposure).
+            _log.warning("OIDC verification failed for %s: %s", repository, exc)
+            return JSONResponse({"error": "invalid_oidc"}, status_code=401)
 
         # The OIDC `repository` claim is the caller's repo — it must match the
         # repo they're asking for a token for. This is what stops repo A minting

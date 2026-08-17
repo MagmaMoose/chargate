@@ -1,0 +1,18 @@
+# Trivy misconfiguration ignores (MegaLinter REPOSITORY_TRIVY).
+#
+# Reviewed false positives on the kustomize base under k8s/base. The same
+# decisions are recorded as KICS suppressions in each manifest and in .checkov.yml;
+# Trivy reads neither, so they are restated here. Anything not listed still gates.
+
+# Workloads in the default namespace. This is a kustomize BASE: `metadata.namespace`
+# is intentionally absent and supplied by the overlay
+# (k8s/overlays/prod/kustomization.yaml: `namespace: chargate`). Setting it in the
+# base would defeat the overlay pattern.
+AVD-KSV-0110
+
+# Restrict container images to trusted registries. The image is
+# ghcr.io/magmamoose/chargate — our own GitHub Container Registry namespace, built
+# and cosign-signed by this repo's release workflow (Diatreme image-sign). It is
+# absent from Trivy's default trusted-registry list simply because that list is
+# vendor-oriented, not because the source is untrusted.
+AVD-KSV-0125

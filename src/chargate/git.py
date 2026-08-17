@@ -9,7 +9,8 @@ real-world cause being a checkout without ``fetch-depth: 0``.
 
 from __future__ import annotations
 
-import subprocess
+import shutil
+import subprocess  # nosec B404 - this module *is* the deliberate subprocess boundary
 from pathlib import Path
 
 from chargate.sarif.diff import DiffIndex, parse_unified_diff
@@ -32,9 +33,28 @@ class ShallowCloneError(MergeBaseError):
     """History is shallow, so the merge-base is unavailable."""
 
 
+def _git_exe() -> str:
+    """Absolute path to ``git``, resolved once through PATH.
+
+    Execing the resolved absolute path (rather than letting the OS re-resolve the
+    bare name ``git`` at exec time) closes the PATH-hijacking window Bandit flags
+    as B607, and turns a missing git into an actionable error instead of an opaque
+    ``FileNotFoundError``.
+    """
+    exe = shutil.which("git")
+    if exe is None:
+        raise GitError(
+            "`git` was not found on PATH. Chargate needs git to resolve the "
+            "merge-base and compute the PR diff for net-new gating."
+        )
+    return exe
+
+
 def _git(args: list[str], cwd: str | Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
+    # Fixed argv list (never a shell string, never concatenated user input) with an
+    # absolute argv[0] — the safe form of subprocess invocation.
+    return subprocess.run(  # nosec B603 - absolute exe, list argv, shell=False
+        [_git_exe(), *args],
         cwd=str(cwd) if cwd is not None else None,
         capture_output=True,
         text=True,

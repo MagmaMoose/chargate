@@ -41,9 +41,13 @@ def test_ruff_check_only_receives_python_files():
 
     checks = (LocalCheck("ruff", "ruff", lambda files: ["ruff", "check", *files]),)
     run_local(
-        ["a.py", "b.txt", "c.pyi", "d.js"], checks=checks, which=lambda t: "/x", runner=runner
+        ["a.py", "b.txt", "c.pyi", "d.js"],
+        checks=checks,
+        which=lambda t: f"/usr/bin/{t}",
+        runner=runner,
     )
-    assert seen["ruff"] == ["ruff", "check", "a.py", "c.pyi"]
+    # argv[0] is the abs path `which` resolved, not the bare tool name (B607).
+    assert seen["/usr/bin/ruff"] == ["/usr/bin/ruff", "check", "a.py", "c.pyi"]
 
 
 def test_no_files_check_runs_without_files():
@@ -58,8 +62,8 @@ def test_no_files_check_runs_without_files():
             "secrets", "gitleaks", lambda _f: ["gitleaks", "protect", "--staged"], needs_files=False
         ),
     )
-    run_local([], checks=checks, which=lambda t: "/x", runner=runner)
-    assert seen["gitleaks"][0] == "gitleaks"
+    run_local([], checks=checks, which=lambda t: f"/usr/bin/{t}", runner=runner)
+    assert seen["/usr/bin/gitleaks"] == ["/usr/bin/gitleaks", "protect", "--staged"]
 
 
 def test_default_checks_present():

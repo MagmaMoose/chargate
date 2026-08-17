@@ -32,6 +32,17 @@ VALIDATE_ALL_CODEBASE: true
 #   - DOCKERFILE
 #   - ACTION
 
+# Bandit on test code is ~100% false positives, and it is the wrong tool for the
+# job there. Its B105/B106 "hardcoded password" checks are a string heuristic that
+# fires on every obviously-fake fixture token ('ghs_x', 'abc123'), and B404/B603/
+# B607 fire on the `subprocess.run(["git", ...])` calls that integration tests must
+# make to build real repositories. A real credential committed to a test file is
+# still caught — by the secret scanners below (betterleaks / kingfisher /
+# secretlint / gitleaks), which read entropy and provider-specific token shapes
+# rather than "is this a string literal near the word token". Those keep scanning
+# tests; only Bandit is scoped to shipping code.
+PYTHON_BANDIT_FILTER_REGEX_EXCLUDE: '(^|/)tests?/'
+
 # Speed: skip noisy or irrelevant linters here, e.g.:
 # DISABLE_LINTERS:
 #   - SPELL_CSPELL
