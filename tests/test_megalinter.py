@@ -85,6 +85,20 @@ def test_composite_action_defaults_to_security_incremental_scanning():
     assert re.search(r"incremental:\n(?:.*\n){0,15}\s+default: 'true'", action)
 
 
+def test_composite_action_exposes_jobs_so_standalone_concurrency_is_reachable():
+    """`jobs` must be an action input, not CLI-only.
+
+    Standalone mode is what arm64 uses, and it runs `jobs` per-linter containers at once
+    (CLI default 4). Without an action input there is no way for a consumer on a small
+    self-hosted runner to lower it — 4 concurrent MegaLinter containers on a 2-OCPU node
+    is a scheduling fight, not a scan. Empty default so the CLI default still wins.
+    """
+    action = (Path(__file__).parent.parent / "action.yml").read_text(encoding="utf-8")
+    assert re.search(r"^  jobs:\n(?:.*\n){0,12}?\s+default: ''", action, re.MULTILINE)
+    assert "JOBS_IN: ${{ inputs.jobs }}" in action
+    assert '[ -n "$JOBS_IN" ] && args+=(--jobs "$JOBS_IN")' in action
+
+
 def test_composite_action_leaves_image_inputs_empty_so_cli_defaults_apply():
     # An action default of 'v8' would shadow the CLI default AND the CHARGATE_* env
     # fallbacks; these inputs must ship empty and be appended only when set.
