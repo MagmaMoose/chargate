@@ -257,8 +257,7 @@ def _render_scan_note(ml_run: ml.MegaLinterRun) -> str | None:
         return None
     note = (
         f"Ran on a `{ml_run.arch}` runner using MegaLinter's per-linter images "
-        f"(`megalinter-only-*`) — the flavor image is `linux/amd64` only. "
-        f"{len(ml_run.linters_run)} linter(s) ran."
+        f"(`megalinter-only-*`) — the flavor image is `linux/amd64` only."
     )
     if ml_run.linters_skipped:
         note += (

@@ -192,7 +192,7 @@ def render_pr_summary(
 
     lines.append(
         "<sub>Pre-existing findings never block; in-source suppressions (accepted "
-        "risks) and SOPS-encrypted secret false positives are reported but never "
+        "risks) and secret false positives are reported but never "
         "gate. The full, unfiltered SARIF ships to the Security tab or as an "
         "artifact.</sub>"
     )
