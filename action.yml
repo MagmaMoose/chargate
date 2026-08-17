@@ -273,13 +273,27 @@ runs:
     # Generate a language-agnostic CycloneDX BOM (Syft) for the Dependency-Track
     # sink. Push/baseline only: PRs don't upload a BOM (no throwaway per-PR
     # versions, faster PR CI), so there's nothing to generate then either.
+    #
+    # Written to RUNNER_TEMP, deliberately NOT the workspace. This step runs before the
+    # gate, which mounts the workspace into MegaLinter — so a BOM inside the checkout
+    # gets scanned as if it were source, and devskim reads CycloneDX `purl` /
+    # `externalReferences` strings as hardcoded tokens (DS173237) and insecure URLs
+    # (DS137138). That produced 13 permanently-unclosable Security-tab alerts: the file
+    # is not in git, so the net-new filter says `file-not-changed` on every run and the
+    # gate can neither surface nor clear them.
+    #
+    # MegaLinter's FILTER_REGEX_EXCLUDE cannot fix this — devskim is a PROJECT-scope
+    # linter that walks the tree itself, and MegaLinter's file filtering only applies to
+    # file-scope linters. Keeping the BOM out of the mounted tree is the only thing that
+    # actually works. (It is also why the PR run never caught this: the step is skipped
+    # on pull_request, so the BOM only ever exists on a push.)
     - name: Generate CycloneDX SBOM
       if: ${{ inputs.dependency_track_url != '' && github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
       uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       with:
         path: '.'
         format: 'cyclonedx-json'
-        output-file: ${{ github.workspace }}/chargate-sbom.cdx.json
+        output-file: ${{ runner.temp }}/chargate-sbom.cdx.json
         artifact-name: chargate-sbom
         upload-artifact: 'true'
 
@@ -351,7 +365,10 @@ runs:
         # upload steps) can see it; emit a workspace-relative output path.
         sarif_rel="chargate-reports/full.sarif"
         sarif_abs="${GITHUB_WORKSPACE:-$PWD}/$sarif_rel"
-        bom_abs="${GITHUB_WORKSPACE:-$PWD}/chargate-sbom.cdx.json"
+        # Matches the "Generate CycloneDX SBOM" step's output-file: RUNNER_TEMP, not the
+        # workspace, so MegaLinter never scans chargate's own generated BOM. Keep the two
+        # in lockstep — a mismatch silently skips the Dependency-Track upload.
+        bom_abs="${RUNNER_TEMP:-${GITHUB_WORKSPACE:-$PWD}}/chargate-sbom.cdx.json"
         mkdir -p "$(dirname "$sarif_abs")"
         echo "sarif_path=$sarif_rel" >> "$GITHUB_OUTPUT"
 

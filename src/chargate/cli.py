@@ -43,7 +43,12 @@ from chargate.sarif.filter import (
     filter_sarif,
     normalize_sarif_uri,
 )
-from chargate.sarif.model import is_secret_result, iter_results, primary_uri
+from chargate.sarif.model import (
+    canonicalize_tool_names,
+    is_secret_result,
+    iter_results,
+    primary_uri,
+)
 from chargate.sarif.sops import EMPTY_SOPS_INDEX, SopsIndex, scan_encrypted_lines
 
 
@@ -328,6 +333,12 @@ def cmd_ci(args: argparse.Namespace) -> int:
             return _fail(str(exc))
 
     sarif = _load_sarif(sarif_path)
+
+    # Fold "Trivy (MegaLinter REPOSITORY_TRIVY)" back to "Trivy" before anything consumes
+    # the document, so the Security tab lists one entry per scanner instead of one per
+    # MegaLinter descriptor key. Done here rather than per-sink so the tab, DefectDojo,
+    # the artifact and the PR comments cannot disagree about a tool's name.
+    canonicalize_tool_names(sarif)
 
     # A SARIF with no runs is indistinguishable from a clean repo at the gate, so say
     # so out loud. This is the exact shape the relative-REPORT_OUTPUT_FOLDER bug took:

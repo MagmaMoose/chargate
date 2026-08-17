@@ -9,6 +9,7 @@ filter logic stays readable. Everything here tolerates missing/None fields.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -50,6 +51,48 @@ def tool_driver_name(run: dict) -> str | None:
     driver = (run.get("tool") or {}).get("driver") or {}
     name = driver.get("name")
     return name if isinstance(name, str) and name else None
+
+
+# MegaLinter's SarifReporter renames each run's driver to "<Tool> (MegaLinter <KEY>)" —
+# e.g. "Trivy (MegaLinter REPOSITORY_TRIVY)". GitHub's Security tab keys its Tools list
+# on that string, so the same scanner appears twice whenever anything also uploads it
+# under its own name: "Trivy" AND "Trivy (MegaLinter REPOSITORY_TRIVY)", "Semgrep OSS
+# (MegaLinter REPOSITORY_SEMGREP)" beside a plain Semgrep, and so on. The suffix carries
+# no information the rule ids don't already: it names the MegaLinter descriptor key, not
+# the tool or its version.
+_MEGALINTER_SUFFIX = re.compile(r"\s*\(MegaLinter\b[^)]*\)\s*$")
+
+
+def canonical_tool_name(name: str) -> str:
+    """``"Trivy (MegaLinter REPOSITORY_TRIVY)"`` -> ``"Trivy"``; other names unchanged.
+
+    Only a trailing ``(MegaLinter ...)`` group is removed, and only if something is left
+    over — a driver named nothing but the suffix keeps its original name rather than
+    becoming an empty string that GitHub would reject.
+    """
+    stripped = _MEGALINTER_SUFFIX.sub("", name).strip()
+    return stripped or name
+
+
+def canonicalize_tool_names(sarif: dict[str, Any]) -> int:
+    """Rewrite every run's driver name in place; return how many changed.
+
+    In place, and on the FULL document, so the Security-tab upload, the DefectDojo push,
+    the artifact and the PR comments all name the tool identically.
+    """
+    changed = 0
+    for run in sarif.get("runs") or []:
+        driver = (run.get("tool") or {}).get("driver")
+        if not isinstance(driver, dict):
+            continue
+        name = driver.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        canonical = canonical_tool_name(name)
+        if canonical != name:
+            driver["name"] = canonical
+            changed += 1
+    return changed
 
 
 # Dedicated secret/credential scanners: every finding is a secret. Matched as a
