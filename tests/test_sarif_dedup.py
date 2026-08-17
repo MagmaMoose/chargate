@@ -40,6 +40,15 @@ def test_fingerprint_prefers_tool_provided(make_result):
     assert finding_fingerprint(result) == "primaryLocationLineHash=abc123:1"
 
 
+def test_fingerprints_beats_partial_fingerprints(make_result):
+    # `fingerprints` is listed first in _FINGERPRINT_KEYS as "most stable";
+    # when both keys are present it must win over `partialFingerprints`.
+    result = make_result("src/a.py", 5, rule_id="R1")
+    result["fingerprints"] = {"hkl": "stable-hash"}
+    result["partialFingerprints"] = {"primaryLocationLineHash": "abc123:1"}
+    assert finding_fingerprint(result) == "hkl=stable-hash"
+
+
 def test_fingerprint_falls_back_to_location_and_message(make_result):
     result = make_result("src/a.py", 5, message="SQL injection")
     assert finding_fingerprint(result) == "src/a.py:5:SQL injection"
