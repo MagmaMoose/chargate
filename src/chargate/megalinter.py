@@ -264,6 +264,11 @@ def build_docker_command(
     cmd = ["docker", "run", "--rm"]
     if config.platform:
         cmd += ["--platform", config.platform]
+    # --user covers linters that write cache dirs before the entrypoint privilege-drop.
+    uid = env.get("MEGALINTER_UID")
+    gid = env.get("MEGALINTER_GID")
+    if uid is not None and gid is not None:
+        cmd += ["--user", f"{uid}:{gid}"]
     for key, value in env.items():
         cmd += ["-e", f"{key}={value}"]
     cmd += ["-v", f"{workspace}:{CONTAINER_WORKSPACE}", image or config.image()]
