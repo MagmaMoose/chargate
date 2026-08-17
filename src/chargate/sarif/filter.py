@@ -28,6 +28,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from chargate.sarif.counts import Counts, count_results
+from chargate.sarif.dedup import dedup_key
 from chargate.sarif.diff import DiffIndex, FileDiff, normalize_path
 from chargate.sarif.model import (
     is_secret_result,
@@ -78,6 +79,11 @@ class FilterPolicy:
     # (`ENC[AES256_GCM,...]`) — a 100% false positive. Needs a SopsIndex passed to
     # `filter_sarif`; a plaintext value in the same file still gates.
     ignore_sops_encrypted: bool = True
+    # Collapse net-new findings that share a `(rule id, fingerprint)` key so the
+    # same logical finding reported by multiple SARIF producers (e.g. the same
+    # engine's SARIF uploaded twice, or CodeQL + a re-scan) gates and comments
+    # once, not N times. See `chargate.sarif.dedup`.
+    deduplicate: bool = True
 
 
 # `_classify_one` reasons whose result is guaranteed to sit on a RIGHT-side line
@@ -194,6 +200,7 @@ def classify_results(
     policy = policy or FilterPolicy()
     changed = diff_index.as_dict()
     verdicts: list[ResultVerdict] = []
+    seen_keys: set[tuple[str | None, str]] = set()
     for run_index, result_index, result, run in iter_results(sarif):
         uri = primary_uri(result)
         start_line = primary_start_line(result)
@@ -217,6 +224,15 @@ def classify_results(
             and sops_index.is_encrypted(normalize_sarif_uri(uri, policy.strip_prefixes), start_line)
         ):
             net_new, reason = False, "sops-encrypted"
+        # Collapse a net-new finding already reported (same rule id + fingerprint)
+        # by an earlier result — the same logical finding from another SARIF
+        # producer or a re-scan. The first occurrence gates; later ones don't.
+        if net_new and policy.deduplicate:
+            key = dedup_key(result)
+            if key in seen_keys:
+                net_new, reason = False, "duplicate"
+            else:
+                seen_keys.add(key)
         verdicts.append(
             ResultVerdict(
                 run_index=run_index,
@@ -249,6 +265,7 @@ def filter_sarif(
     keep = {(v.run_index, v.result_index) for v in verdicts if v.net_new}
     suppressed = {(v.run_index, v.result_index) for v in verdicts if v.reason == "suppressed"}
     sops_ignored = {(v.run_index, v.result_index) for v in verdicts if v.reason == "sops-encrypted"}
+    deduped = {(v.run_index, v.result_index) for v in verdicts if v.reason == "duplicate"}
 
     filtered = copy.deepcopy(sarif)
     for run_index, run in enumerate(filtered.get("runs") or []):
@@ -262,5 +279,5 @@ def filter_sarif(
     return FilterResult(
         filtered_sarif=filtered,
         verdicts=verdicts,
-        counts=count_results(sarif, keep, suppressed, sops_ignored),
+        counts=count_results(sarif, keep, suppressed, sops_ignored, deduped),
     )

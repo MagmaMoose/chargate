@@ -544,6 +544,26 @@ pip-audit / npm audit / govulncheck) is covered by `REPOSITORY_OSV_SCANNER` +
 `REPOSITORY_TRIVY` + `REPOSITORY_GRYPE`. Secrets scanning moved from TruffleHog to
 MegaLinter's native `betterleaks` (v10's gitleaks successor) / `secretlint` / `kingfisher`.
 
+## chargate vs CodeQL
+
+Chargate is a SAST **orchestrator/aggregator**, not a competing analysis engine —
+it owns the ground CodeQL cedes (net-new PR-diff gating, cross-engine
+de-duplication, the DefectDojo/Dependency-Track bridge) and normalises any
+SARIF-2.1.0 producer into one gate. Gating keys on the SARIF result, never on the
+tool, so CodeQL / Semgrep / KICS / checkov / hadolint output all get identical
+introduced-vs-pre-existing logic, and the same finding reported by two engines
+(or a re-scan) collapses to one by `(rule id, fingerprint)`.
+
+- **Primary SAST** — polyglot repos, languages CodeQL covers poorly, or teams
+  wanting SAST + IaC + secrets + SCA + Dockerfile + shell coverage with PR-diff
+  gating in one gate. Feed MegaLinter's report; chargate is the whole story.
+- **CodeQL complement** — repos already running CodeQL for deep dataflow. Layer
+  CodeQL's uploaded SARIF into chargate's ingested set; chargate adds the net-new
+  diff gate, cross-engine de-dup, and the DefectDojo bridge on top.
+
+Operators pick the mode by *what SARIF they feed in*, not a flag. Rationale and
+benchmark: [SAST direction](docs/sast-benchmark.md).
+
 ## Migrating from v1
 
 v1 was a composite action that fetched a hand-rolled scanner runtime from
@@ -563,7 +583,8 @@ you migrate. Move to the `v2` composite action when ready.
 ## Documentation & contributing
 
 - **Full docs** (MkDocs): [architecture](docs/architecture.md) ·
-  [net-new gating](docs/net-new.md) · [setup & usage](docs/setup.md) ·
+  [net-new gating](docs/net-new.md) · [SAST direction](docs/sast-benchmark.md) ·
+  [setup & usage](docs/setup.md) ·
   [CLI reference](docs/cli.md). Preview locally with `uv run --group docs mkdocs serve`.
 - **Contributing:** issues and PRs are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
   Dev stack: Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only core.

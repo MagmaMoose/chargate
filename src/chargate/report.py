@@ -42,6 +42,8 @@ def render_summary(
         lines.append(f"| Suppressed (accepted in-source) | {counts.suppressed} |")
     if counts.sops_ignored:
         lines.append(f"| SOPS-encrypted (false positive) | {counts.sops_ignored} |")
+    if counts.deduped:
+        lines.append(f"| Duplicates collapsed (rule + fingerprint) | {counts.deduped} |")
     lines.append(f"| Total in full SARIF | {counts.total} |")
     if counts.per_band_net_new:
         bands = ", ".join(f"{k}={v}" for k, v in sorted(counts.per_band_net_new.items()))
@@ -135,6 +137,9 @@ def render_pr_summary(
     if counts.sops_ignored:
         headers.append("SOPS-encrypted")
         values.append(counts.sops_ignored)
+    if counts.deduped:
+        headers.append("Duplicates collapsed")
+        values.append(counts.deduped)
     headers.append("Total in full SARIF")
     values.append(counts.total)
     table = [

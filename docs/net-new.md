@@ -17,6 +17,7 @@ falls inside an added/modified hunk. The diff is computed against
 | Result with **no** file location (project-level: SBOM/license/some Trivy) | **not** net-new | `--no-location-policy block` |
 | Changed file, result with no `startLine` (common for SCA on a lockfile) | net-new (file-level fallback) | `--no-region-fallback` to disable |
 | Secret-scanner hit on a **SOPS-encrypted** value (`ENC[AES256_GCM,...]`) | dropped as a false positive → never blocks | `ignore_sops_encrypted: false` / `--no-sops-ignore` |
+| Same finding reported by **two engines** or a re-scan (same rule id + fingerprint) | collapsed → gates/comments once | `deduplicate: false` |
 | Multiple locations | uses the **primary** (`locations[0]`) | documented |
 | Missing merge-base / shallow clone | **fails loudly** — needs `fetch-depth: 0` | — |
 
@@ -25,6 +26,22 @@ These knobs are expressed on `FilterPolicy` in
 PR-introduced dependency vulnerability attached to a changed lockfile (no
 `startLine`) still blocks, while truly project-global findings (no file at all)
 fall under the no-location policy.
+
+## Engine-agnostic gating & de-duplication
+
+Classification keys on the SARIF *result*, never on the emitting tool, so every
+producer — MegaLinter's linters, plus any CodeQL / Semgrep / KICS / checkov /
+hadolint SARIF layered into the ingested set — gets the identical
+introduced-vs-pre-existing logic. This is what lets chargate act as a SAST
+aggregator rather than an engine; see [SAST direction](sast-benchmark.md).
+
+Because a fleet of engines will re-report the same issue, a net-new finding that
+shares a `(rule id, fingerprint)` key with one already seen is **collapsed** —
+the first occurrence gates, later ones get a `duplicate` count and are dropped
+from the net-new set (so a PR gets one comment, not one per engine). Fingerprints
+prefer the tool's own `fingerprints`/`partialFingerprints`; otherwise they derive
+from the primary location and message. The full SARIF still ships every result.
+De-dup is on by default; disable it with `FilterPolicy.deduplicate=False`.
 
 ## SOPS-encrypted secrets
 
