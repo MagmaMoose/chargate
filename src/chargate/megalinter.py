@@ -65,6 +65,11 @@ STANDALONE_REPO_PREFIX = "megalinter-only-"
 DEFAULT_TAG = "v10.0.0"
 
 CONTAINER_WORKSPACE = "/tmp/lint"  # MegaLinter's DEFAULT_DOCKER_WORKSPACE_DIR.  # nosec B108
+
+# HOME for the non-root uid MegaLinter drops to. Deliberately a SIBLING of
+# CONTAINER_WORKSPACE, not a child: tool caches (grype's vuln DB, trivy's, semgrep's
+# rule cache) must be writable but must not land in the scanned tree. See build_env.
+CONTAINER_HOME = "/tmp/chargate-home"  # nosec B108 - container-internal, /tmp is sticky
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 SARIF_VERSION = "2.1.0"
 
@@ -214,18 +219,22 @@ class MegaLinterRun:
 def _artifact_exclude_regex(config: MegaLinterConfig) -> str:
     """A ``FILTER_REGEX_EXCLUDE`` pattern covering chargate's own workspace output.
 
-    Chargate writes three things into the workspace that MegaLinter would otherwise
-    scan as if they were source: the Syft BOM (generated *before* the gate step so
-    the Dependency-Track sink can upload it), the emitted full SARIF, and
-    MegaLinter's own report folder.
+    Chargate's generated files — the emitted full SARIF, MegaLinter's report folder,
+    and (only when a caller writes it there, which ``action.yml`` no longer does) the
+    Syft BOM — are not scannable source. A finding in one is permanently unresolvable:
+    the file is not in git, so :mod:`chargate.sarif.filter` classifies it
+    ``file-not-changed`` on every run, and the gate can neither surface it as net-new
+    nor clear it while the Security tab holds the alert open.
 
-    Scanning them is pure noise that the gate can never act on. A finding inside a
-    generated BOM — devskim reading CycloneDX ``purl`` / ``externalReferences``
-    strings as hardcoded tokens (DS173237) or insecure URLs (DS137138) — is
-    permanently unresolvable: the file is not in git, so
-    :mod:`chargate.sarif.filter` classifies it ``file-not-changed`` on every run
-    and chargate can neither surface it as net-new nor clear it, while the
-    Security tab holds the alert open forever.
+    **This only covers file-scope linters.** ``FILTER_REGEX_EXCLUDE`` filters the file
+    list MegaLinter hands a linter, so it does nothing for PROJECT-scope linters
+    (``REPOSITORY_*``: devskim, trivy, checkov, semgrep, grype, betterleaks), which walk
+    the tree themselves. Relying on it alone is what left 13 devskim alerts open on the
+    generated BOM (DS173237 x12 on CycloneDX ``purl`` strings, DS137138 x1). The only
+    thing that reliably keeps a generated file out of a project-scope scan is keeping it
+    out of the mounted tree — hence ``action.yml`` writes the BOM to ``RUNNER_TEMP``.
+    Treat this regex as defence for the file-scope case (and for a local ``chargate ci``
+    run against a dirty working tree), not as the mechanism.
     """
     names = (
         re.escape(SBOM_FILE_NAME),
@@ -287,6 +296,28 @@ def build_env(config: MegaLinterConfig, *, single_linter: str = "") -> dict[str,
     if hasattr(os, "getuid"):
         env["MEGALINTER_UID"] = os.environ.get("MEGALINTER_UID") or str(os.getuid())
         env["MEGALINTER_GID"] = os.environ.get("MEGALINTER_GID") or str(os.getgid())
+        # ...and the uid we just dropped to has NO HOME. The images set HOME for root
+        # only, so after setup-runtime-user.sh switches user, HOME is unset and every
+        # tool that caches under it resolves `~` to `/` — which is not writable by a
+        # non-root uid. Three scanners die there, and MegaLinter classifies each as a
+        # non-blocking tool error rather than a finding, so they report NOTHING and the
+        # run still looks green:
+        #
+        #   grype    unable to create db root dir /.cache/grype/db: mkdir /.cache: permission denied
+        #   trivy    failed to download vulnerability DB: mkdir /.cache: permission denied
+        #   semgrep  PermissionError: [Errno 13] Permission denied: '/.semgrep'
+        #
+        # A vulnerability scanner that silently finds zero CVEs is worse than one that
+        # fails loudly: alerts it raised previously can never be closed either, because
+        # GitHub only retires an alert when that same tool reports again without it.
+        #
+        # Point HOME at a writable path OUTSIDE the workspace — /tmp is world-writable
+        # and sticky in these images, and a sibling of CONTAINER_WORKSPACE (/tmp/lint)
+        # so the caches are neither scanned as source nor left in the checkout.
+        env.setdefault("HOME", CONTAINER_HOME)
+        env.setdefault("XDG_CACHE_HOME", f"{CONTAINER_HOME}/.cache")
+        env.setdefault("XDG_CONFIG_HOME", f"{CONTAINER_HOME}/.config")
+        env.setdefault("XDG_DATA_HOME", f"{CONTAINER_HOME}/.local/share")
     env.update(config.extra_env)
     # Chargate's own workspace artifacts are never scannable source. Applied last
     # and OR'd with (not overridden by) any consumer pattern, so a repo tuning

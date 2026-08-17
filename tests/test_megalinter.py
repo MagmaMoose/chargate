@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -118,12 +119,14 @@ def test_report_output_folder_follows_a_custom_report_dir():
     assert env["REPORT_OUTPUT_FOLDER"] == "/tmp/lint/reports/ml"  # nosec B108
 
 
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX-only uid drop")
 def test_build_env_sets_runtime_uid_so_reports_are_not_root_owned():
     env = ml.build_env(ml.MegaLinterConfig())
     assert env["MEGALINTER_UID"].isdigit()
     assert env["MEGALINTER_GID"].isdigit()
 
 
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX-only uid drop")
 def test_runtime_uid_can_be_overridden_from_the_environment(monkeypatch):
     # The escape hatch for a containerised runner whose workspace is owned by a
     # different user than the job: dropping to the job's uid there leaves MegaLinter
@@ -469,12 +472,16 @@ def test_run_uses_injected_runner(tmp_path: Path):
 
 
 def test_build_env_excludes_chargate_own_workspace_artifacts():
-    """The BOM/SARIF chargate writes into the workspace must never be scanned.
+    """Chargate's generated files must not be scanned as source by FILE-scope linters.
 
-    They are not in git, so a finding in them is `file-not-changed` forever: the
-    gate can neither surface it as net-new nor clear it, but it sits open in the
-    Security tab. (Regression guard for the 13 devskim alerts on the generated
-    chargate-sbom.cdx.json.)
+    They are not in git, so a finding in one is `file-not-changed` forever: the gate can
+    neither surface it as net-new nor clear it, but it sits open in the Security tab.
+
+    Note the scope. FILTER_REGEX_EXCLUDE filters the file list MegaLinter hands a linter,
+    so it does nothing for project-scope REPOSITORY_* linters that walk the tree
+    themselves. It is NOT what fixed the 13 devskim alerts on the generated BOM — moving
+    the BOM out of the workspace was (see
+    test_composite_action_writes_the_sbom_outside_the_scanned_workspace).
     """
     env = ml.build_env(ml.MegaLinterConfig())
     pattern = env["FILTER_REGEX_EXCLUDE"]
@@ -494,6 +501,48 @@ def test_build_env_exclude_ors_consumer_pattern_rather_than_replacing_it():
     pattern = env["FILTER_REGEX_EXCLUDE"]
     assert re.search(pattern, "vendor/thing.py")  # consumer's pattern honoured
     assert re.search(pattern, ml.SBOM_FILE_NAME)  # chargate's still applied
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX-only uid drop")
+def test_build_env_gives_the_dropped_uid_a_writable_home():
+    """The uid MegaLinter drops to must have a writable HOME, outside the workspace.
+
+    Without it `~` resolves to `/`, which a non-root uid cannot write, and grype, trivy
+    and semgrep all die on their caches — reported as non-blocking TOOL ERRORS, so they
+    contribute zero findings while the run stays green. Alerts those tools raised earlier
+    can then never be closed either, because GitHub only retires an alert when the same
+    tool reports again without it.
+    """
+    env = ml.build_env(ml.MegaLinterConfig())
+    assert env["HOME"] == ml.CONTAINER_HOME
+    # Writable (under /tmp) but NOT inside the mounted workspace, so caches are neither
+    # scanned as source nor left behind in the checkout.
+    assert env["HOME"].startswith("/tmp/")  # nosec B108 - asserting a container path
+    assert not env["HOME"].startswith(ml.CONTAINER_WORKSPACE + "/")
+    assert env["HOME"] != ml.CONTAINER_WORKSPACE
+    for key in ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+        assert env[key].startswith(ml.CONTAINER_HOME + "/"), key
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX-only uid drop")
+def test_home_can_be_overridden_from_extra_env():
+    env = ml.build_env(ml.MegaLinterConfig(extra_env={"HOME": "/tmp/mine"}))  # nosec B108
+    assert env["HOME"] == "/tmp/mine"  # nosec B108 - container path in a test
+
+
+def test_composite_action_writes_the_sbom_outside_the_scanned_workspace():
+    """The generated BOM must not live in the tree MegaLinter mounts.
+
+    devskim is a PROJECT-scope linter: it walks the workspace itself, so no MegaLinter
+    file filter can keep it off a generated file inside the checkout. A BOM under
+    GITHUB_WORKSPACE produced 13 unclosable alerts (DS173237 x12 on CycloneDX `purl`
+    strings, DS137138 x1). The gate step's BOM path must agree, or the
+    Dependency-Track upload silently stops happening.
+    """
+    action = (Path(__file__).parent.parent / "action.yml").read_text(encoding="utf-8")
+    assert f"output-file: ${{{{ runner.temp }}}}/{ml.SBOM_FILE_NAME}" in action
+    assert f"${{{{ github.workspace }}}}/{ml.SBOM_FILE_NAME}" not in action
+    assert f'bom_abs="${{RUNNER_TEMP:-${{GITHUB_WORKSPACE:-$PWD}}}}/{ml.SBOM_FILE_NAME}"' in action
 
 
 def test_run_standalone_merges_every_linter_report(tmp_path: Path):

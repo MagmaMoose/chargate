@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -43,7 +44,12 @@ from chargate.sarif.filter import (
     filter_sarif,
     normalize_sarif_uri,
 )
-from chargate.sarif.model import is_secret_result, iter_results, primary_uri
+from chargate.sarif.model import (
+    canonicalize_tool_names,
+    is_secret_result,
+    iter_results,
+    primary_uri,
+)
 from chargate.sarif.sops import EMPTY_SOPS_INDEX, SopsIndex, scan_encrypted_lines
 
 
@@ -329,6 +335,12 @@ def cmd_ci(args: argparse.Namespace) -> int:
 
     sarif = _load_sarif(sarif_path)
 
+    # Fold "Trivy (MegaLinter REPOSITORY_TRIVY)" back to "Trivy" before anything consumes
+    # the document, so the Security tab lists one entry per scanner instead of one per
+    # MegaLinter descriptor key. Done here rather than per-sink so the tab, DefectDojo,
+    # the artifact and the PR comments cannot disagree about a tool's name.
+    canonicalize_tool_names(sarif)
+
     # A SARIF with no runs is indistinguishable from a clean repo at the gate, so say
     # so out loud. This is the exact shape the relative-REPORT_OUTPUT_FOLDER bug took:
     # a well-formed document that had scanned nothing, gating on nothing, for months.
@@ -384,7 +396,7 @@ def cmd_ci(args: argparse.Namespace) -> int:
         )
 
     # 4. Optional DefectDojo import of the FULL SARIF (never fails the gate).
-    dd = _maybe_import_defectdojo(args, sarif_path if not args.sarif_out else Path(args.sarif_out))
+    dd = _maybe_import_defectdojo(args, sarif)
 
     # 4b. Optional Dependency-Track upload of the CycloneDX BOM (never fails the gate).
     dt = _maybe_upload_dependencytrack(args)
@@ -452,7 +464,9 @@ class _SinkOutcome(NamedTuple):
     url: str | None = None
 
 
-def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> _SinkOutcome:
+def _maybe_import_defectdojo(
+    args: argparse.Namespace, sarif_doc: dict[str, Any]
+) -> _SinkOutcome:
     if not args.defectdojo_url:
         return _SinkOutcome()
     token = os.environ.get(args.defectdojo_token_env, "")
@@ -471,7 +485,17 @@ def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> _Sin
         tags=tuple(args.dd_tag or ()),
         verify_ssl=not args.dd_insecure,
     )
-    result = dd.import_sarif(config, sarif_path)
+    # Serialize the already-canonicalized in-memory document so the upload always
+    # carries folded tool names regardless of whether --sarif-out was passed.
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".sarif.json", delete=False, encoding="utf-8"
+    ) as f:
+        json.dump(sarif_doc, f)
+        tmp_path = Path(f.name)
+    try:
+        result = dd.import_sarif(config, tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     if result.ok:
         return _SinkOutcome(result.message, result.url)
     return _SinkOutcome(f"upload failed (non-blocking): {result.message}")

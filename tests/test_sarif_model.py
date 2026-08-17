@@ -6,7 +6,12 @@ exercised through the filter/counts suites.
 
 from __future__ import annotations
 
-from chargate.sarif.model import is_secret_result, tool_driver_name
+from chargate.sarif.model import (
+    canonical_tool_name,
+    canonicalize_tool_names,
+    is_secret_result,
+    tool_driver_name,
+)
 
 
 def _run(sarif: dict) -> dict:
@@ -94,3 +99,53 @@ def test_kubernetes_native_secret_mgmt_is_not_a_hardcoded_secret(make_sarif, mak
 def test_non_secret_finding_is_not_secret(make_sarif, make_result):
     run = _run(make_sarif([make_result("a.yaml", 1, rule_id="line-length")], tool_name="yamllint"))
     assert not is_secret_result(run["results"][0], run)
+
+
+# ── Tool-name canonicalization ──
+#
+# MegaLinter renames each SARIF run's driver to "<Tool> (MegaLinter <DESCRIPTOR_KEY>)".
+# GitHub's Security tab keys its Tools list on that string, so a scanner uploaded under
+# both names shows up twice ("Trivy" AND "Trivy (MegaLinter REPOSITORY_TRIVY)").
+
+
+def test_canonical_tool_name_strips_the_megalinter_suffix():
+    assert canonical_tool_name("Trivy (MegaLinter REPOSITORY_TRIVY)") == "Trivy"
+    assert canonical_tool_name("Semgrep OSS (MegaLinter REPOSITORY_SEMGREP)") == "Semgrep OSS"
+    assert canonical_tool_name("Bandit (MegaLinter PYTHON_BANDIT)") == "Bandit"
+    assert canonical_tool_name("devskim (MegaLinter REPOSITORY_DEVSKIM)") == "devskim"
+
+
+def test_canonical_tool_name_leaves_other_names_alone():
+    # Tools that never carried the suffix, and parentheses that are not the suffix.
+    for name in ("CodeQL", "Trivy", "syft", "dustilock", "KICS", "grype (v0.74)"):
+        assert canonical_tool_name(name) == name
+
+
+def test_canonical_tool_name_never_returns_empty():
+    # A driver named only by the suffix keeps its original name; GitHub rejects "".
+    assert canonical_tool_name("(MegaLinter REPOSITORY_TRIVY)") == "(MegaLinter REPOSITORY_TRIVY)"
+
+
+def test_canonicalize_tool_names_folds_duplicates_in_place(make_sarif, make_result):
+    sarif = {
+        "runs": [
+            make_sarif([make_result("a.py", 1)], tool_name="Trivy (MegaLinter REPOSITORY_TRIVY)")[
+                "runs"
+            ][0],
+            make_sarif([make_result("b.py", 2)], tool_name="Trivy")["runs"][0],
+            make_sarif([make_result("c.py", 3)], tool_name="CodeQL")["runs"][0],
+        ]
+    }
+    assert canonicalize_tool_names(sarif) == 1  # only the suffixed run changed
+    names = [tool_driver_name(run) for run in sarif["runs"]]
+    assert names == ["Trivy", "Trivy", "CodeQL"]
+    # Results are untouched — this renames the driver, nothing else.
+    assert [len(run["results"]) for run in sarif["runs"]] == [1, 1, 1]
+
+
+def test_canonicalize_tool_names_tolerates_malformed_runs():
+    sarif = {
+        "runs": [{}, {"tool": {}}, {"tool": {"driver": {}}}, {"tool": {"driver": {"name": ""}}}]
+    }
+    assert canonicalize_tool_names(sarif) == 0
+    assert canonicalize_tool_names({}) == 0

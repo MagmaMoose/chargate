@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import jwt
@@ -74,7 +75,16 @@ async def mint_installation_token(
         "X-GitHub-Api-Version": _API_VERSION,
     }
     base = api_url.rstrip("/")
-    installation = await client.get(f"{base}/repos/{owner}/{repo}/installation", headers=headers)
+    # Percent-encode with an EMPTY safe set, so `/`, `.`, `%` and `?` cannot survive into
+    # the path even if validate_repository were bypassed or loosened. On a value that
+    # passed validation this is a no-op — the point is that the request URL is safe by
+    # construction at the interpolation site, not merely because a check ran earlier
+    # (CodeQL py/partial-ssrf). httpx does not re-encode an already-encoded path segment.
+    owner_seg = quote(owner, safe="")
+    repo_seg = quote(repo, safe="")
+    installation = await client.get(
+        f"{base}/repos/{owner_seg}/{repo_seg}/installation", headers=headers
+    )
     installation.raise_for_status()
     installation_id = installation.json()["id"]
 
