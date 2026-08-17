@@ -17,13 +17,20 @@ where configuration comes from — see ``app.config``.
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.config import BrokerConfig, load_config
-from app.github import mint_installation_token
+from app.github import InvalidRepositoryError, mint_installation_token, validate_repository
 from app.oidc import JwksUnavailable, KeyResolver, OidcError, verify_oidc_token
+
+# Nothing request-derived is ever passed to this logger. /token is unauthenticated, so a
+# caller-supplied string reaching a log record is CodeQL py/log-injection — see the
+# OidcError handler for what is logged instead and why.
+_log = logging.getLogger("chargate.broker")
 
 
 def create_app(
@@ -81,6 +88,15 @@ def create_app(
         repo = body.get("repo")
         if not (oidc_token and owner and repo):
             return JSONResponse({"error": "missing_fields"}, status_code=400)
+        if not (isinstance(owner, str) and isinstance(repo, str)):
+            return JSONResponse({"error": "invalid_repository"}, status_code=400)
+        # Reject anything that isn't a plain GitHub owner/repo identifier before it
+        # reaches an API URL or a claim comparison. A value containing '/' or '..'
+        # would otherwise let the caller steer the request path (py/partial-ssrf).
+        try:
+            owner, repo = validate_repository(owner, repo)
+        except InvalidRepositoryError:
+            return JSONResponse({"error": "invalid_repository"}, status_code=400)
         repository = f"{owner}/{repo}"
 
         try:
@@ -109,7 +125,37 @@ def create_app(
             except JwksUnavailable:
                 return JSONResponse({"error": "jwks_unavailable"}, status_code=503)
             except OidcError as exc:
-                return JSONResponse({"error": "invalid_oidc", "detail": str(exc)}, status_code=401)
+                # The exception text comes from PyJWT and can carry key ids, expected
+                # audiences and other internals. It goes to the broker's own log (where
+                # an operator debugging a consumer's OIDC setup needs it) and never to
+                # the unauthenticated caller (CodeQL py/stack-trace-exposure).
+                #
+                # Both values go through _for_log: /token is unauthenticated, so writing
+                # Only the exception's CLASS NAME is logged — never its message, and
+                # never the caller-supplied repository. Both of those are request-derived
+                # strings, and writing either into a log record on an unauthenticated
+                # endpoint is CodeQL py/log-injection: a CRLF in the value forges a
+                # second log line. A regex scrub at the sink genuinely prevents that but
+                # is not a barrier CodeQL recognises, so the taint is removed instead of
+                # laundered. `type(exc).__name__` carries no attacker-controlled bytes.
+                #
+                # This is also the more useful field: ExpiredSignatureError vs
+                # InvalidAudienceError vs InvalidSignatureError names the misconfiguration
+                # an operator is actually chasing, where the unverified repo name — which
+                # the caller simply asserted — does not. Correlate to a specific request
+                # through the access log.
+                #
+                # The CAUSE, not the OidcError itself: verify_oidc_token wraps every PyJWT
+                # failure as `raise OidcError(str(exc)) from exc` (app.oidc), so the
+                # wrapper's own name is the same string every time and says nothing. A few
+                # OidcErrors are raised with no cause (missing kid, no resolver), hence the
+                # fallback.
+                cause = exc.__cause__
+                _log.warning(
+                    "OIDC verification failed: %s",
+                    type(cause).__name__ if cause is not None else type(exc).__name__,
+                )
+                return JSONResponse({"error": "invalid_oidc"}, status_code=401)
 
             # The OIDC `repository` claim is the caller's repo — it must match the
             # repo they're asking for a token for. This is what stops repo A minting

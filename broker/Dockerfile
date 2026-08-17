@@ -10,7 +10,18 @@
 # uvicorn lives in the `server` extra rather than in the base dependency set.
 ARG PYTHON_VERSION=3.12
 
+# High, fixed uid/gid for the runtime user. Above 10000 so it cannot collide with
+# a uid the host already assigns to a real account — what a container escape would
+# otherwise inherit. k8s/base/deployment.yaml pins the same numbers in
+# securityContext.runAsUser/runAsGroup; the two must be changed together
+# (Checkov CKV_K8S_40, Trivy KSV-0020/KSV-0021).
+ARG APP_UID=10001
+ARG APP_GID=10001
+
 FROM python:${PYTHON_VERSION}-slim AS runtime
+
+ARG APP_UID
+ARG APP_GID
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,14 +30,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /srv
 
 # The broker's own pyproject is the single source of dependency truth for both
-# targets; `[server]` adds the uvicorn the Worker does not use.
+# targets; `[server]` adds the uvicorn the Worker does not use. Consolidated with
+# user/group creation in one layer (hadolint DL3059).
+#
+# DL3013 ("pin versions in pip") cannot read this install: the argument is the local
+# project `.[server]`, not a package name, so there is no version to pin here — the
+# versions live in broker/pyproject.toml and are resolved against broker/uv.lock.
+# hadolint sees `.[server]` as an unpinned package because of the extras bracket.
 COPY broker/pyproject.toml /srv/pyproject.toml
 COPY broker/app /srv/app
-RUN pip install --no-cache-dir '.[server]'
+# hadolint ignore=DL3013
+RUN pip install --no-cache-dir '.[server]' \
+    && groupadd --gid "${APP_GID}" app \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" \
+        --create-home --home-dir /home/app --shell /usr/sbin/nologin app
 
 # Non-root; no writable app state (readOnlyRootFilesystem is enforced in k8s).
-RUN useradd --create-home --home-dir /home/app --shell /usr/sbin/nologin app
-USER 1000
+USER ${APP_UID}
 ENV HOME=/home/app
 EXPOSE 8000
 

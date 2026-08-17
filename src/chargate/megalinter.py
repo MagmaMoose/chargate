@@ -35,7 +35,9 @@ from __future__ import annotations
 import json
 import os
 import platform
-import subprocess
+import re
+import shutil
+import subprocess  # nosec B404 - chargate's job is to shell out to the MegaLinter container
 import sys
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -92,6 +94,15 @@ Pick one:
   * runs-on: an amd64 runner (ubuntu-latest).
   * install qemu-user-static + binfmt on the runner and set docker_platform:
     linux/amd64 — it works, but an emulated MegaLinter run is roughly 5-10x slower."""
+
+# The CycloneDX BOM chargate writes into the workspace for the Dependency-Track
+# sink. Kept here as the single source of truth; `action.yml` ("Generate CycloneDX
+# SBOM") must emit this exact name so `_artifact_exclude_regex` can exclude it.
+SBOM_FILE_NAME = "chargate-sbom.cdx.json"
+
+# Directory `action.yml` writes the emitted full SARIF into (under the workspace,
+# so `hashFiles()` can guard the upload steps).
+SARIF_OUT_DIR = "chargate-reports"
 
 
 class MegaLinterError(RuntimeError):
@@ -200,6 +211,30 @@ class MegaLinterRun:
     linters_skipped: tuple[tuple[str, str], ...] = ()
 
 
+def _artifact_exclude_regex(config: MegaLinterConfig) -> str:
+    """A ``FILTER_REGEX_EXCLUDE`` pattern covering chargate's own workspace output.
+
+    Chargate writes three things into the workspace that MegaLinter would otherwise
+    scan as if they were source: the Syft BOM (generated *before* the gate step so
+    the Dependency-Track sink can upload it), the emitted full SARIF, and
+    MegaLinter's own report folder.
+
+    Scanning them is pure noise that the gate can never act on. A finding inside a
+    generated BOM — devskim reading CycloneDX ``purl`` / ``externalReferences``
+    strings as hardcoded tokens (DS173237) or insecure URLs (DS137138) — is
+    permanently unresolvable: the file is not in git, so
+    :mod:`chargate.sarif.filter` classifies it ``file-not-changed`` on every run
+    and chargate can neither surface it as net-new nor clear it, while the
+    Security tab holds the alert open forever.
+    """
+    names = (
+        re.escape(SBOM_FILE_NAME),
+        re.escape(SARIF_OUT_DIR) + "/",
+        re.escape(config.report_dir) + "/",
+    )
+    return r"(^|/)(" + "|".join(names) + ")"
+
+
 def build_env(config: MegaLinterConfig, *, single_linter: str = "") -> dict[str, str]:
     """The MegaLinter env that makes it report-everything but gate-nothing.
 
@@ -253,15 +288,26 @@ def build_env(config: MegaLinterConfig, *, single_linter: str = "") -> dict[str,
         env["MEGALINTER_UID"] = os.environ.get("MEGALINTER_UID") or str(os.getuid())
         env["MEGALINTER_GID"] = os.environ.get("MEGALINTER_GID") or str(os.getgid())
     env.update(config.extra_env)
+    # Chargate's own workspace artifacts are never scannable source. Applied last
+    # and OR'd with (not overridden by) any consumer pattern, so a repo tuning
+    # FILTER_REGEX_EXCLUDE can't accidentally re-admit chargate's generated files.
+    artifacts = _artifact_exclude_regex(config)
+    consumer = env.get("FILTER_REGEX_EXCLUDE", "").strip()
+    env["FILTER_REGEX_EXCLUDE"] = f"({consumer})|({artifacts})" if consumer else artifacts
     return env
 
 
 def build_docker_command(
     config: MegaLinterConfig, env: dict[str, str], image: str | None = None
 ) -> list[str]:
-    """A ``docker run`` invocation of ``image`` (default: the flavor image) with ``env``."""
+    """A ``docker run`` invocation of ``image`` (default: the flavor image) with ``env``.
+
+    ``argv[0]`` is the absolute ``docker`` path when it is resolvable on PATH, so
+    the exec does not re-resolve a bare name (Bandit B607). When docker is absent
+    the bare name is kept, letting the caller surface the usual "docker not found".
+    """
     workspace = str(Path(config.workspace).resolve())
-    cmd = ["docker", "run", "--rm"]
+    cmd = [shutil.which("docker") or "docker", "run", "--rm"]
     if config.platform:
         cmd += ["--platform", config.platform]
     # --user covers linters that write cache dirs before the entrypoint privilege-drop.

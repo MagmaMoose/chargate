@@ -28,7 +28,14 @@ packages = ["src/chargate"]
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 # Docs tooling (non-default group): `uv run --group docs mkdocs serve|build`.
-docs = ["mkdocs-material>=9.5"]
+docs = [
+  "mkdocs-material>=9.5",
+  # Transitive via mkdocs-material. Floor pinned so a future re-lock cannot
+  # resolve back under GHSA-gm37-52c6-37mw (high: ReDoS in the caret/tilde/
+  # betterem/magiclink inline processors) or GHSA-9xwg-3r6f-jcx2 (medium: path
+  # traversal in the b64 extension), both fixed in 11.0.1.
+  "pymdown-extensions>=11.0.1",
+]
 # The token-broker service under `broker/` is a separate deployable with its own
 # deps — they are deliberately NOT runtime deps of the stdlib-only chargate CLI.
 # It now carries its own `broker/pyproject.toml`, because pywrangler vendors a

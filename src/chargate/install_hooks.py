@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404 - drives `git config` / `pre-commit`; see module docstring
 from collections.abc import Callable
 from pathlib import Path
 
@@ -66,7 +66,21 @@ class HookInstallError(RuntimeError):
 
 
 def _default_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+    """Run a fixed argv list, execing an absolute ``argv[0]`` where resolvable.
+
+    Every caller passes a literal command (``git config …``, ``pre-commit …``), so
+    resolving ``argv[0]`` through PATH once here — rather than letting the OS do it
+    at exec time — closes the PATH-hijacking window Bandit flags as B607 for all
+    of them at a single choke point.
+    """
+    argv = cmd
+    if argv:
+        resolved = shutil.which(argv[0])
+        if resolved is not None:
+            argv = [resolved, *argv[1:]]
+    return subprocess.run(  # nosec B603 - literal argv list, shell=False
+        argv, capture_output=True, text=True, check=False
+    )
 
 
 def _managed_block(rev: str) -> str:

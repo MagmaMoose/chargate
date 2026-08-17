@@ -15,7 +15,7 @@ the real tools.
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - dispatches the local checks; see module docstring
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -63,8 +63,12 @@ Which = Callable[[str], str | None]
 
 def staged_files(repo: str = ".") -> list[str]:
     """Added/copied/modified staged files, capped, for the no-args fallback."""
-    proc = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+    git = shutil.which("git")
+    if git is None:
+        return []
+    # Absolute argv[0] resolved via PATH up front, fixed argv list, no shell.
+    proc = subprocess.run(  # nosec B603 - absolute exe, list argv, shell=False
+        [git, "diff", "--cached", "--name-only", "--diff-filter=ACM"],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -83,6 +87,20 @@ def _select_files(files: Sequence[str], check: LocalCheck) -> list[str]:
     return selected
 
 
+def _resolved_argv(check: LocalCheck, files: Sequence[str], resolved_tool: str) -> list[str]:
+    """``check.build_argv(files)`` with a bare ``argv[0]`` swapped for its abs path.
+
+    ``run_local`` already probes each tool with ``which``; reusing that resolved
+    path as ``argv[0]`` means we exec an absolute path instead of re-resolving the
+    bare tool name through PATH at exec time (Bandit B607 / PATH hijacking). A
+    ``build_argv`` that already supplies its own argv[0] is left untouched.
+    """
+    argv = check.build_argv(files)
+    if argv and argv[0] == check.tool:
+        return [resolved_tool, *argv[1:]]
+    return argv
+
+
 def run_local(
     files: Sequence[str],
     checks: Sequence[LocalCheck] = DEFAULT_CHECKS,
@@ -95,20 +113,23 @@ def run_local(
     Exit code is 0 when nothing found, 1 when any check reports findings. Missing
     tools are skipped (never fail the commit).
     """
-    run_fn: Runner = runner or (lambda cmd: subprocess.run(cmd, check=False))
+    run_fn: Runner = runner or (
+        lambda cmd: subprocess.run(cmd, check=False)  # nosec B603 - see _resolved_argv
+    )
     which_fn: Which = which or shutil.which
 
     outcomes: list[CheckOutcome] = []
     failed = False
     for check in checks:
-        if which_fn(check.tool) is None:
+        resolved = which_fn(check.tool)
+        if resolved is None:
             outcomes.append(CheckOutcome(check.name, "skipped", f"{check.tool} not installed"))
             continue
         selected = _select_files(files, check)
         if check.needs_files and not selected:
             outcomes.append(CheckOutcome(check.name, "ok", "no matching staged files"))
             continue
-        completed = run_fn(check.build_argv(selected))
+        completed = run_fn(_resolved_argv(check, selected, resolved))
         if completed.returncode == 0:
             outcomes.append(CheckOutcome(check.name, "ok"))
         else:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import time
 
 import httpx
@@ -162,6 +164,100 @@ def test_allowlist_blocks_other_repo(keypair):
 def test_missing_fields_rejected(keypair):
     client, _ = _client(keypair)
     assert client.post("/token", json={"owner": "org"}).status_code == 400
+
+
+def test_oidc_failure_does_not_leak_exception_detail(keypair):
+    """A 401 body must not echo PyJWT's message (CodeQL py/stack-trace-exposure).
+
+    The endpoint is unauthenticated, so the exception text — which can name key ids
+    and expected audiences — belongs in the broker log, not the response.
+    """
+    client, private_pem = _client(keypair)
+    resp = client.post(
+        "/token",
+        json={"oidcToken": _oidc(private_pem, audience="diatreme"), "owner": "org", "repo": "repo"},
+    )
+    assert resp.status_code == 401
+    assert resp.json() == {"error": "invalid_oidc"}
+    assert "detail" not in resp.json()
+
+
+@pytest.mark.parametrize(
+    "owner,repo",
+    [
+        ("org", "repo/../../evil"),  # path traversal out of /repos/{owner}/{repo}
+        ("org/..", "repo"),
+        ("org", "repo%2f..%2fevil"),  # percent-encoded separator
+        ("org", "repo?x=1"),  # query injection into the API path
+        ("", "repo"),
+        ("-org", "repo"),  # owners may not start with a hyphen
+        ("org", "re po"),
+        # CRLF would forge a second log record if it reached the OIDC-failure
+        # _log.warning (CodeQL py/log-injection). Rejected here, sanitised there.
+        ("org", "repo\nX-Injected: 1"),
+        ("org", "repo\r\nWARNING:root:forged"),
+    ],
+)
+def test_malformed_repository_rejected_before_any_request(keypair, owner, repo):
+    """owner/repo must be plain GitHub identifiers (CodeQL py/partial-ssrf).
+
+    Rejected at the edge with 400, before the value can reach an API URL — the OIDC
+    claim check is the primary control, this is the defence-in-depth layer.
+    """
+    exploded = httpx.MockTransport(
+        lambda req: pytest.fail(f"request must not be issued, got {req.url}")
+    )
+    client, private_pem = _client(keypair, transport=exploded)
+    resp = client.post(
+        "/token",
+        json={"oidcToken": _oidc(private_pem), "owner": owner, "repo": repo},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] in ("invalid_repository", "missing_fields")
+
+
+def test_oidc_failure_log_carries_no_request_derived_text(keypair, caplog):
+    """The OIDC-failure log record must contain only the exception CLASS name.
+
+    /token is unauthenticated, so putting either the caller's repository or PyJWT's
+    message into a log record is CodeQL py/log-injection — a CRLF in the value forges a
+    second line. Neither is logged; the class name is, because it names the
+    misconfiguration without carrying attacker-controlled bytes.
+    """
+    client, private_pem = _client(keypair)
+    with caplog.at_level(logging.WARNING, logger="chargate.broker"):
+        resp = client.post(
+            "/token",
+            json={
+                "oidcToken": _oidc(private_pem, audience="diatreme"),
+                "owner": "org",
+                "repo": "repo",
+            },
+        )
+    assert resp.status_code == 401
+
+    records = [r for r in caplog.records if r.name == "chargate.broker"]
+    assert records, "the OIDC failure should be logged server-side"
+    # Assert the SHAPE, not the absence of particular words: a fixed prefix followed by a
+    # single Python identifier. Free-form text — a repository, a PyJWT sentence, an
+    # injected CRLF payload — cannot satisfy this, whereas substring checks miss cases and
+    # false-positive on legitimate class names (InvalidAudienceError contains "audience").
+    for record in records:
+        assert re.fullmatch(
+            r"OIDC verification failed: [A-Za-z_][A-Za-z0-9_]*", record.getMessage()
+        ), record.getMessage()
+    # The diagnostic that IS kept: the underlying PyJWT error class, not its wrapper.
+    assert any(r.getMessage().endswith("InvalidAudienceError") for r in records)
+
+
+def test_non_string_repository_rejected(keypair):
+    client, private_pem = _client(keypair)
+    resp = client.post(
+        "/token",
+        json={"oidcToken": _oidc(private_pem), "owner": {"a": 1}, "repo": ["x"]},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_repository"
 
 
 def test_app_not_installed_is_403(keypair):
