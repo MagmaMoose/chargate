@@ -190,6 +190,10 @@ def test_oidc_failure_does_not_leak_exception_detail(keypair):
         ("", "repo"),
         ("-org", "repo"),  # owners may not start with a hyphen
         ("org", "re po"),
+        # CRLF would forge a second log record if it reached the OIDC-failure
+        # _log.warning (CodeQL py/log-injection). Rejected here, sanitised there.
+        ("org", "repo\nX-Injected: 1"),
+        ("org", "repo\r\nWARNING:root:forged"),
     ],
 )
 def test_malformed_repository_rejected_before_any_request(keypair, owner, repo):
@@ -208,6 +212,22 @@ def test_malformed_repository_rejected_before_any_request(keypair, owner, repo):
     )
     assert resp.status_code == 400
     assert resp.json()["error"] in ("invalid_repository", "missing_fields")
+
+
+def test_log_sink_strips_control_characters():
+    """The log sink itself must flatten CRLF, independently of the edge validation.
+
+    `validate_repository` is what stops tainted values reaching this call today, but the
+    sink is guarded so that adding a log site — or moving the validation — cannot
+    reintroduce CodeQL py/log-injection. Guard the guard.
+    """
+    from app.main import _for_log
+
+    assert _for_log("org/repo\nWARNING:root:forged") == "org/repo WARNING:root:forged"
+    assert _for_log("a\r\nb\tc\x00d") == "a  b c d"
+    assert "\n" not in _for_log("x" * 10 + "\n" + "y" * 10)
+    # Bounded, so a huge value cannot flood the log.
+    assert len(_for_log("z" * 5000)) == 200
 
 
 def test_non_string_repository_rejected(keypair):

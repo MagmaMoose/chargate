@@ -18,6 +18,7 @@ where configuration comes from — see ``app.config``.
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 from fastapi import FastAPI, Request
@@ -28,6 +29,19 @@ from app.github import InvalidRepositoryError, mint_installation_token, validate
 from app.oidc import JwksUnavailable, KeyResolver, OidcError, verify_oidc_token
 
 _log = logging.getLogger("chargate.broker")
+
+# CR/LF and other control characters are what let a caller-supplied value forge extra
+# log lines (CodeQL py/log-injection). `validate_repository` already constrains
+# owner/repo to GitHub identifier characters, so nothing tainted can reach a log call
+# today — this guards the *sink* rather than relying on that invariant holding several
+# calls away, so adding a log site or moving the validation later cannot silently
+# reintroduce the hole.
+_LOG_UNSAFE = re.compile(r"[\r\n\x00-\x1f\x7f]")
+
+
+def _for_log(value: object, limit: int = 200) -> str:
+    """Flatten ``value`` to a single bounded log-safe line."""
+    return _LOG_UNSAFE.sub(" ", str(value))[:limit]
 
 
 def create_app(
@@ -126,7 +140,18 @@ def create_app(
                 # audiences and other internals. It goes to the broker's own log (where
                 # an operator debugging a consumer's OIDC setup needs it) and never to
                 # the unauthenticated caller (CodeQL py/stack-trace-exposure).
-                _log.warning("OIDC verification failed for %s: %s", repository, exc)
+                #
+                # Both values go through _for_log: /token is unauthenticated, so writing
+                # request-derived text straight into a log record is CodeQL
+                # py/log-injection — which this line was, before the sink helper existed.
+                #
+                # "unverified" is deliberate: verification just failed, so `repository`
+                # is only what the caller *claims* to be, not an established identity.
+                _log.warning(
+                    "OIDC verification failed for unverified repository %s: %s",
+                    _for_log(repository),
+                    _for_log(exc),
+                )
                 return JSONResponse({"error": "invalid_oidc"}, status_code=401)
 
             # The OIDC `repository` claim is the caller's repo — it must match the

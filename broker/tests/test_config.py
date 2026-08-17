@@ -10,6 +10,15 @@ from __future__ import annotations
 
 from app.config import BrokerConfig, _worker_overlay, cf_env, load_config
 
+# A PEM-*shaped* placeholder, assembled at run time instead of written as a literal.
+# A real PEM private-key header in source — in code OR in a comment, since scanners read
+# both — is exactly what secret scanners exist to find, and a fixture that trips them on
+# every run (betterleaks `private-key`) teaches reviewers to wave the alert through, which
+# is how a real key eventually slips past. The assembled value is still PEM-shaped, so
+# these tests check what they always did; the "key material" is the character "x".
+_PEM_BEGIN = "-----BEGIN " + "RSA PRIVATE KEY-----"
+FAKE_PRIVATE_KEY = f"{_PEM_BEGIN}\nx\n"
+
 
 class _FakeCfEnv:
     """Minimal stand-in for a Cloudflare Worker ``env`` object."""
@@ -20,14 +29,14 @@ class _FakeCfEnv:
 
 
 def test_worker_overlay_picks_up_declared_fields():
-    token = cf_env.set(_FakeCfEnv(APP_ID="42", PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nx\n"))
+    token = cf_env.set(_FakeCfEnv(APP_ID="42", PRIVATE_KEY=FAKE_PRIVATE_KEY))
     try:
         overlay = _worker_overlay()
     finally:
         cf_env.reset(token)
 
     assert overlay["app_id"] == "42"
-    assert "-----BEGIN" in overlay["private_key"]
+    assert overlay["private_key"] == FAKE_PRIVATE_KEY
 
 
 def test_worker_overlay_ignores_undeclared_bindings():
@@ -51,9 +60,7 @@ def test_load_config_worker_overlay_wins_over_env(monkeypatch):
     monkeypatch.setenv("APP_ID", "env-value")
     monkeypatch.setenv("PRIVATE_KEY", "env-key")
 
-    token = cf_env.set(
-        _FakeCfEnv(APP_ID="cf-value", PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nx\n")
-    )
+    token = cf_env.set(_FakeCfEnv(APP_ID="cf-value", PRIVATE_KEY=FAKE_PRIVATE_KEY))
     try:
         config = load_config()
     finally:
@@ -64,6 +71,6 @@ def test_load_config_worker_overlay_wins_over_env(monkeypatch):
 
 def test_load_config_falls_back_to_env(monkeypatch):
     monkeypatch.setenv("APP_ID", "from-env")
-    monkeypatch.setenv("PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nx\n")
+    monkeypatch.setenv("PRIVATE_KEY", FAKE_PRIVATE_KEY)
     config = load_config()
     assert config.app_id == "from-env"
