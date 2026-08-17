@@ -43,6 +43,22 @@ def test_amd64_only_linters_are_never_security_linters():
     assert amd64_only.isdisjoint(FLAVOR_STANDALONE_SETS["security"])
 
 
+def test_kubescape_is_the_only_gated_kubernetes_linter():
+    # kubescape is the sole SARIF-emitting Kubernetes linter, so it is the only one that
+    # reaches the net-new gate — it must stay in the security substitution set.
+    assert "KUBERNETES_KUBESCAPE" in FLAVOR_STANDALONE_SETS["security"]
+    assert STANDALONE_LINTERS["KUBERNETES_KUBESCAPE"].sarif is True
+
+
+def test_kubeconform_is_known_but_not_gated_and_kube_score_is_absent():
+    # kubeconform validates manifests but emits no SARIF, so it must never be in the
+    # security (SARIF-gated) set. kube-score has no MegaLinter descriptor: guarding here
+    # stops anyone naming a non-existent KUBERNETES_KUBE_SCORE key that would do nothing.
+    assert STANDALONE_LINTERS["KUBERNETES_KUBECONFORM"].sarif is False
+    assert "KUBERNETES_KUBECONFORM" not in FLAVOR_STANDALONE_SETS["security"]
+    assert "KUBERNETES_KUBE_SCORE" not in STANDALONE_LINTERS
+
+
 def test_the_all_flavor_has_no_standalone_substitution():
     # Substituting `all` would mean 100+ container starts and several GB of pulls.
     assert "all" not in FLAVOR_STANDALONE_SETS

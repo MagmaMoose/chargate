@@ -228,6 +228,32 @@ Hub publishing at `v9.4.0`, so `docker.io` cannot serve any current version — 
 `megalinter_registry` / `megalinter_namespace` at a mirror if you need one, or
 `megalinter_image` at a full reference to bypass name composition entirely.
 
+### Kubernetes manifests
+
+MegaLinter's `KUBERNETES` descriptor has three linters and the `security` flavor runs
+two of them:
+
+| Linter | What it checks | On the net-new gate? |
+| --- | --- | --- |
+| `KUBERNETES_KUBESCAPE` | Security posture (misconfig, RBAC, …) | **Yes** — it emits SARIF. |
+| `KUBERNETES_KUBECONFORM` | Manifest schema validation | No SARIF; fails the job only under `strict: true`. |
+
+`kube-score` has **no** MegaLinter descriptor, so there is no linter key to enable — run
+it as a standalone [pre-commit hook](https://github.com/zegl/kube-score) if you want it.
+
+The chargate-recommended `.mega-linter.yml` enables `KUBERNETES_KUBECONFORM` with
+`--ignore-missing-schemas` (so CRDs without a published schema are not false errors) and
+an exclude regex that keeps it off files that are not standalone manifests:
+
+- **Kustomize / Flux overlays and patches** are fragments, not whole objects. kubeconform
+  validates finished manifests, so render first (`kustomize build ./overlay | kubeconform`
+  or [`flux-local`](https://github.com/allenporter/flux-local)) and validate the output —
+  the security image ships kubeconform but not kustomize, so rendering runs outside it.
+- **SOPS-encrypted secrets** (`*.sops.yaml`, `secret*`) are ciphertext, not valid YAML.
+- **Chart templates** (`/templates/`) and CI config (`.github/`) are not K8s objects.
+
+Tune the pattern for your layout via `KUBERNETES_KUBECONFORM_FILTER_REGEX_EXCLUDE`.
+
 ## Troubleshooting
 
 **`exec /bin/bash: exec format error`** — the runner is arm64 and MegaLinter's flavor

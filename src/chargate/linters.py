@@ -89,6 +89,10 @@ STANDALONE_LINTERS: dict[str, LinterImage] = dict(
         # why it produced nothing.
         _entry("BASH_EXEC", sarif=False),
         _entry("KUBERNETES_HELM", sarif=False),
+        # kubeconform validates manifests against OpenAPI schemas but emits no SARIF, so
+        # it gates only via `strict` (a tool error), never the net-new SARIF gate. K8s
+        # SARIF coverage is KUBERNETES_KUBESCAPE alone. There is deliberately no
+        # KUBERNETES_KUBE_SCORE entry: kube-score has no MegaLinter descriptor upstream.
         _entry("KUBERNETES_KUBECONFORM", sarif=False),
         _entry("REPOSITORY_OSV_SCANNER", sarif=False),
         _entry("REPOSITORY_TRUFFLEHOG", sarif=False),

@@ -63,6 +63,34 @@ VALIDATE_ALL_CODEBASE: true
 #   - DOCKERFILE
 #   - ACTION
 
+# Kubernetes manifest validation. MegaLinter's KUBERNETES descriptor ships three
+# linters: kubeconform (schema validation), kubescape (security posture) and helm.
+# `security` flavor already runs kubescape, and kubescape is the ONLY one that emits
+# SARIF, so it is the only Kubernetes linter that reaches chargate's net-new gate. Both
+# settings below are enabled in the security flavor image; they are spelled out here so a
+# consumer copying this template gets the same exclusions and knows how each one gates.
+#
+#   * KUBERNETES_KUBECONFORM validates manifests against upstream OpenAPI schemas. It
+#     produces NO SARIF, so its findings never reach the net-new gate — they surface as a
+#     MegaLinter tool error, which fails the job only under `strict: true`. Keep it on to
+#     catch malformed manifests; rely on kubescape (SARIF) for the gated security checks.
+#   * kube-score is NOT a MegaLinter linter (it has no descriptor upstream). There is no
+#     KUBERNETES_KUBE_SCORE key to enable — naming one does nothing, silently. Run it as a
+#     separate pre-commit hook if you want its opinionated production-readiness checks.
+#
+# `--ignore-missing-schemas` stops CRDs (Flux, cert-manager, …) with no published schema
+# from being reported as errors. The exclude regex keeps kubeconform off files that are
+# not standalone manifests and would otherwise be false positives:
+#   * kustomize overlays/patches (`patch`, `kustomization.yaml`) are fragments, not whole
+#     objects — validate the RENDERED output (`kustomize build` / `flux-local`) in a
+#     separate step, not the raw overlay. The security flavor image ships kubeconform but
+#     not kustomize, so rendering happens outside the linter.
+#   * SOPS-encrypted secrets (`*.sops.yaml`, `secret*`) are ciphertext, not valid YAML.
+#   * `.github/`, chart templates and non-manifest config are not Kubernetes objects.
+KUBERNETES_KUBECONFORM_ARGUMENTS:
+  - --ignore-missing-schemas
+KUBERNETES_KUBECONFORM_FILTER_REGEX_EXCLUDE: "(kustomization\\.ya?ml|.*(patch|sops)\\.ya?ml|.*secret.*\\.ya?ml|/templates/|^\\.github/)"
+
 # Speed: skip noisy or irrelevant linters here, e.g.:
 # DISABLE_LINTERS:
 #   - SPELL_CSPELL
