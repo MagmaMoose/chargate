@@ -264,12 +264,7 @@ def build_docker_command(
     cmd = ["docker", "run", "--rm"]
     if config.platform:
         cmd += ["--platform", config.platform]
-    # --user ensures generated files (reports, caches) are owned by the runner user
-    # rather than root. The values mirror MEGALINTER_UID/GID already in the env so
-    # Docker enforces ownership from process start, covering linters that create cache
-    # directories before MegaLinter's own entrypoint privilege-drop takes effect.
-    # Absent on Windows (no getuid), and honoured as-is when MEGALINTER_UID=0 is set
-    # explicitly as the ARC/docker-in-docker escape hatch.
+    # --user covers linters that write cache dirs before the entrypoint privilege-drop.
     uid = env.get("MEGALINTER_UID")
     gid = env.get("MEGALINTER_GID")
     if uid is not None and gid is not None:
