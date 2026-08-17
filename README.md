@@ -538,8 +538,12 @@ reporting](https://github.com/MagmaMoose/chargate/security/advisories/new) or se
 
 ## What MegaLinter covers (vs the old hand-rolled set)
 
-Trivy, Semgrep, Checkov, Hadolint, ShellCheck, actionlint, ESLint, kubeconform/
-kube-score all map to MegaLinter linters. Dependency/SCA scanning (formerly
+Trivy, Semgrep, Checkov, Hadolint, ShellCheck, actionlint and ESLint all map to
+MegaLinter linters. Kubernetes manifests are covered by `KUBERNETES_KUBESCAPE` (the
+only SARIF-emitting K8s linter, so the only one on the net-new gate) plus
+`KUBERNETES_KUBECONFORM` for schema validation (no SARIF — it gates via `strict`, see
+[the Kubernetes note in `.mega-linter.yml`](.mega-linter.yml)); kube-score has no
+MegaLinter descriptor and is not wired in. Dependency/SCA scanning (formerly
 pip-audit / npm audit / govulncheck) is covered by `REPOSITORY_OSV_SCANNER` +
 `REPOSITORY_TRIVY` + `REPOSITORY_GRYPE`. Secrets scanning moved from TruffleHog to
 MegaLinter's native `betterleaks` (v10's gitleaks successor) / `secretlint` / `kingfisher`.
