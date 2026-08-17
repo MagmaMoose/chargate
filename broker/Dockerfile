@@ -32,8 +32,14 @@ WORKDIR /srv
 # The broker's own pyproject is the single source of dependency truth for both
 # targets; `[server]` adds the uvicorn the Worker does not use. Consolidated with
 # user/group creation in one layer (hadolint DL3059).
+#
+# DL3013 ("pin versions in pip") cannot read this install: the argument is the local
+# project `.[server]`, not a package name, so there is no version to pin here — the
+# versions live in broker/pyproject.toml and are resolved against broker/uv.lock.
+# hadolint sees `.[server]` as an unpinned package because of the extras bracket.
 COPY broker/pyproject.toml /srv/pyproject.toml
 COPY broker/app /srv/app
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir '.[server]' \
     && groupadd --gid "${APP_GID}" app \
     && useradd --uid "${APP_UID}" --gid "${APP_GID}" \

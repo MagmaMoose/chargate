@@ -18,7 +18,6 @@ where configuration comes from — see ``app.config``.
 from __future__ import annotations
 
 import logging
-import re
 
 import httpx
 from fastapi import FastAPI, Request
@@ -28,20 +27,10 @@ from app.config import BrokerConfig, load_config
 from app.github import InvalidRepositoryError, mint_installation_token, validate_repository
 from app.oidc import JwksUnavailable, KeyResolver, OidcError, verify_oidc_token
 
+# Nothing request-derived is ever passed to this logger. /token is unauthenticated, so a
+# caller-supplied string reaching a log record is CodeQL py/log-injection — see the
+# OidcError handler for what is logged instead and why.
 _log = logging.getLogger("chargate.broker")
-
-# CR/LF and other control characters are what let a caller-supplied value forge extra
-# log lines (CodeQL py/log-injection). `validate_repository` already constrains
-# owner/repo to GitHub identifier characters, so nothing tainted can reach a log call
-# today — this guards the *sink* rather than relying on that invariant holding several
-# calls away, so adding a log site or moving the validation later cannot silently
-# reintroduce the hole.
-_LOG_UNSAFE = re.compile(r"[\r\n\x00-\x1f\x7f]")
-
-
-def _for_log(value: object, limit: int = 200) -> str:
-    """Flatten ``value`` to a single bounded log-safe line."""
-    return _LOG_UNSAFE.sub(" ", str(value))[:limit]
 
 
 def create_app(
@@ -142,15 +131,29 @@ def create_app(
                 # the unauthenticated caller (CodeQL py/stack-trace-exposure).
                 #
                 # Both values go through _for_log: /token is unauthenticated, so writing
-                # request-derived text straight into a log record is CodeQL
-                # py/log-injection — which this line was, before the sink helper existed.
+                # Only the exception's CLASS NAME is logged — never its message, and
+                # never the caller-supplied repository. Both of those are request-derived
+                # strings, and writing either into a log record on an unauthenticated
+                # endpoint is CodeQL py/log-injection: a CRLF in the value forges a
+                # second log line. A regex scrub at the sink genuinely prevents that but
+                # is not a barrier CodeQL recognises, so the taint is removed instead of
+                # laundered. `type(exc).__name__` carries no attacker-controlled bytes.
                 #
-                # "unverified" is deliberate: verification just failed, so `repository`
-                # is only what the caller *claims* to be, not an established identity.
+                # This is also the more useful field: ExpiredSignatureError vs
+                # InvalidAudienceError vs InvalidSignatureError names the misconfiguration
+                # an operator is actually chasing, where the unverified repo name — which
+                # the caller simply asserted — does not. Correlate to a specific request
+                # through the access log.
+                #
+                # The CAUSE, not the OidcError itself: verify_oidc_token wraps every PyJWT
+                # failure as `raise OidcError(str(exc)) from exc` (app.oidc), so the
+                # wrapper's own name is the same string every time and says nothing. A few
+                # OidcErrors are raised with no cause (missing kid, no resolver), hence the
+                # fallback.
+                cause = exc.__cause__
                 _log.warning(
-                    "OIDC verification failed for unverified repository %s: %s",
-                    _for_log(repository),
-                    _for_log(exc),
+                    "OIDC verification failed: %s",
+                    type(cause).__name__ if cause is not None else type(exc).__name__,
                 )
                 return JSONResponse({"error": "invalid_oidc"}, status_code=401)
 

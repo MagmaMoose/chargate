@@ -184,7 +184,11 @@ def test_build_docker_command_mounts_workspace_and_passes_env(tmp_path: Path):
 def test_build_docker_command_passes_platform_when_set(tmp_path: Path):
     config = ml.MegaLinterConfig(workspace=str(tmp_path), platform="linux/amd64")
     cmd = ml.build_docker_command(config, {})
-    assert cmd[:5] == ["docker", "run", "--rm", "--platform", "linux/amd64"]
+    # argv[0] is docker's resolved absolute path where PATH has it and the bare name
+    # otherwise, so assert on the basename — a literal "docker" here passes only on a
+    # host without docker installed, which is how this slipped through locally.
+    assert Path(cmd[0]).stem == "docker"
+    assert cmd[1:5] == ["run", "--rm", "--platform", "linux/amd64"]
 
 
 def test_build_docker_command_accepts_an_explicit_image(tmp_path: Path):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import time
 
 import httpx
@@ -214,20 +216,38 @@ def test_malformed_repository_rejected_before_any_request(keypair, owner, repo):
     assert resp.json()["error"] in ("invalid_repository", "missing_fields")
 
 
-def test_log_sink_strips_control_characters():
-    """The log sink itself must flatten CRLF, independently of the edge validation.
+def test_oidc_failure_log_carries_no_request_derived_text(keypair, caplog):
+    """The OIDC-failure log record must contain only the exception CLASS name.
 
-    `validate_repository` is what stops tainted values reaching this call today, but the
-    sink is guarded so that adding a log site — or moving the validation — cannot
-    reintroduce CodeQL py/log-injection. Guard the guard.
+    /token is unauthenticated, so putting either the caller's repository or PyJWT's
+    message into a log record is CodeQL py/log-injection — a CRLF in the value forges a
+    second line. Neither is logged; the class name is, because it names the
+    misconfiguration without carrying attacker-controlled bytes.
     """
-    from app.main import _for_log
+    client, private_pem = _client(keypair)
+    with caplog.at_level(logging.WARNING, logger="chargate.broker"):
+        resp = client.post(
+            "/token",
+            json={
+                "oidcToken": _oidc(private_pem, audience="diatreme"),
+                "owner": "org",
+                "repo": "repo",
+            },
+        )
+    assert resp.status_code == 401
 
-    assert _for_log("org/repo\nWARNING:root:forged") == "org/repo WARNING:root:forged"
-    assert _for_log("a\r\nb\tc\x00d") == "a  b c d"
-    assert "\n" not in _for_log("x" * 10 + "\n" + "y" * 10)
-    # Bounded, so a huge value cannot flood the log.
-    assert len(_for_log("z" * 5000)) == 200
+    records = [r for r in caplog.records if r.name == "chargate.broker"]
+    assert records, "the OIDC failure should be logged server-side"
+    # Assert the SHAPE, not the absence of particular words: a fixed prefix followed by a
+    # single Python identifier. Free-form text — a repository, a PyJWT sentence, an
+    # injected CRLF payload — cannot satisfy this, whereas substring checks miss cases and
+    # false-positive on legitimate class names (InvalidAudienceError contains "audience").
+    for record in records:
+        assert re.fullmatch(
+            r"OIDC verification failed: [A-Za-z_][A-Za-z0-9_]*", record.getMessage()
+        ), record.getMessage()
+    # The diagnostic that IS kept: the underlying PyJWT error class, not its wrapper.
+    assert any(r.getMessage().endswith("InvalidAudienceError") for r in records)
 
 
 def test_non_string_repository_rejected(keypair):
