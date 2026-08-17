@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -395,7 +396,7 @@ def cmd_ci(args: argparse.Namespace) -> int:
         )
 
     # 4. Optional DefectDojo import of the FULL SARIF (never fails the gate).
-    dd = _maybe_import_defectdojo(args, sarif_path if not args.sarif_out else Path(args.sarif_out))
+    dd = _maybe_import_defectdojo(args, sarif)
 
     # 4b. Optional Dependency-Track upload of the CycloneDX BOM (never fails the gate).
     dt = _maybe_upload_dependencytrack(args)
@@ -463,7 +464,9 @@ class _SinkOutcome(NamedTuple):
     url: str | None = None
 
 
-def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> _SinkOutcome:
+def _maybe_import_defectdojo(
+    args: argparse.Namespace, sarif_doc: dict[str, Any]
+) -> _SinkOutcome:
     if not args.defectdojo_url:
         return _SinkOutcome()
     token = os.environ.get(args.defectdojo_token_env, "")
@@ -482,7 +485,17 @@ def _maybe_import_defectdojo(args: argparse.Namespace, sarif_path: Path) -> _Sin
         tags=tuple(args.dd_tag or ()),
         verify_ssl=not args.dd_insecure,
     )
-    result = dd.import_sarif(config, sarif_path)
+    # Serialize the already-canonicalized in-memory document so the upload always
+    # carries folded tool names regardless of whether --sarif-out was passed.
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".sarif.json", delete=False, encoding="utf-8"
+    ) as f:
+        json.dump(sarif_doc, f)
+        tmp_path = Path(f.name)
+    try:
+        result = dd.import_sarif(config, tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     if result.ok:
         return _SinkOutcome(result.message, result.url)
     return _SinkOutcome(f"upload failed (non-blocking): {result.message}")
