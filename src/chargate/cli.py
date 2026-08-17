@@ -129,6 +129,7 @@ def counts_to_dict(result: FilterResult) -> dict[str, Any]:
         "pre_existing_count": c.pre_existing,
         "suppressed_count": c.suppressed,
         "sops_ignored_count": c.sops_ignored,
+        "deduped_count": c.deduped,
         "per_level_total": c.per_level_total,
         "per_level_net_new": c.per_level_net_new,
         "per_severity_total": c.per_band_total,
@@ -148,6 +149,11 @@ def _print_summary(result: FilterResult, decision: Any) -> None:
         _eprint(
             f"chargate: {c.sops_ignored} SOPS-encrypted secret finding(s) ignored "
             "(false positives, never blocking)"
+        )
+    if c.deduped:
+        _eprint(
+            f"chargate: {c.deduped} duplicate net-new finding(s) collapsed "
+            "(same rule + fingerprint from another engine/re-scan)"
         )
     if c.per_band_net_new:
         bands = ", ".join(f"{k}={v}" for k, v in sorted(c.per_band_net_new.items()))
