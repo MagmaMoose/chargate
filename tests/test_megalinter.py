@@ -191,6 +191,41 @@ def test_build_docker_command_accepts_an_explicit_image(tmp_path: Path):
     assert cmd[-1] == "ghcr.io/oxsecurity/megalinter-only-python_ruff:v10"
 
 
+def test_build_docker_command_adds_user_flag_when_uid_gid_in_env(tmp_path: Path):
+    # Generated files (reports, caches) must be owned by the runner user, not root.
+    config = ml.MegaLinterConfig(workspace=str(tmp_path))
+    env = {"MEGALINTER_UID": "1001", "MEGALINTER_GID": "1002"}
+    cmd = ml.build_docker_command(config, env)
+    assert "--user" in cmd
+    assert cmd[cmd.index("--user") + 1] == "1001:1002"
+
+
+def test_build_docker_command_no_user_flag_when_uid_gid_absent(tmp_path: Path):
+    # Windows (no os.getuid): build_env omits MEGALINTER_UID/GID; no --user must appear.
+    config = ml.MegaLinterConfig(workspace=str(tmp_path))
+    cmd = ml.build_docker_command(config, {"FOO": "bar"})
+    assert "--user" not in cmd
+
+
+def test_build_docker_command_user_flag_with_explicit_root_escape_hatch(tmp_path: Path):
+    # MEGALINTER_UID=0 is the ARC/docker-in-docker escape hatch; --user 0:0 propagates it.
+    config = ml.MegaLinterConfig(workspace=str(tmp_path))
+    env = {"MEGALINTER_UID": "0", "MEGALINTER_GID": "0"}
+    cmd = ml.build_docker_command(config, env)
+    assert "--user" in cmd
+    assert cmd[cmd.index("--user") + 1] == "0:0"
+
+
+def test_build_docker_command_user_flag_does_not_affect_mounts_or_image(tmp_path: Path):
+    # Adding --user must not displace the volume mount or the image reference.
+    config = ml.MegaLinterConfig(workspace=str(tmp_path))
+    env = {"MEGALINTER_UID": "1001", "MEGALINTER_GID": "1001"}
+    cmd = ml.build_docker_command(config, env)
+    assert cmd[-1] == config.image()
+    mount = f"{tmp_path.resolve()}:{ml.CONTAINER_WORKSPACE}"
+    assert mount in cmd
+
+
 # ── Architecture detection ──
 
 
