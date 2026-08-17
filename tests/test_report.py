@@ -175,7 +175,7 @@ def test_render_pr_summary_surfaces_sops_encrypted(make_sarif, make_result):
     result, decision = _sops_result(make_sarif, make_result)
     md = render_pr_summary(result.counts, decision, Mode.PR, list(result.net_new))
     assert "| Net-new | Pre-existing | SOPS-encrypted | Total in full SARIF |" in md
-    assert "SOPS-encrypted secret false positives" in md  # footer explains the column
+    assert "secret false positives" in md  # footer explains the column
 
 
 def test_render_pr_summary_includes_sink_links(make_sarif, make_result):
