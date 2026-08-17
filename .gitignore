@@ -22,3 +22,17 @@ megalinter-reports/
 
 # Claude Code (scratch flood-output target from the [tooling] block)
 .claude/last_output.txt
+
+# JetBrains. Untracked but not ignored is the dangerous combination: it puts local IDE
+# state (including per-user paths and run configs) one `git add -A` away from a public
+# repo, and it shows up as noise in every `git status` while reviewing.
+.idea/
+
+# Python Workers vendoring (broker/)
+#
+# `pywrangler sync` resolves the broker's dependencies against the Emscripten target and
+# unpacks the wheels into python_modules/, rebuilt on every deploy. .venv-workers/ is the
+# throwaway interpreter it resolves with. broker/pylock.toml IS committed: it pins the
+# exact wheel set that gets bundled, which is the whole point.
+python_modules/
+.venv-workers/

@@ -34,8 +34,10 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Net-new gating: net-new.md
+  - SAST direction: sast-benchmark.md
   - Setup & usage: setup.md
   - CLI reference: cli.md
+  - Broker deployment: broker-deployment.md
 
 markdown_extensions:
   - admonition

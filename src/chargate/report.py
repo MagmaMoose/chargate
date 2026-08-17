@@ -26,6 +26,7 @@ def render_summary(
     dd_message: str | None = None,
     dt_message: str | None = None,
     pr_message: str | None = None,
+    scan_note: str | None = None,
 ) -> str:
     """Render the Markdown job summary for a CI run."""
     lines: list[str] = ["## Chargate", ""]
@@ -41,11 +42,19 @@ def render_summary(
         lines.append(f"| Suppressed (accepted in-source) | {counts.suppressed} |")
     if counts.sops_ignored:
         lines.append(f"| SOPS-encrypted (false positive) | {counts.sops_ignored} |")
+    if counts.deduped:
+        lines.append(f"| Duplicates collapsed (rule + fingerprint) | {counts.deduped} |")
     lines.append(f"| Total in full SARIF | {counts.total} |")
     if counts.per_band_net_new:
         bands = ", ".join(f"{k}={v}" for k, v in sorted(counts.per_band_net_new.items()))
         lines.append(f"| Net-new by severity | {bands} |")
     lines.append("")
+
+    # How the scan ran, when that wasn't the plain flavor image. A reduced scan that
+    # finds nothing looks exactly like a clean repo, so it has to announce itself.
+    if scan_note:
+        lines.append(f"> 🔎 {scan_note}")
+        lines.append("")
 
     if not megalinter_ok:
         lines.append(
@@ -107,6 +116,7 @@ def render_pr_summary(
     note: str | None = None,
     defectdojo_url: str | None = None,
     dependency_track_url: str | None = None,
+    scan_note: str | None = None,
 ) -> str:
     """Render the updatable PR summary comment (carries :data:`SUMMARY_MARKER`).
 
@@ -127,6 +137,9 @@ def render_pr_summary(
     if counts.sops_ignored:
         headers.append("SOPS-encrypted")
         values.append(counts.sops_ignored)
+    if counts.deduped:
+        headers.append("Duplicates collapsed")
+        values.append(counts.deduped)
     headers.append("Total in full SARIF")
     values.append(counts.total)
     table = [
@@ -162,6 +175,12 @@ def render_pr_summary(
         lines.append(note)
         lines.append("")
 
+    # Same reasoning as in render_summary: a degraded scan must be visible on the PR
+    # itself, not only in the job log nobody opens when the gate is green.
+    if scan_note:
+        lines.append(f"_{scan_note}_")
+        lines.append("")
+
     uploads: list[str] = []
     if defectdojo_url:
         uploads.append(f"[SARIF in DefectDojo]({defectdojo_url})")
@@ -173,7 +192,7 @@ def render_pr_summary(
 
     lines.append(
         "<sub>Pre-existing findings never block; in-source suppressions (accepted "
-        "risks) and SOPS-encrypted secret false positives are reported but never "
+        "risks) and secret false positives are reported but never "
         "gate. The full, unfiltered SARIF ships to the Security tab or as an "
         "artifact.</sub>"
     )

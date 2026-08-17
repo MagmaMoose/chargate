@@ -33,6 +33,7 @@ class Counts:
     net_new: int
     suppressed: int = 0  # author-accepted in-source suppressions (never gate)
     sops_ignored: int = 0  # secret-scanner hits on SOPS-encrypted values (never gate)
+    deduped: int = 0  # net-new findings collapsed into an earlier identical one
     per_level_total: dict[str, int] = field(default_factory=dict)
     per_level_net_new: dict[str, int] = field(default_factory=dict)
     per_band_total: dict[str, int] = field(default_factory=dict)
@@ -40,13 +41,13 @@ class Counts:
 
     @property
     def pre_existing(self) -> int:
-        """Findings that are neither net-new, suppressed, nor SOPS-ignored — old.
+        """Findings that are neither net-new, suppressed, SOPS-ignored, nor deduped.
 
-        Suppressed and SOPS-ignored results are carved into their own buckets so a
-        risk accepted (or a false positive dropped) *in this PR* isn't hidden among
-        truly pre-existing findings.
+        Suppressed, SOPS-ignored, and de-duplicated results are carved into their own
+        buckets so a risk accepted (or a false positive / duplicate dropped) *in this
+        PR* isn't hidden among truly pre-existing findings.
         """
-        return self.total - self.net_new - self.suppressed - self.sops_ignored
+        return self.total - self.net_new - self.suppressed - self.sops_ignored - self.deduped
 
 
 def count_results(
@@ -54,17 +55,20 @@ def count_results(
     net_new_keys: Iterable[tuple[int, int]],
     suppressed_keys: Iterable[tuple[int, int]] = (),
     sops_keys: Iterable[tuple[int, int]] = (),
+    deduped_keys: Iterable[tuple[int, int]] = (),
 ) -> Counts:
-    """Tally totals, net-new, suppressed, and SOPS-ignored counts.
+    """Tally totals, net-new, suppressed, SOPS-ignored, and de-duplicated counts.
 
     ``suppressed_keys`` are results carrying an author-accepted in-source
-    suppression; ``sops_keys`` are secret-scanner hits on a SOPS-encrypted value.
-    Both are disjoint from ``net_new_keys`` (neither is ever net-new) and from each
-    other, and are broken out so they don't inflate ``pre_existing``.
+    suppression; ``sops_keys`` are secret-scanner hits on a SOPS-encrypted value;
+    ``deduped_keys`` are net-new findings collapsed into an earlier identical one.
+    All three are disjoint from ``net_new_keys`` (none is ever net-new) and from one
+    another, and are broken out so they don't inflate ``pre_existing``.
     """
     keys = set(net_new_keys)
     suppressed_set = set(suppressed_keys)
     sops_set = set(sops_keys)
+    deduped_set = set(deduped_keys)
     per_level_total: Counter[str] = Counter()
     per_level_net_new: Counter[str] = Counter()
     per_band_total: Counter[str] = Counter()
@@ -73,6 +77,7 @@ def count_results(
     net_new = 0
     suppressed = 0
     sops_ignored = 0
+    deduped = 0
 
     for run_index, result_index, result, run in iter_results(sarif):
         total += 1
@@ -90,12 +95,15 @@ def count_results(
             suppressed += 1
         elif (run_index, result_index) in sops_set:
             sops_ignored += 1
+        elif (run_index, result_index) in deduped_set:
+            deduped += 1
 
     return Counts(
         total=total,
         net_new=net_new,
         suppressed=suppressed,
         sops_ignored=sops_ignored,
+        deduped=deduped,
         per_level_total=dict(per_level_total),
         per_level_net_new=dict(per_level_net_new),
         per_band_total=dict(per_band_total),

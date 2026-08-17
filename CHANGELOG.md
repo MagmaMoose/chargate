@@ -2,6 +2,86 @@
 
 <!-- version list -->
 
+## v2.11.2 (2026-08-12)
+
+### Bug Fixes
+
+- Bump the actions-version group across 1 directory with 2 updates
+  ([`9694533`](https://github.com/MagmaMoose/chargate/commit/9694533159a820c66af3b2aa34458b181a2a9c4a))
+
+
+## v2.11.1 (2026-08-12)
+
+### Bug Fixes
+
+- **gate**: Restore B101 coverage and repair the DefectDojo sink
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+- **megalinter**: Chargate has been gating on an empty SARIF
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+- **megalinter**: Gate arm64 standalone on DEFAULT_TAG, suppress bandit false positives
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+- **megalinter**: Skip bandit B101 via PYTHON_BANDIT_ARGUMENTS in mega-linter config
+  ([#39](https://github.com/MagmaMoose/chargate/pull/39),
+  [`5775de7`](https://github.com/MagmaMoose/chargate/commit/5775de731d396080fa12b4e590d554900bf19fda))
+
+
+## v2.11.0 (2026-08-04)
+
+### Chores
+
+- Update chargate image
+  ([`b705859`](https://github.com/MagmaMoose/chargate/commit/b7058596e5612c41e26c51ab26db771175bca754))
+
+### Features
+
+- **action**: Default to focused PR security scans
+  ([#33](https://github.com/MagmaMoose/chargate/pull/33),
+  [`034cc40`](https://github.com/MagmaMoose/chargate/commit/034cc40a4d90eb9e731456a7f7f64e4af22bfba2))
+
+### Testing
+
+- Widen regex slack in action defaults test ([#33](https://github.com/MagmaMoose/chargate/pull/33),
+  [`034cc40`](https://github.com/MagmaMoose/chargate/commit/034cc40a4d90eb9e731456a7f7f64e4af22bfba2))
+
+
+## v2.10.0 (2026-08-01)
+
+### Bug Fixes
+
+- **broker**: Disable Worker preview URLs and fix Dockerfile doc path
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+### Chores
+
+- Update chargate image
+  ([`6511cc8`](https://github.com/MagmaMoose/chargate/commit/6511cc8bfa773322366881889639a86e136eb448))
+
+### Documentation
+
+- **broker**: Correct the plan requirement — 4.30 MiB needs Workers Paid
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+### Features
+
+- **broker**: Run the token broker as a Cloudflare Python Worker
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+### Testing
+
+- **broker**: Add Worker config overlay tests (addresses review comment from nievah)
+  ([#37](https://github.com/MagmaMoose/chargate/pull/37),
+  [`da3cf2f`](https://github.com/MagmaMoose/chargate/commit/da3cf2f16278e8d44ee77044260362155a0cee25))
+
+
 ## v2.9.0 (2026-07-22)
 
 ### Bug Fixes

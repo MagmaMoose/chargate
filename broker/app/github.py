@@ -17,11 +17,11 @@ import jwt
 _API_VERSION = "2022-11-28"
 
 # GitHub owner (user/org) and repo naming rules, tightened to what can never alter
-# the shape of a URL path: no '/', no '.', no '%', no ':'. Owners are alphanumeric
-# with single hyphens; repo names also allow '_' and '.', but we reject '.' outright
-# since '..' is the path-traversal primitive and chargate never needs dotted repos.
+# the shape of a URL path: no '/', no '%', no ':'. Owners are alphanumeric with
+# single hyphens. Repo names allow '_' and '.' (e.g. foo.github.io), but '..' is
+# the path-traversal primitive — reject that sequence specifically, not all dots.
 _OWNER_RE = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\Z")
-_REPO_RE = re.compile(r"\A[A-Za-z0-9_-]{1,100}\Z")
+_REPO_RE = re.compile(r"\A(?!.*\.\.)[A-Za-z0-9_.-]{1,100}\Z")
 
 
 class InvalidRepositoryError(ValueError):
@@ -39,9 +39,9 @@ def validate_repository(owner: str, repo: str) -> tuple[str, str]:
     that builds the URLs.
     """
     if not _OWNER_RE.match(owner or ""):
-        raise InvalidRepositoryError(f"invalid GitHub owner: {owner!r}")
+        raise InvalidRepositoryError(f"invalid owner: {owner!r}")
     if not _REPO_RE.match(repo or ""):
-        raise InvalidRepositoryError(f"invalid GitHub repo: {repo!r}")
+        raise InvalidRepositoryError(f"invalid repo: {repo!r}")
     return owner, repo
 
 
