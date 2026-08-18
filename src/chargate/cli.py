@@ -464,9 +464,7 @@ class _SinkOutcome(NamedTuple):
     url: str | None = None
 
 
-def _maybe_import_defectdojo(
-    args: argparse.Namespace, sarif_doc: dict[str, Any]
-) -> _SinkOutcome:
+def _maybe_import_defectdojo(args: argparse.Namespace, sarif_doc: dict[str, Any]) -> _SinkOutcome:
     if not args.defectdojo_url:
         return _SinkOutcome()
     token = os.environ.get(args.defectdojo_token_env, "")
