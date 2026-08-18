@@ -603,3 +603,37 @@ def test_run_raises_the_arch_guard_before_touching_docker(tmp_path: Path):
 
     with pytest.raises(ml.MegaLinterError):
         ml.run(config, runner=fake_runner, arch="arm64")
+
+
+def test_bandit_excludes_test_directories_by_default():
+    """B101 (assert_used) must not make every test-bearing PR unmergeable.
+
+    A pytest test is nothing but asserts, so with bandit scanning `tests/` the net-new
+    gate blocks once per NEW assertion. Observed on MagmaMoose/caldrith: one PR adding two
+    test files produced 58 blocking findings, 57 of them test assertions.
+
+    Scoped to bandit — every other linter still reads the tests — and bandit still scans
+    shipped code, where `python -O` really does strip an `assert`.
+    """
+    pattern = ml.build_env(ml.MegaLinterConfig())["PYTHON_BANDIT_FILTER_REGEX_EXCLUDE"]
+    for path in ("tests/test_files.py", "src/pkg/tests/test_x.py", "test/test_y.py"):
+        assert re.search(pattern, path), f"{path} should be excluded by {pattern}"
+    # Shipped code is still scanned, and a directory that merely CONTAINS "test" is not
+    # caught — the pattern is anchored to a path boundary.
+    for path in ("src/chargate/cli.py", "src/contests/views.py", "latest/thing.py"):
+        assert not re.search(pattern, path), f"{path} must still be scanned"
+
+    # The global file filter is a separate knob: excluding tests from bandit must not
+    # quietly exclude them from every other linter too.
+    assert not re.search(
+        ml.build_env(ml.MegaLinterConfig())["FILTER_REGEX_EXCLUDE"], "tests/test_files.py"
+    )
+
+
+def test_bandit_exclude_ors_consumer_pattern_rather_than_replacing_it():
+    env = ml.build_env(
+        ml.MegaLinterConfig(extra_env={"PYTHON_BANDIT_FILTER_REGEX_EXCLUDE": "(vendor/)"})
+    )
+    pattern = env["PYTHON_BANDIT_FILTER_REGEX_EXCLUDE"]
+    assert re.search(pattern, "vendor/thing.py")  # consumer's pattern honoured
+    assert re.search(pattern, "tests/test_x.py")  # chargate's default still applied
