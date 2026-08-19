@@ -88,3 +88,11 @@
   which is not in the shipped dependency set; `scripts/build_lambda_zip.py` excludes it by
   name and `tests/test_lambda_package.py` asserts its absence. Shipping it turns a clean
   deploy into a cold-start `ImportError` on the fail-soft path above — i.e. into silence.
+- **Diatreme runs its own `actions/checkout`, which `git clean -ffdx`s your build output.** The
+  composite action checks the repo out again internally (`fetch-depth: 0`), and
+  `actions/checkout` defaults to `clean: true` — so any artifact an earlier step wrote *inside*
+  the workspace is deleted before diatreme's publish step runs. A Lambda zip built to `./dist`
+  disappeared exactly this way, and the symptom blames the caller:
+  `s3: package-path must be the built artifact FILE. Not a file: dist/chargate-broker.zip`,
+  on a run whose own log shows the build succeeding two steps earlier. Build to
+  `${{ runner.temp }}` and pass that absolute path as `package-path`.

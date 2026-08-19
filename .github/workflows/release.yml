@@ -88,11 +88,18 @@ jobs:
         shell: bash
         env:
           HAVE_TARGET: ${{ vars.BROKER_ARTIFACT_BUCKET != '' && vars.BROKER_PUBLISH_ROLE_ARN != '' }}
+          # OUTSIDE THE WORKSPACE, AND THAT IS LOAD-BEARING. The diatreme action runs its own
+          # `actions/checkout` internally, which defaults to `clean: true` and therefore
+          # `git clean -ffdx` — so anything this step leaves under the repo is deleted before
+          # diatreme's publish step looks for it. A zip written to ./dist vanished exactly that
+          # way and the publish failed with "package-path must be the built artifact FILE".
+          # $RUNNER_TEMP is on the runner but outside the checkout, so it survives.
+          ZIP_PATH: ${{ runner.temp }}/chargate-broker.zip
         run: |
           set -euo pipefail
           cd broker
           uv run python scripts/build_lambda_zip.py \
-            --out ../dist/chargate-broker.zip \
+            --out "${ZIP_PATH}" \
             --platform x86_64-manylinux_2_28
           cd ..
 
@@ -141,7 +148,8 @@ jobs:
           publish-package: ${{ steps.pkg.outputs.publish }}
           package-ecosystem: s3
           package-feed-url: s3://${{ vars.BROKER_ARTIFACT_BUCKET }}/broker
-          package-path: dist/chargate-broker.zip
+          # Absolute, and outside the checkout — see the note on ZIP_PATH above.
+          package-path: ${{ runner.temp }}/chargate-broker.zip
           aws-role-to-assume: ${{ vars.BROKER_PUBLISH_ROLE_ARN }}
 
       # The deploy is a human action in another repo, so tell the human exactly what to
