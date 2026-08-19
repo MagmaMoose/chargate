@@ -200,9 +200,11 @@ def main(argv: list[str] | None = None) -> int:
         help="the broker/ directory (holds pyproject.toml, uv.lock and app/)",
     )
     parser.add_argument("--out", type=Path, default=Path("dist/chargate-broker.zip"))
+    # NOT `required=True`, deliberately — see the check in the build path below. `--changed-since`
+    # answers a question about git history and builds nothing, so demanding a platform for it made
+    # the publish gate exit 2 on every release and took the whole release job with it.
     parser.add_argument(
         "--platform",
-        required=True,
         help="uv --python-platform target, e.g. x86_64-manylinux_2_28. No default on purpose.",
     )
     parser.add_argument("--python-version", default="3.12")
@@ -221,6 +223,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.changed_since:
         print("true" if changed_since(args.broker_root, args.changed_since) else "false")
         return 0
+
+    # Enforced HERE rather than by argparse, so it still fails loudly for a build but does not
+    # apply to `--changed-since`. The guarantee that matters is unchanged: a build cannot pick a
+    # platform for you, because `cryptography` ships compiled wheels and a Mac-resolved set
+    # deploys cleanly and then ImportErrors at cold start.
+    if not args.platform:
+        parser.error("--platform is required when building (no default, on purpose)")
 
     digest = build(
         args.broker_root,
