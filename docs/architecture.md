@@ -103,10 +103,15 @@ runtime-dependency-free).
 `repository` claim **must** equal the requested `owner/repo`) and mints a token
 scoped to that repo with `pull_requests: write` only. The whole flow is
 **fail-soft**: without `id-token: write`, or if the App isn't installed, the action
-silently falls back to `github-actions[bot]`. The service ships as the
-`ghcr.io/magmamoose/chargate` image and is deployed out-of-band (Kustomize manifests
-under `k8s/`); operating it — the GitHub App, its private key in a secret store, and
-installing the App on consumer orgs — is the operator's responsibility. See
+silently falls back to `github-actions[bot]` — which also means a broken broker is
+**silent**, so treat "nothing failed" as no evidence at all. The service ships as a
+version-scoped zip in S3 and runs as an AWS Lambda behind an API Gateway HTTP API; the
+Terraform module and leaf live in
+[magmamoose/infra](https://github.com/magmamoose/infra) under `terraform/aws/chargate/`,
+and deploying is a reviewed one-line bump of `broker_artifact_version` there. Operating
+it — the GitHub App, its private key in SSM Parameter Store, and installing the App on
+consumer orgs — is the operator's responsibility; see
+[Token broker deployment](broker-deployment.md). Also see
 [PR comments → *Comment as `Chargate[bot]`*](setup.md#pr-comments-ghas-style) for the
 consumer-side setup.
 

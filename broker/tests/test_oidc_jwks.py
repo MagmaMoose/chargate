@@ -145,7 +145,7 @@ def test_upstream_jwks_outage_is_503_not_401(key, monkeypatch):
     async def boom(*args, **kwargs):
         raise JwksUnavailable("JWKS endpoint unreachable")
 
-    monkeypatch.setattr("app.main.verify_oidc_token", boom)
+    monkeypatch.setattr("app.broker.verify_oidc_token", boom)
 
     from app.config import BrokerConfig
 
@@ -154,10 +154,3 @@ def test_upstream_jwks_outage_is_503_not_401(key, monkeypatch):
     resp = client.post("/token", json={"oidcToken": _oidc(key), "owner": "org", "repo": "repo"})
     assert resp.status_code == 503
     assert resp.json()["error"] == "jwks_unavailable"
-
-
-def test_entry_module_imports_under_plain_cpython():
-    """entry.py must import off-Worker or linting and these tests cannot load it."""
-    import entry
-
-    assert entry.Default is not None

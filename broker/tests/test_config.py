@@ -1,76 +1,98 @@
-"""Tests for the Worker config overlay mechanism.
-
-``_worker_overlay`` + ``load_config`` are the only path that makes the Worker
-target work — values come from ``cf_env``, not from ``os.environ``.  The container
-tests in ``test_readiness.py`` never exercise this path because they never set
-``cf_env``.
-"""
+"""Configuration: PEM normalisation, the allowlist, permissions, and the SSM overlay."""
 
 from __future__ import annotations
 
-from app.config import BrokerConfig, _worker_overlay, cf_env, load_config
+import json
 
-# A PEM-*shaped* placeholder, assembled at run time instead of written as a literal.
-# A real PEM private-key header in source — in code OR in a comment, since scanners read
-# both — is exactly what secret scanners exist to find, and a fixture that trips them on
-# every run (betterleaks `private-key`) teaches reviewers to wave the alert through, which
-# is how a real key eventually slips past. The assembled value is still PEM-shaped, so
-# these tests check what they always did; the "key material" is the character "x".
-_PEM_BEGIN = "-----BEGIN " + "RSA PRIVATE KEY-----"
-FAKE_PRIVATE_KEY = f"{_PEM_BEGIN}\nx\n"
+import pytest
+
+from app import ssm
+from app.config import BrokerConfig, ConfigError, load_config
 
 
-class _FakeCfEnv:
-    """Minimal stand-in for a Cloudflare Worker ``env`` object."""
-
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-def test_worker_overlay_picks_up_declared_fields():
-    token = cf_env.set(_FakeCfEnv(APP_ID="42", PRIVATE_KEY=FAKE_PRIVATE_KEY))
-    try:
-        overlay = _worker_overlay()
-    finally:
-        cf_env.reset(token)
-
-    assert overlay["app_id"] == "42"
-    assert overlay["private_key"] == FAKE_PRIVATE_KEY
+@pytest.fixture(autouse=True)
+def _clean_ssm_cache():
+    ssm.reset_cache()
+    yield
+    ssm.reset_cache()
 
 
-def test_worker_overlay_ignores_undeclared_bindings():
-    # ``env`` may carry KV bindings, D1 bindings, etc. — they must not leak into config.
-    token = cf_env.set(
-        _FakeCfEnv(APP_ID="1", PRIVATE_KEY="k", KV_NAMESPACE="some-binding", D1_DB="another")
+def test_escaped_newlines_are_restored():
+    """Secret stores commonly \\n-escape a PEM; cryptography needs real newlines."""
+    escaped = "-----BEGIN RSA PRIVATE KEY-----\\nabc\\n-----END RSA PRIVATE KEY-----"  # gitleaks:allow - test fixture, not a real key
+    config = BrokerConfig(app_id="1", private_key=escaped)
+    assert "\n" in config.private_key
+    assert "\\n" not in config.private_key
+
+
+def test_real_newlines_are_left_alone():
+    pem = "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----"
+    assert BrokerConfig(app_id="1", private_key=pem).private_key == pem
+
+
+def test_allowed_empty_means_any():
+    assert BrokerConfig(app_id="1", private_key="k").allowed() == set()
+
+
+def test_allowed_parses_and_strips():
+    config = BrokerConfig(app_id="1", private_key="k", allowed_repositories="a/b, c/d ,")
+    assert config.allowed() == {"a/b", "c/d"}
+
+
+def test_permissions_defaults_to_pull_requests_write():
+    assert BrokerConfig(app_id="1", private_key="k").permissions() == {"pull_requests": "write"}
+
+
+def test_permissions_parses_override():
+    config = BrokerConfig(
+        app_id="1", private_key="k", token_permissions_json=json.dumps({"issues": "read"})
     )
-    try:
-        overlay = _worker_overlay()
-    finally:
-        cf_env.reset(token)
-
-    assert set(overlay.keys()) <= set(BrokerConfig.model_fields.keys())
+    assert config.permissions() == {"issues": "read"}
 
 
-def test_worker_overlay_empty_off_worker():
-    assert _worker_overlay() == {}
-
-
-def test_load_config_worker_overlay_wins_over_env(monkeypatch):
-    monkeypatch.setenv("APP_ID", "env-value")
-    monkeypatch.setenv("PRIVATE_KEY", "env-key")
-
-    token = cf_env.set(_FakeCfEnv(APP_ID="cf-value", PRIVATE_KEY=FAKE_PRIVATE_KEY))
-    try:
-        config = load_config()
-    finally:
-        cf_env.reset(token)
-
-    assert config.app_id == "cf-value"
-
-
-def test_load_config_falls_back_to_env(monkeypatch):
-    monkeypatch.setenv("APP_ID", "from-env")
-    monkeypatch.setenv("PRIVATE_KEY", FAKE_PRIVATE_KEY)
+def test_load_config_reads_the_environment(monkeypatch):
+    monkeypatch.delenv("SECRET_PATH", raising=False)
+    monkeypatch.setenv("APP_ID", "42")
+    monkeypatch.setenv("PRIVATE_KEY", "pem")
+    monkeypatch.setenv("OIDC_AUDIENCE", "chargate")
     config = load_config()
-    assert config.app_id == "from-env"
+    assert config.app_id == "42"
+    assert config.private_key == "pem"
+
+
+def test_load_config_raises_when_unconfigured(monkeypatch):
+    """A deployment that was never finished must be distinguishable from a bug."""
+    monkeypatch.delenv("SECRET_PATH", raising=False)
+    monkeypatch.delenv("APP_ID", raising=False)
+    monkeypatch.delenv("PRIVATE_KEY", raising=False)
+    with pytest.raises(ConfigError):
+        load_config()
+
+
+def test_secret_path_unset_does_not_touch_ssm(monkeypatch):
+    """The local and CI path must never import boto3, let alone call AWS."""
+    monkeypatch.delenv("SECRET_PATH", raising=False)
+    monkeypatch.setenv("APP_ID", "42")
+    monkeypatch.setenv("PRIVATE_KEY", "pem")
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("SSM must not be consulted when SECRET_PATH is unset")
+
+    monkeypatch.setattr(ssm, "secrets", explode)
+    assert load_config().app_id == "42"
+
+
+def test_ssm_overlay_wins_over_the_environment(monkeypatch):
+    """The secrets come from Parameter Store, never from the function's own config.
+
+    Anything holding lambda:GetFunctionConfiguration can read an environment variable,
+    so a PRIVATE_KEY that leaked into one must not beat the value in SSM.
+    """
+    monkeypatch.setenv("SECRET_PATH", "/chargate/prod")
+    monkeypatch.setenv("APP_ID", "stale")
+    monkeypatch.setenv("PRIVATE_KEY", "stale")
+    monkeypatch.setattr(ssm, "secrets", lambda path: {"app_id": "99", "private_key": "real"})
+
+    config = load_config()
+    assert config.app_id == "99"
+    assert config.private_key == "real"

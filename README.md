@@ -246,7 +246,7 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 | `pr_comment_mode` | `both` | `summary` (one updatable comment) · `inline` (per-line) · `both`. |
 | `pr_comment_max_inline` | `50` | Cap on inline comments per run; the rest are listed in the summary. |
 | `pr_comment_token` | `''` | Override token used **only** to author the comments (BYO GitHub App). Usually unset — see [PR comments](#pr-comments-ghas-style). |
-| `token_broker_url` | `https://chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship. Set empty to disable (fall back to `github-actions[bot]`). |
+| `token_broker_url` | `https://broker-chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship. Set empty to disable (fall back to `github-actions[bot]`). |
 | `oidc_audience` | `chargate` | OIDC audience requested for the broker exchange (advanced). |
 
 ### DefectDojo (optional sink)

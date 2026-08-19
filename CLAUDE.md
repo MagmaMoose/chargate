@@ -7,8 +7,9 @@ unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab /
 artifact) and a CycloneDX BOM (Syft) goes to Dependency-Track; on PRs it posts
 GHAS-style comments for net-new findings. One `chargate` CLI backs two surfaces:
 `action.yml` (composite action) and `.pre-commit-hooks.yaml` (local hook). A
-separate FastAPI service under `broker/` (own dep-group; deployed via `k8s/` +
-Flux) mints the `Chargate[bot]` token those PR comments are authored with.
+separate service under `broker/` (its own pyproject; deployed as an AWS Lambda
+behind an API Gateway HTTP API — module + leaf live in `magmamoose/infra`) mints
+the `Chargate[bot]` token those PR comments are authored with.
 
 @.claude/QUICK_START.md
 @.claude/ARCHITECTURE_MAP.md
@@ -18,7 +19,7 @@ Flux) mints the `Chargate[bot]` token those PR comments are authored with.
 
 Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only **core** (no
 runtime deps — the DefectDojo/Dependency-Track clients use `urllib`); the `broker/`
-service keeps its FastAPI deps in a separate `broker` dep-group. SHA-pin external
+service has its own `broker/pyproject.toml` and virtualenv. SHA-pin external
 GitHub Actions with a `# vX.Y.Z` comment. MIT. Tests mirror modules 1:1 under `tests/`.
 
 **Releases** are automated: pushing to `main` runs Diatreme + python-semantic-release
