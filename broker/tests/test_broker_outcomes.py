@@ -25,6 +25,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from app.broker import handle_token
 from app.config import GITHUB_OIDC_ISSUER, BrokerConfig
 
+BROKER_ROOT = Path(__file__).resolve().parents[1]
+
 _CONFIG = BrokerConfig(app_id="1", private_key="-----BEGIN RSA PRIVATE KEY-----\nx\n")
 
 
@@ -253,3 +255,62 @@ def test_every_outcome_string_is_covered():
         "mint_ok",
     }
     assert emitted <= covered, f"untested outcome(s): {emitted - covered}"
+
+
+# --- the level itself ------------------------------------------------------------------------
+#
+# Everything above uses `caplog.at_level(INFO)`, which SETS the level. That is precisely how the
+# original bug survived: the AWS Lambda runtime sets the ROOT logger to WARNING, this logger
+# inherited it, and every outcome line was dropped in production while the suite stayed green.
+# These reproduce the runtime's configuration instead of overriding it.
+
+
+def test_logger_permits_info_without_any_test_configuration():
+    from app.broker import _log
+
+    assert _log.level != logging.NOTSET, "an inherited level is what the Lambda runtime breaks"
+    assert _log.isEnabledFor(logging.INFO)
+
+
+def test_outcome_survives_a_root_logger_pinned_to_warning():
+    """The exact production shape: root at WARNING, nothing else configured."""
+    import subprocess
+    import sys
+
+    program = (
+        "import logging, sys, io, asyncio\n"
+        # Reproduce the Lambda runtime: a handler on root, root at WARNING.
+        "buf = io.StringIO()\n"
+        "h = logging.StreamHandler(buf)\n"
+        "logging.root.addHandler(h)\n"
+        "logging.root.setLevel(logging.WARNING)\n"
+        "from app.broker import handle_token\n"
+        "asyncio.run(handle_token(b'not json'))\n"
+        "out = buf.getvalue()\n"
+        "assert 'invalid_json' in out, 'outcome line was dropped: %r' % out\n"
+        "print('emitted')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=BROKER_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "emitted" in result.stdout
+
+
+def test_a_bad_level_env_var_does_not_crash_the_import():
+    """A typo must not turn a logging preference into a cold-start failure."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.broker as b; print(b._log.level)"],
+        cwd=BROKER_ROOT,
+        capture_output=True,
+        text=True,
+        env={"CHARGATE_LOG_LEVEL": "NOT_A_LEVEL", "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(logging.INFO)
