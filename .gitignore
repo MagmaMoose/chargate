@@ -36,3 +36,6 @@ megalinter-reports/
 # exact wheel set that gets bundled, which is the whole point.
 python_modules/
 .venv-workers/
+
+# Written by the brimyr patch-coverage gate (pytest --cov-report=xml)
+coverage.xml
