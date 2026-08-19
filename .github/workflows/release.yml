@@ -27,6 +27,11 @@ on:
     branches: [main]
     paths-ignore: ['**/*.md', 'docs/**', 'mkdocs.yml', 'LICENSE', '.gitignore']
   workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Publish the broker zip even if nothing under broker/ changed (cold start, or re-publishing after a failed upload)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write     # version bump + tag on release
@@ -88,6 +93,7 @@ jobs:
         shell: bash
         env:
           HAVE_TARGET: ${{ vars.BROKER_ARTIFACT_BUCKET != '' && vars.BROKER_PUBLISH_ROLE_ARN != '' }}
+          FORCE_PUBLISH: ${{ inputs.force_publish || false }}
           # OUTSIDE THE WORKSPACE, AND THAT IS LOAD-BEARING. The diatreme action runs its own
           # `actions/checkout` internally, which defaults to `clean: true` and therefore
           # `git clean -ffdx` — so anything this step leaves under the repo is deleted before
@@ -109,7 +115,15 @@ jobs:
           # reads them. Compare against the previous release tag — at this point in the
           # job the new tag does not exist yet, so the latest tag IS the previous release.
           previous="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-          if [ -z "${previous}" ]; then
+          if [ "${FORCE_PUBLISH}" = "true" ]; then
+            # THE COLD-START ESCAPE HATCH. On a brand new stack the infra leaf cannot be applied
+            # until an object exists to point at, but the gate below will correctly answer "false"
+            # whenever the release that creates the bucket touched no broker/ code — so without
+            # this the first artifact can never be published through the normal path, and someone
+            # hand-uploads a zip that CI never built. Also the way to recover from an upload that
+            # failed after the gate had already said "nothing changed".
+            changed=true
+          elif [ -z "${previous}" ]; then
             changed=true          # first ever release: nothing to compare against
           else
             changed="$(cd broker && uv run python scripts/build_lambda_zip.py --changed-since "${previous}")"
