@@ -212,6 +212,23 @@ def test_build_script_refuses_to_guess_a_platform():
     assert "--platform" in result.stderr
 
 
+def test_changed_since_does_not_require_a_platform():
+    """`--changed-since` asks a question about git history and builds nothing.
+
+    Requiring `--platform` for it made the release workflow's publish gate exit 2, which
+    `set -euo pipefail` turned into a failed release job — the build had already succeeded, and
+    then the gate query killed it. Regression test for that exact invocation.
+    """
+    result = subprocess.run(
+        [sys.executable, "scripts/build_lambda_zip.py", "--changed-since", "HEAD"],
+        cwd=BROKER_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() in {"true", "false"}
+
+
 def test_digest_matches_the_file(package):
     zip_path, digest = package
     assert hashlib.sha256(zip_path.read_bytes()).hexdigest() == digest
