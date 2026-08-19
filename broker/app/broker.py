@@ -37,6 +37,24 @@ from app.oidc import JwksUnavailable, KeyResolver, OidcError, verify_oidc_token
 _log = logging.getLogger("chargate.broker")
 
 
+def _outcome(name: str) -> None:
+    """Emit exactly one structured line naming how a /token request ended.
+
+    THE ONLY OBSERVABILITY THIS SERVICE HAS. Every failure here is invisible from outside:
+    the client fails soft, so a broker that refuses every request produces no red check
+    anywhere, just PR comments quietly losing their Chargate[bot] byline. The Lambda error
+    alarm catches a raise; it cannot catch a broker that is cleanly and consistently
+    answering 403.
+
+    ``name`` is a FIXED STRING chosen from the call sites below — never a caller-supplied
+    value, never an exception message. /token is unauthenticated, so anything request-derived
+    reaching a log record is CodeQL py/log-injection: a CRLF in the value forges a second
+    line. Keeping the vocabulary closed is what makes this safe to emit unconditionally, and
+    is also what lets a CloudWatch metric filter key on it.
+    """
+    _log.info('{"outcome": "%s"}', name)
+
+
 def handle_health() -> tuple[int, dict[str, str]]:
     """Liveness. Answers whether or not configuration is present.
 
@@ -80,16 +98,20 @@ async def handle_token(
     try:
         parsed = json.loads(body)
     except ValueError:
+        _outcome("invalid_json")
         return 400, {"error": "invalid_json"}
     if not isinstance(parsed, dict):
+        _outcome("invalid_json")
         return 400, {"error": "invalid_json"}
 
     oidc_token = parsed.get("oidcToken")
     owner = parsed.get("owner")
     repo = parsed.get("repo")
     if not (oidc_token and owner and repo):
+        _outcome("missing_fields")
         return 400, {"error": "missing_fields"}
     if not (isinstance(owner, str) and isinstance(repo, str)):
+        _outcome("invalid_repository")
         return 400, {"error": "invalid_repository"}
     # Reject anything that isn't a plain GitHub owner/repo identifier before it
     # reaches an API URL or a claim comparison. A value containing '/' or '..'
@@ -97,6 +119,7 @@ async def handle_token(
     try:
         owner, repo = validate_repository(owner, repo)
     except InvalidRepositoryError:
+        _outcome("invalid_repository")
         return 400, {"error": "invalid_repository"}
     repository = f"{owner}/{repo}"
 
@@ -107,10 +130,12 @@ async def handle_token(
         # purpose: every one of them means the same thing to the caller. A 500 with a
         # traceback would read as a broker bug; this is a deployment that was never
         # finished, and the caller should retry once it is.
+        _outcome("config_unavailable")
         return 503, {"error": "config_unavailable"}
 
     allowlist = active.allowed()
     if allowlist and repository not in allowlist:
+        _outcome("repo_not_allowed")
         return 403, {"error": "repo_not_allowed"}
 
     # One client for both the JWKS fetch and the GitHub calls, so a warm execution
@@ -125,6 +150,7 @@ async def handle_token(
                 key_resolver=key_resolver,
             )
         except JwksUnavailable:
+            _outcome("jwks_unavailable")
             return 503, {"error": "jwks_unavailable"}
         except OidcError as exc:
             # Only the exception's CLASS NAME is logged — never its message, and
@@ -151,12 +177,14 @@ async def handle_token(
                 "OIDC verification failed: %s",
                 type(cause).__name__ if cause is not None else type(exc).__name__,
             )
+            _outcome("invalid_oidc")
             return 401, {"error": "invalid_oidc"}
 
         # The OIDC `repository` claim is the caller's repo — it must match the
         # repo they're asking for a token for. This is what stops repo A minting
         # a token for repo B.
         if claims.get("repository") != repository:
+            _outcome("repo_mismatch")
             return 403, {"error": "repo_mismatch"}
 
         try:
@@ -173,8 +201,11 @@ async def handle_token(
             status = exc.response.status_code
             # App not installed on the repo → 404 from /installation.
             reason = "app_not_installed" if status == 404 else "mint_failed"
+            _outcome(reason)
             return (403 if status == 404 else 502), {"error": reason}
         except httpx.HTTPError:
+            _outcome("mint_failed")
             return 502, {"error": "mint_failed"}
 
+    _outcome("mint_ok")
     return 200, {"token": token_value, "expires_at": expires_at, "repository": repository}
