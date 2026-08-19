@@ -49,6 +49,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Tags AND full history. gitversion needs the history to compute the next
+          # version, and the broker publish gate resolves the previous release with
+          # `git describe --tags` — on a shallow clone that finds nothing and the gate
+          # fails open, republishing the package on every release.
+          fetch-depth: 0
+      # Needed by the broker build step below. The CLI half of this repo is stdlib-only
+      # and needs no toolchain, which is why nothing here installed uv before.
+      - name: Install uv
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: '3.12'
       - id: detect
         shell: bash
         # image_name is set only when the repo builds a container image; Diatreme
@@ -61,13 +74,65 @@ jobs:
           fi
       # PR: verify the image builds (image repos only).
       - if: github.event_name == 'pull_request' && steps.detect.outputs.image_name != ''
-        uses: magmamoose/diatreme@3103a8f7a077d8c60eb1602ae7bbd23e420d7cfd # v2.7.0
+        uses: magmamoose/diatreme@79056f54fdfba54c0b260ffa371df14b94f1a8e6 # v2.8.0
         with:
           mode: ci
           image_name: ${{ steps.detect.outputs.image_name }}
+      # ── The broker Lambda artifact ──────────────────────────────────────────
+      #
+      # Chargate's deployable is a zip in S3, which magmamoose/infra's
+      # `chargate-broker` leaf pins by version. Publishing happens here; DEPLOYING is a
+      # separate, reviewed one-line bump of `broker_artifact_version` in that leaf.
+      #
+      # Everything below is inert until the two repo variables are set, so this is safe
+      # to merge before the infra side exists: diatreme skips the publish when
+      # `publish-package` is false.
+      - name: Build the broker Lambda zip
+        id: pkg
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          HAVE_TARGET: ${{ vars.BROKER_ARTIFACT_BUCKET != '' && vars.BROKER_PUBLISH_ROLE_ARN != '' }}
+        run: |
+          set -euo pipefail
+          cd broker
+          uv run python scripts/build_lambda_zip.py \
+            --out ../dist/chargate-broker.zip \
+            --platform x86_64-manylinux_2_28
+          cd ..
+
+          # THE PUBLISH GATE. Chargate releases are overwhelmingly CLI changes that
+          # touch nothing in this package; without the gate the infra leaf collects a
+          # stream of version-bump PRs redeploying byte-identical code until nobody
+          # reads them. Compare against the previous release tag — at this point in the
+          # job the new tag does not exist yet, so the latest tag IS the previous release.
+          previous="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -z "${previous}" ]; then
+            changed=true          # first ever release: nothing to compare against
+          else
+            changed="$(cd broker && uv run python scripts/build_lambda_zip.py --changed-since "${previous}")"
+          fi
+
+          if [ "${HAVE_TARGET}" != "true" ]; then
+            # Not wired up yet. Say so loudly rather than silently not publishing.
+            echo "::notice::BROKER_ARTIFACT_BUCKET / BROKER_PUBLISH_ROLE_ARN unset; not publishing"
+            changed=false
+          fi
+          echo "publish=${changed}" >> "$GITHUB_OUTPUT"
+
+      # OIDC only — no AWS key is stored in this repository. diatreme's s3 publisher
+      # merely VERIFIES the session (`sts get-caller-identity`), so this step is what
+      # actually establishes it.
+      - name: Configure AWS credentials
+        if: steps.pkg.outputs.publish == 'true'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.BROKER_PUBLISH_ROLE_ARN }}
+          aws-region: eu-west-1
+
       # Default-branch push (or manual dispatch): version + release.
       - if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: magmamoose/diatreme@3103a8f7a077d8c60eb1602ae7bbd23e420d7cfd # v2.7.0
+        uses: magmamoose/diatreme@79056f54fdfba54c0b260ffa371df14b94f1a8e6 # v2.8.0
         with:
           mode: release
           versioning-tool: gitversion
@@ -75,3 +140,28 @@ jobs:
           environments: '["prod"]'
           prerelease-identifiers: '{}'
           image_name: ${{ steps.detect.outputs.image_name }}
+          # The key is `broker/<version>.zip` and diatreme REFUSES to overwrite an
+          # existing one — the infra leaf pins that key, so replacing its bytes would
+          # swap the running code under a version somebody already reviewed.
+          publish-package: ${{ steps.pkg.outputs.publish }}
+          package-ecosystem: s3
+          package-feed-url: s3://${{ vars.BROKER_ARTIFACT_BUCKET }}/broker
+          package-path: dist/chargate-broker.zip
+          aws-role-to-assume: ${{ vars.BROKER_PUBLISH_ROLE_ARN }}
+
+      # The deploy is a human action in another repo, so tell the human exactly what to
+      # change rather than making them work it out from the release notes.
+      - name: Summarise the infra bump
+        if: steps.pkg.outputs.publish == 'true'
+        shell: bash
+        run: |
+          {
+            echo "### Broker artifact published"
+            echo
+            echo "Deploy it by bumping this line in \`magmamoose/infra\`:"
+            echo
+            echo '```hcl'
+            echo '# terraform/aws/chargate/prod/eu-west-1/chargate-broker/terragrunt.hcl'
+            echo "broker_artifact_version = \"<the version this release cut>\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

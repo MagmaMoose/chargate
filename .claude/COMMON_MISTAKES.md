@@ -31,9 +31,11 @@
   set (no on/off toggle); mirror this shape for any new sink. DT uploads on push/tags
   only (tracks shipped artifacts), never on PRs.
 - **The `broker/` service is a separate deployable**, not part of the CLI: keep its
-  FastAPI/httpx/pyjwt deps in the `broker` dep-group so the wheel stays dep-free.
-  Ships as `ghcr.io/magmamoose/chargate`, deploys via `k8s/` + Flux; the App + OCI-Vault
-  keys are operator-owned (see the token-broker design memory).
+  pyjwt/httpx deps in `broker/pyproject.toml` so the CLI wheel stays dep-free.
+  Ships as a zip in S3 and runs on AWS Lambda behind an API Gateway HTTP API; the
+  module and leaf live in `magmamoose/infra` under `terraform/aws/chargate/`, and
+  deploying is a reviewed one-line bump of `broker_artifact_version` there. The App
+  private key and the AWS account are operator-owned (see the token-broker design memory).
 - **DefectDojo types a Test from `runs[0]` and nothing else.** Its SARIF parser is a
   *dynamic test type* parser: `get_tests()` makes one ParserTest per run named after
   `run.tool.driver.name`, then `consolidate_dynamic_tests` does `test_raw = tests[0]` for
@@ -61,3 +63,28 @@
   false and means "a linter blew up, you decide"; zero runs means the gate scanned nothing,
   so a pass is meaningless. Gating the empty-report check on `strict` reintroduces the
   original bug for every consumer who never set it.
+- **`GET /healthz` proves the function booted and NOTHING else.** It returns 200 on a Lambda
+  with no SSM parameters, no IAM permission to read them, and no GitHub App installed —
+  because it deliberately answers before configuration is consulted (that is what makes
+  "deploy, then seed the secrets" work). The failures it hides are exactly the ones this
+  service has: the two-ARN SSM policy, the KMS decrypt grant, and an App that was never
+  installed on the repo. Verify with a real signed `POST /token` — `.github/workflows/broker-smoke.yml`
+  runs the SHIPPED `scripts/request-app-token.sh` and then hands the minted token back to
+  the GitHub API, which is the only thing that exercises all of it. Nievah's first AWS front
+  door deployed clean, health-checked green, and returned `InvalidSignatureException` on
+  every POST.
+- **`s3:GetObjectAttributes` does not authorise `HeadObject`.** Diatreme's s3 publisher
+  (`package-ecosystem: s3`) calls `aws s3api head-object` to refuse overwriting a published
+  key, and its AccessDenied branch is `exit 1`, not a skip — so a publish role missing
+  `s3:GetObject` fails the release outright. Reported on magmamoose/infra#638, which is where
+  the `artifacts` module's policy lives.
+- **The broker fails soft, so a broken deployment is SILENT.** `scripts/request-app-token.sh`
+  emits an empty token and `exit 0` on every error path, and the action falls back to
+  `github-actions[bot]`. Nothing goes red anywhere. That is correct behaviour — a security
+  gate must not break a consumer's build because a token minter is down — but it means the
+  only signals that the broker is broken are the weekly smoke run and a PR comment byline.
+  Never treat "no failures reported" as evidence the broker works.
+- **`app/main.py` must never enter the Lambda zip.** It is the one module importing FastAPI,
+  which is not in the shipped dependency set; `scripts/build_lambda_zip.py` excludes it by
+  name and `tests/test_lambda_package.py` asserts its absence. Shipping it turns a clean
+  deploy into a cold-start `ImportError` on the fail-soft path above — i.e. into silence.

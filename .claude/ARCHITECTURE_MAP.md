@@ -19,7 +19,8 @@ side-effecting edges. The two external sinks are optional + **failure-isolated**
 (a sink outage is logged, never fails the gate). Exit codes: `0` pass · `1`
 blocking net-new · `2` setup/tool error.
 
-Separate from the CLI: the **`broker/`** FastAPI service (own dep-group; `k8s/` + Flux)
+Separate from the CLI: the **`broker/`** service (own pyproject; AWS Lambda + API Gateway,
+via `magmamoose/infra` `terraform/aws/chargate/`)
 exchanges a run's Actions OIDC token for a `Chargate[bot]` App token to author PR comments.
 
 Full module table + call graph: read `./PROJECT_INDEX.json`.

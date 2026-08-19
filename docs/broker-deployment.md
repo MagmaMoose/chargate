@@ -1,162 +1,179 @@
 # Token broker deployment
 
-The broker under `broker/` has two supported targets from the same source tree and the same
-commit: a **Cloudflare Python Worker** (the current one) and a **container** from GHCR. Nothing
-in the application code chooses between them — the only runtime-shaped difference is where
-configuration comes from, and `app/config.py` handles both.
+The broker exchanges a consumer's GitHub Actions OIDC token for a short-lived, repo-scoped
+`Chargate[bot]` installation token, so Chargate's PR comments carry that byline instead of
+`github-actions[bot]`.
 
-Consumers are unaffected by which one is live: same hostname, same `POST /token` contract.
+It runs as an **AWS Lambda behind an API Gateway HTTP API**, in Chargate's own AWS account.
+The Terraform lives in [magmamoose/infra](https://github.com/magmamoose/infra) under
+`terraform/aws/chargate/`; this repository owns the code that runs on it and the contract for
+packaging it.
 
-| | Cloudflare Worker | Kubernetes |
-|---|---|---|
-| Runtime | Pyodide, ASGI bridge | `python:3.12-slim`, uvicorn |
-| Entry | `broker/entry.py` → `Default.fetch` | `uvicorn app.main:app` |
-| Config | `wrangler.toml` `[vars]` + `wrangler secret put` | ExternalSecret → Secret → `envFrom` |
-| TLS | Terminated by Cloudflare | Ingress + cert-manager |
-| Cost at this volume | Workers Paid — see §1.3 | A cluster |
+```
+consumer repo's workflow           any pinned chargate tag
+  scripts/request-app-token.sh     POST {oidcToken, owner, repo, ref, runId, sha}
+        │
+        ▼
+  broker-chargate.magmamoose.com   Cloudflare DNS, PROXIED (orange cloud)
+        │                          CNAME → the API Gateway custom-domain target
+        ▼
+  API Gateway HTTP API             $default route + stage · throttle 2 rps / burst 10
+        │                          execute-api endpoint disabled: the custom domain is the only door
+        ▼
+  chargate-broker (Lambda)         python3.12 · x86_64 · app.lambda_handler.handler
+        │                          code: s3://<artifacts bucket>/broker/<version>.zip
+        ├── SSM Parameter Store    /chargate/prod/{app-id,private-key}  (SecureString)
+        └── api.github.com         App JWT → installation → scoped token
+```
 
----
+!!! warning "`GET /healthz` proves nothing"
+    It returns 200 on a Lambda with no SSM parameters, no permission to read them, and no
+    GitHub App installed — it deliberately answers before configuration is consulted, which is
+    what makes "deploy, then seed the secrets" work. Because
+    `scripts/request-app-token.sh` fails soft (empty token, `exit 0`), a broken broker
+    produces **no red check anywhere** — just comments quietly reverting to
+    `github-actions[bot]`. Verify with a real signed `POST`:
+    `.github/workflows/broker-smoke.yml`.
 
-## 1. Cloudflare Worker
+## The package contract
 
-### 1.1 Why the deploy is three commands, not one
+`broker/scripts/build_lambda_zip.py` is the one definition of what ships. It is run by CI (so
+a bad dependency bump fails the pull request) and by the release workflow (which publishes the
+artifact) — a local build and a released artifact produced by different means is a difference
+nobody discovers until production behaves unlike the test.
 
-`pywrangler sync` resolves `broker/pyproject.toml` against the Pyodide build implied by
-`compatibility_date` and unpacks the wasm32 wheels into `python_modules/`. Plain `wrangler
-deploy` on its own uploads the source and nothing else, so the Worker starts with only the
-Python standard library and dies on the first third-party import.
-
-The prune between the two steps is **not** optional. Wrangler bundles every file in the working
-directory and honours neither `.wranglerignore` nor a rules exclusion for Python, so the
-resolution virtualenvs and the test suite would otherwise ship — and `.venv` holds host-native
-wheels that cannot run on wasm32 at all.
-
-```sh
+```bash
 cd broker
-uv run --with workers-py==1.16.1 pywrangler sync
-rm -rf .venv .venv-workers tests
-npx --yes wrangler@4.42.0 deploy --routes "chargate.magmamoose.com/*"
+uv run python scripts/build_lambda_zip.py \
+  --out ../dist/chargate-broker.zip --platform x86_64-manylinux_2_28
 ```
 
-`.github/workflows/deploy-cloudflare.yml` does exactly this on a push to `main`. A pull request
-runs the same vendor step and then `wrangler deploy --dry-run`, which catches the failure mode
-that actually bites here — a dependency with no wasm32 wheel — without uploading anything.
+**What ships:** `app/` minus `main.py`, plus the resolved wheels for `pyjwt[crypto]` and
+`httpx`. ~5.3 MB.
 
-!!! warning "Node 26 cannot run `pywrangler sync`"
-    The Pyodide interpreter is resolved through a node shim that still passes
-    `--experimental-wasm-stack-switching`, which Node 26 rejects with `bad option`. Use Node 22
-    or 24; CI pins 24.
+- `app/main.py` is **excluded by name**. It is the only module importing FastAPI, which is not
+  in the shipped dependency set; including it turns a clean deploy into a cold-start
+  `ImportError` on the fail-soft path above.
+- `boto3`/`botocore` are never bundled — the runtime supplies them.
+- `--platform` is **required and has no default**, because `cryptography` ships compiled
+  wheels and a build on a developer's Mac would otherwise deploy and then fail to import.
 
-### 1.2 Secrets
+**The build is deterministic** (fixed timestamps, fixed modes, sorted order, resolution pinned
+by `broker/uv.lock`). The release workflow decides whether to publish by comparing against the
+previous release tag; a non-reproducible build would mean every chargate release opened an
+infra bump PR redeploying byte-identical code until nobody read them.
 
-Set once per environment, never committed:
+`broker/tests/test_lambda_package.py` defends all of this — including unzipping the artifact
+into an empty directory and importing it in a subprocess with a scrubbed path and poisoned
+`sys.modules`, so a module that grows an import of something unshipped goes red here rather
+than at the first real request.
 
-```sh
-cd broker
-npx wrangler secret put APP_ID
-npx wrangler secret put PRIVATE_KEY < chargate-app.private-key.pem
+## Publishing and deploying are different acts
+
+**Publishing** rides on `release.yml`: it builds the zip, gates on whether anything shipped
+actually changed since the previous tag, and hands it to diatreme's `package-ecosystem: s3`.
+Auth is GitHub OIDC — no AWS credential is stored in this repository. Two repo **variables**
+turn it on; unset, diatreme skips the step and nothing changes:
+
+| Variable | Value |
+|---|---|
+| `BROKER_ARTIFACT_BUCKET` | `terragrunt output artifact_bucket` from infra's `chargate-artifacts` leaf |
+| `BROKER_PUBLISH_ROLE_ARN` | `terragrunt output publish_role_arn` from the same leaf |
+
+The key is `broker/<version>.zip` and **diatreme refuses to overwrite one that exists** —
+infra pins that key, so replacing its bytes would swap the running code under a version
+somebody already reviewed.
+
+**Deploying** is a reviewed one-line bump of `broker_artifact_version` in infra's
+`chargate-broker` leaf. The release job writes the exact line to its step summary.
+
+## Secrets
+
+Seeded **by hand**, never by Terraform: a secret in a Terraform resource is a secret in
+Terraform state, and magmamoose/infra is public. They are not Lambda environment variables
+either, where anything holding `lambda:GetFunctionConfiguration` could read them.
+
+```bash
+aws ssm put-parameter --region eu-west-1 --profile mm-prd-chargate \
+  --name /chargate/prod/app-id --type String --value "$APP_ID" --overwrite
+
+aws ssm put-parameter --region eu-west-1 --profile mm-prd-chargate \
+  --name /chargate/prod/private-key --type SecureString \
+  --value "file://chargate-app.private-key.pem" --overwrite
+
+rm chargate-app.private-key.pem
 ```
 
-`PRIVATE_KEY` is multi-line, so pipe the PEM rather than pasting it. **PKCS#1** — the
-`BEGIN RSA PRIVATE KEY` form GitHub hands out — is fine as-is: `pyjwt[crypto]` uses
-`cryptography`, which reads it directly. The pkcs8 conversion people reach for is a constraint
-of the JavaScript `crypto.subtle.importKey` path, not this one.
+No `--key-id`, so the AWS-managed `aws/ssm` key is used, which carries no monthly charge.
+Standard-tier parameters are free for both storage and reads. Verify:
 
-!!! warning "Deploy first, then set secrets"
-    Cloudflare has no API for a secret on a script that was never uploaded, so on a fresh
-    account `wrangler secret put` fails until the Worker exists. Deploy once — `/healthz`
-    answers without either secret — then set them and deploy again.
-
-`/healthz` and `/readyz` are deliberately not the same check. Configuration is resolved per
-request (the Worker requires it — secrets only exist on the invocation's `env`), where it used
-to be built when the app was constructed, so a broker missing `APP_ID`/`PRIVATE_KEY` used to
-crash-loop and be impossible to miss. To keep that signal:
-
-| | Unconfigured | Configured |
-|---|---|---|
-| `GET /healthz` (liveness) | `200 {"status": "ok"}` | `200` |
-| `GET /readyz` (readiness) | `503 {"status": "misconfigured"}` | `200` |
-| `POST /token` | `503 {"error": "config_unavailable"}` | `200` |
-
-So the first Worker deploy comes up healthy with no secrets, while on Kubernetes the readiness
-probe still marks a misconfigured pod NotReady rather than letting it report Ready and fail
-every token request. A malformed request is still answered `400` before configuration is
-consulted at all.
-
-Everything else is non-secret and lives in `wrangler.toml` `[vars]`: `OIDC_AUDIENCE`,
-`GITHUB_API_URL`, `TOKEN_PERMISSIONS_JSON`, `ALLOWED_REPOSITORIES`.
-
-### 1.3 Cost and limits
-
-**This Worker requires the Workers Paid plan ($5/month), and the reason is script size, not
-traffic.** The vendored bundle measures **4.30 MiB gzipped** (18.3 MiB raw, 1055 modules)
-against a **3 MB ceiling on Workers Free** and **10 MB on Paid**. `cryptography` is the bulk of
-it — 4.5 MiB of wheel before any application code — and it is not optional: `pyjwt[crypto]`
-needs it to verify RS256 and to sign the App JWT.
-
-Getting under 3 MB would mean dropping `cryptography` for the runtime's WebCrypto, which cannot
-load the PKCS#1 key GitHub issues without a pkcs8 conversion, and would mean hand-rolling both
-the verify and the sign. That is a large rewrite to save $5/month; it is not worth it.
-
-Everything *else* fits Free comfortably, and none of it is close to a paid overage:
-
-| | Included/month | Broker's usage |
-|---|---|---|
-| Requests | 10,000,000 | ~1.5–15k |
-| CPU time | 30,000,000 CPU-ms | ~5 ms per request; the two quotas balance at 3 ms/request |
-| Duration | not billed, no limit | two GitHub round-trips of I/O wait, free |
-
-So the marginal cost of this Worker on an account that already has Workers Paid is **zero**.
-
-`/token` is public and unauthenticated at the edge (it authenticates callers itself, by
-verifying their Actions OIDC token). There is no account-level spend cap on Workers, and a
-rejected request still bills, so put a WAF rate-limiting rule in front of it — blocked requests
-never invoke the Worker and are therefore never billed.
-
-`/token` is public and unauthenticated at the edge (it authenticates callers itself, by
-verifying their Actions OIDC token). There is no account-level spend cap on Workers, and a
-rejected request still bills, so if this ever moves to a paid account put a WAF rate-limiting
-rule in front of it — blocked requests never invoke the Worker and are therefore never billed.
-
-### 1.4 JWKS
-
-GitHub's Actions JWKS is fetched with `httpx` rather than `jwt.PyJWKClient`. This is the one
-thing in the service that could not follow it to a Worker: `PyJWKClient` fetches over
-`urllib.request.urlopen`, a blocking socket call, and the Workers runtime has no blocking
-sockets.
-
-The fetched key set is cached in a module-level dict, which a warm isolate reuses across
-requests — the closest thing a Worker has to a process cache, and it costs no KV writes. A key
-rotation is handled by a single forced refetch on a `kid` miss rather than by waiting out the
-TTL, so a rotation does not need a cold isolate to recover.
-
----
-
-## 2. Kubernetes
-
-Still supported and still built by `release.yml`. The manifests live in `k8s/`, the image is
-`ghcr.io/magmamoose/chargate`, and configuration arrives as environment variables through the
-ExternalSecret in `k8s/base/externalsecret.yaml` (`APP_ID`, `PRIVATE_KEY`).
-
-```sh
-kubectl apply -k k8s/overlays/prod
+```bash
+aws ssm get-parameters-by-path --path /chargate/prod --recursive --with-decryption \
+  --region eu-west-1 --profile mm-prd-chargate
 ```
 
-The container needs uvicorn, which the Worker does not, so it is an optional extra rather than a
-base dependency: `uvicorn[standard]` drags in `httptools`, which has no wasm32 wheel, and one
-unresolvable transitive dependency fails the whole vendor step.
+Parameter basenames map to config fields with `-` → `_`, so `private-key` lands on
+`BrokerConfig.private_key`.
 
----
+## Going live
 
-## 3. Cutover
+Steps marked **H** need a human with credentials or a console.
 
-A Worker **route** beats both a DNS record and a Cloudflare Tunnel at the edge, so the order is
-forced and only one order is safe:
+1. **H** Confirm the Chargate GitHub App exists, note its **App ID**, confirm it is installed
+   on every repo that should get `Chargate[bot]` comments, and download the private key.
+   Its absence is invisible — a 404 becomes `app_not_installed`, the client fails soft, silence.
+2. Merge infra **#638** (it is what creates `terraform/aws/` at all), then the chargate infra PR.
+3. **H** Apply the `chargate-artifacts` leaf. Set `BROKER_ARTIFACT_BUCKET` and
+   `BROKER_PUBLISH_ROLE_ARN` as repo variables from its outputs.
+4. **H** Seed the two SSM parameters (above).
+5. Merge this repo's release changes to `main`; confirm `broker/<version>.zip` exists in the
+   bucket. **This is the cold start** — the front door cannot be applied against a key that
+   does not exist.
+6. **H** Apply `chargate-broker` **phase 1**: `enable_custom_domain = false`. This requests the
+   regional ACM certificate and prints the validation record. Nothing resolves yet.
+7. Add the ACM validation CNAME to the Cloudflare leaf (grey cloud — a proxied record answers
+   with Cloudflare's own value and the certificate never leaves `PENDING_VALIDATION`). Apply,
+   wait for `ISSUED`.
+8. **H** Apply **phase 2**: `enable_custom_domain = true`, `disable_default_endpoint = true`.
+   Applying phase 2 before the certificate is issued fails with a `BadRequestException`.
+9. Add the `broker-chargate.magmamoose.com` CNAME → the custom-domain target, **`proxied = true`**
+   (orange cloud). The hostname resolves for the first time. Note that consumers pinned to a
+   tag released *before* this change still default to the old `chargate.magmamoose.com`, which
+   does not resolve — they fail soft to `github-actions[bot]` until they bump.
+10. **H** Run `broker-smoke.yml` and confirm a real token is minted and accepted by GitHub.
+    Then open a throwaway PR in a consumer repo and check the comment byline.
+11. **H** Confirm the SNS subscription email — until clicked it delivers nothing, which
+    Terraform reports as "created" either way.
+12. **H** Authorise the Slack workspace in the AWS Chatbot console for **this** account.
+    Chatbot's workspace authorisation is per-account and cannot be done by Terraform; nievah's
+    account being authorised does nothing for chargate's.
 
-1. Deploy the Worker and set its secrets, but leave the route off.
-2. Verify it: `curl https://<workers.dev URL>/healthz`.
-3. Add the route for `chargate.magmamoose.com/*`. It now wins over the tunnel immediately.
-4. Only then remove the in-cluster Deployment and its tunnel ingress rule.
+**Rollback** before step 9 is "do nothing" — nobody is using it. After step 9: delete the CNAME
+or set `enable_custom_domain = false`; consumers return to `github-actions[bot]`, which is
+exactly the behaviour they have today.
 
-Doing 4 before 3 is an outage. Rolling back is the same list in reverse: drop the route and the
-tunnel serves the pod again.
+## Cost
+
+Roughly **under a cent a month**. Everything is inside a permanent Always-Free allowance except
+API Gateway requests and S3 storage.
+
+Note that Always-Free allowances are **pooled across the AWS organization**, not granted per
+account — AWS applies the free tier to total usage across all member accounts. And because
+free-tier eligibility dates from the *management* account's creation, the 12-month offers
+(including API Gateway's 1M calls) have already expired for this account, so gateway requests
+are billed from the first one at $1.00/million.
+
+The controls that actually bound a bad day, in order of how fast they act:
+
+1. **The 2 rps stage throttle** — instantaneous, at the gateway. Deterministically caps Lambda
+   invocations, compute, logs and egress at any load.
+2. **`disable_execute_api_endpoint`** — the custom domain is the only door.
+3. **The Cloudflare proxy** — abusive volume is absorbed at Cloudflare's free edge and never
+   becomes an AWS line item. This is what makes the undocumented 429-billing question moot for
+   traffic that arrives via the hostname.
+4. **The account-level API Gateway throttle.** Default 10,000 rps; lowering it to 50 is a
+   support case (magmamoose/infra#642) and is what bounds the one genuinely unresolved
+   question — whether API Gateway bills requests it rejects with its own 429. AWS does not
+   document this.
+5. **CloudWatch alarms and an AWS Budget** — receipts, not controls. Budgets refresh at most
+   three times a day and cannot stop spend.

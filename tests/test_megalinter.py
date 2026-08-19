@@ -492,7 +492,7 @@ def test_build_env_excludes_chargate_own_workspace_artifacts():
     ):
         assert re.search(pattern, path), f"{path} should be excluded by {pattern}"
     # Real source is still scanned.
-    for path in ("src/chargate/cli.py", "k8s/base/deployment.yaml"):
+    for path in ("src/chargate/cli.py", "action.yml"):
         assert not re.search(pattern, path)
 
 
