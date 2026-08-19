@@ -39,3 +39,4 @@ python_modules/
 
 # Written by the brimyr patch-coverage gate (pytest --cov-report=xml)
 coverage.xml
+.coverage
