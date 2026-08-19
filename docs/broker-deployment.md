@@ -14,7 +14,8 @@ consumer repo's workflow           any pinned chargate tag
   scripts/request-app-token.sh     POST {oidcToken, owner, repo, ref, runId, sha}
         │
         ▼
-  broker-chargate.magmamoose.com   Cloudflare DNS, DNS-only (grey cloud) — see below
+  broker-chargate.magmamoose.com   Cloudflare DNS, PROXIED (orange cloud)
+  chargate.magmamoose.com          also served — the legacy name pinned consumers still call
         │                          CNAME → the API Gateway custom-domain target
         ▼
   API Gateway HTTP API             $default route + stage · throttle 2 rps / burst 10
@@ -138,24 +139,24 @@ Steps marked **H** need a human with credentials or a console.
    wait for `ISSUED`.
 8. **H** Apply **phase 2**: `enable_custom_domain = true`, `disable_default_endpoint = true`.
    Applying phase 2 before the certificate is issued fails with a `BadRequestException`.
-9. Add the `broker-chargate.magmamoose.com` CNAME → the custom-domain target, **`proxied = false`**
-   (grey cloud). The hostname resolves for the first time. Note that consumers pinned to a
-   tag released *before* this change still default to the old `chargate.magmamoose.com`, which
-   does not resolve — they fail soft to `github-actions[bot]` until they bump.
+9. Add the `broker-chargate.magmamoose.com` CNAME → the custom-domain target, **`proxied = true`**
+   (orange cloud). The hostname resolves for the first time.
 
-   !!! warning "Grey, not orange — and that is a known regression"
-       Proxied, every request returned Cloudflare **521** while AWS saw nothing: API Gateway's
-       `Count` metric had no datapoints and a unique probe path never reached the Lambda. The
-       origin was healthy throughout (TCP/443 on every IP, correct certificate for both plausible
-       SNIs, no AAAA records so not the IPv6 trap). Port 80 is refused on every origin IP — the
-       port a *Flexible* origin fetch dials — and the 521 **survived the zone being set to Full
-       (strict)**, which points at a Page Rule or Configuration Rule pinning SSL for this
-       hostname. Tracked in magmamoose/infra#654.
+    !!! warning "Proxying needs the zone on Full (strict), and fails opaquely without it"
+        Proxied, every request returned Cloudflare **521** while AWS saw nothing — API Gateway's
+        `Count` metric had no datapoints and a unique probe path never reached the Lambda. The
+        origin was healthy throughout (TCP/443 on every IP, correct certificate for both
+        plausible SNIs, no AAAA records so not the IPv6 trap), and port 80 was refused on every
+        origin IP — the port a *Flexible* origin fetch dials. Setting the zone's SSL/TLS mode to
+        **Full (strict)** is what fixed it.
 
-       This matters for cost, not just tidiness: the 2 rps stage throttle bounds the **Lambda**
-       bill deterministically but not the **API Gateway** bill, since AWS does not document
-       whether it charges for the 429s it issues. Grey cloud leaves the throttle and the
-       account-level quota as the only cost controls.
+    !!! danger "Serve the OLD hostname too, or no consumer gets the byline"
+        `token_broker_url` is an action input with a **default**, so the old hostname is frozen
+        into every tag released before a rename — and consumers pin chargate by SHA through a
+        centrally-provisioned workflow, so they cannot all move at once. The module takes
+        `additional_domain_names` for exactly this; each entry gets its own certificate, domain
+        and mapping, all free. Remove the entry once nothing references the old name.
+
 10. **H** Run `broker-smoke.yml` and confirm a real token is minted and accepted by GitHub.
     Then open a throwaway PR in a consumer repo and check the comment byline.
 11. **H** Confirm the SNS subscription email — until clicked it delivers nothing, which
