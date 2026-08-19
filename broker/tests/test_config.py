@@ -19,8 +19,11 @@ def _clean_ssm_cache():
 
 def test_escaped_newlines_are_restored():
     """Secret stores commonly \\n-escape a PEM; cryptography needs real newlines."""
-    # gitleaks:allow - test fixture, not a real key
-    escaped = "-----BEGIN RSA PRIVATE KEY-----\\nabc\\n-----END RSA PRIVATE KEY-----"
+    # The annotation MUST sit on the same line as the match: betterleaks and gitleaks only
+    # honour `gitleaks:allow` there, so moving it above to satisfy ruff's 100-column limit
+    # silently un-suppresses the finding. Splitting the literal satisfies both.
+    begin = "-----BEGIN RSA PRIVATE KEY-----"  # gitleaks:allow - test fixture, not a real key
+    escaped = begin + "\\nabc\\n-----END RSA PRIVATE KEY-----"
     config = BrokerConfig(app_id="1", private_key=escaped)
     assert "\n" in config.private_key
     assert "\\n" not in config.private_key
