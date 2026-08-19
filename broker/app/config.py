@@ -109,7 +109,7 @@ def load_config() -> BrokerConfig:
         env_value = os.environ.get(name.upper())
         if env_value is not None:
             values[name] = env_value
-    values.update(_ssm_overlay())
+    values.update({k: v for k, v in _ssm_overlay().items() if k in names})
 
     missing = [name for name in ("app_id", "private_key") if not values.get(name)]
     if missing:
