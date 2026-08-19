@@ -229,6 +229,20 @@ def test_changed_since_does_not_require_a_platform():
     assert result.stdout.strip() in {"true", "false"}
 
 
+def test_gate_watches_every_input_that_changes_what_ships():
+    """The publish gate must key on pyproject.toml as well as the lock.
+
+    `uv export --frozen --no-dev` reads pyproject to decide which dependencies are in scope, so
+    moving a package between `dependencies` and an extra changes the shipped set while uv.lock
+    stays byte-identical. A gate that watched only the lock would never publish that change.
+    """
+    from scripts.build_lambda_zip import changed_since
+
+    source = (BROKER_ROOT / "scripts" / "build_lambda_zip.py").read_text()
+    assert "broker/pyproject.toml" in source
+    assert callable(changed_since)
+
+
 def test_digest_matches_the_file(package):
     zip_path, digest = package
     assert hashlib.sha256(zip_path.read_bytes()).hexdigest() == digest
