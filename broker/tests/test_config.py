@@ -19,7 +19,7 @@ def _clean_ssm_cache():
 
 def test_escaped_newlines_are_restored():
     """Secret stores commonly \\n-escape a PEM; cryptography needs real newlines."""
-    escaped = "-----BEGIN RSA PRIVATE KEY-----\\nabc\\n-----END RSA PRIVATE KEY-----"
+    escaped = "-----BEGIN RSA PRIVATE KEY-----\\nabc\\n-----END RSA PRIVATE KEY-----"  # gitleaks:allow - test fixture, not a real key
     config = BrokerConfig(app_id="1", private_key=escaped)
     assert "\n" in config.private_key
     assert "\\n" not in config.private_key

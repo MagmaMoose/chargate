@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import shutil
-import subprocess
+import subprocess  # nosec B404 - build tool; all argv lists are hardcoded, shell=False
 import sys
 import tempfile
 import zipfile
@@ -66,7 +66,7 @@ _EXCLUDED_METADATA_SUFFIXES = (".dist-info", ".egg-info")
 
 
 def _run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=True, text=True, capture_output=True, **kwargs)  # type: ignore[arg-type]
+    return subprocess.run(command, check=True, text=True, capture_output=True, **kwargs)  # nosec B603 - list argv, shell=False  # type: ignore[arg-type]
 
 
 def vendor(broker_root: Path, target: Path, *, platform: str, python_version: str) -> None:
