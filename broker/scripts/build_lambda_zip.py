@@ -183,7 +183,18 @@ def changed_since(broker_root: Path, ref: str) -> bool:
     except subprocess.CalledProcessError:
         return True
 
-    watched = ("broker/app/", "broker/uv.lock", "broker/scripts/build_lambda_zip.py")
+    # `broker/pyproject.toml` IS watched, and it is not redundant with uv.lock. The build
+    # ships whatever `uv export --frozen --no-dev` resolves, and that reads pyproject to decide
+    # which dependencies and groups are in scope — so moving a package between `dependencies`
+    # and an optional extra changes what lands in the zip while uv.lock stays byte-identical.
+    # Without this, that change would never be published and the deployed broker would quietly
+    # keep running the old dependency set.
+    watched = (
+        "broker/app/",
+        "broker/uv.lock",
+        "broker/pyproject.toml",
+        "broker/scripts/build_lambda_zip.py",
+    )
     for line in diff.stdout.splitlines():
         candidate = line.strip()
         if candidate.startswith(watched) and not candidate.endswith("/main.py"):
