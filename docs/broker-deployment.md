@@ -70,8 +70,10 @@ than at the first real request.
 
 ## Publishing and deploying are different acts
 
-**Publishing** rides on `release.yml`: it builds the zip, gates on whether anything shipped
-actually changed since the previous tag, and hands it to diatreme's `package-ecosystem: s3`.
+**Publishing** is `.github/workflows/publish-broker.yml`, triggered by the release tag. It builds the zip, gates on whether anything shipped
+actually changed since the previous tag, and uploads it with `s3api put-object`, refusing to
+overwrite an existing key. It is deliberately NOT in `release.yml`, which caldrith provisions
+centrally and overwrites in place.
 Auth is GitHub OIDC — no AWS credential is stored in this repository. Two repo **variables**
 turn it on; unset, diatreme skips the step and nothing changes:
 

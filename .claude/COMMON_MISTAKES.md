@@ -96,3 +96,13 @@
   `s3: package-path must be the built artifact FILE. Not a file: dist/chargate-broker.zip`,
   on a run whose own log shows the build succeeding two steps earlier. Build to
   `${{ runner.temp }}` and pass that absolute path as `package-path`.
+- **`.github/workflows/release.yml` is provisioned by caldrith and will be overwritten.** It is
+  pushed directly as `chore: provision required workflows (caldrith)` — no in-file marker says
+  so, and four such commits already exist here. Broker publish wiring added to it survived one
+  release and then vanished, taking the deployment path with it and leaving no failing check
+  anywhere. Chargate-specific CI belongs in a file caldrith does not own; the publish lives in
+  `.github/workflows/publish-broker.yml`. `ci.yml` and `security.yml` are NOT managed.
+- **Diatreme's package publishing only fires on the run that CREATES a tag** — its step is gated
+  on `steps.normalize.outputs.released == 'true'`. A re-run of a failed release, or any release
+  whose version was already tagged, skips the publish silently and reports success. If an upload
+  fails for any other reason, you cannot simply re-run it; key the publish off the tag instead.
