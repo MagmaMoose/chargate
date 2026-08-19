@@ -26,7 +26,9 @@ build-backend = "hatchling.build"
 packages = ["src/chargate"]
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+# pytest-cov is required by the brimyr patch-coverage gate: it runs
+# `pytest --cov --cov-report=xml`, which errors without the plugin.
+dev = ["pytest>=8.0", "pytest-cov>=7.0", "ruff>=0.6"]
 # Docs tooling (non-default group): `uv run --group docs mkdocs serve|build`.
 docs = [
   "mkdocs-material>=9.5",
