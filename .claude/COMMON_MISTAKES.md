@@ -106,3 +106,17 @@
   on `steps.normalize.outputs.released == 'true'`. A re-run of a failed release, or any release
   whose version was already tagged, skips the publish silently and reports success. If an upload
   fails for any other reason, you cannot simply re-run it; key the publish off the tag instead.
+- **The Lambda runtime pins the ROOT logger to WARNING, so `_log.info` is dropped.** A child
+  logger with no level of its own inherits that, and `app/broker.py`'s per-request outcome line —
+  the only observability this service has — emitted nothing in production. `app.broker` now sets
+  its own level (`CHARGATE_LOG_LEVEL`, default INFO).
+  **The reason it survived review is the lesson:** `caplog.at_level(logging.INFO, ...)` *sets*
+  the level the runtime does not, so the tests asserted against a configuration that exists
+  nowhere else and the observability was asserted into existence. A test for log output must
+  reproduce the deployed logging setup (root at WARNING, one handler) rather than configure it —
+  see `test_outcome_survives_a_root_logger_pinned_to_warning`.
+- **Do not bypass this repo's own git hooks.** `git -c core.hooksPath=/dev/null commit` (or
+  `--no-verify`) skips `chargate local`, `actions-pin-sha`, the conventional branch-name check and
+  `commit-msg`. Chargate is the tool that enforces these; routing around them here is
+  self-defeating, and it hides exactly the class of defect the gate exists to catch. If a hook
+  blocks a commit, fix the cause or raise it — do not disable the hook path.

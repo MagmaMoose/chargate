@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -35,6 +36,27 @@ from app.oidc import JwksUnavailable, KeyResolver, OidcError, verify_oidc_token
 # caller-supplied string reaching a log record is CodeQL py/log-injection — see the
 # OidcError handler for what is logged instead and why.
 _log = logging.getLogger("chargate.broker")
+
+
+def _configure_level() -> None:
+    """Set this logger's level explicitly. Without it, nothing below WARNING is emitted.
+
+    THE AWS LAMBDA RUNTIME SETS THE ROOT LOGGER TO WARNING. This logger has no level of its
+    own, so it inherits that, and every ``_outcome()`` line — the only observability this
+    service has — was silently dropped in production.
+
+    It passed every test, and that is the part worth remembering: `caplog.at_level(INFO)`
+    SETS the level the runtime does not, so the tests were asserting against a configuration
+    that exists nowhere else. The observability was asserted into existence.
+    """
+    requested = os.environ.get("CHARGATE_LOG_LEVEL", "INFO").upper()
+    # A typo in the env var must not take the function down at import — that would turn a
+    # logging preference into a cold-start crash on the fail-soft path.
+    level = logging.getLevelNamesMapping().get(requested, logging.INFO)
+    _log.setLevel(level)
+
+
+_configure_level()
 
 
 def _outcome(name: str) -> None:
