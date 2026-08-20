@@ -11,17 +11,17 @@ falls inside an added/modified hunk. The diff is computed against
 
 | Case | Policy (default) | Configurable |
 | --- | --- | --- |
-| Brand-new file | all results net-new |, |
+| Brand-new file | all results net-new | no |
 | Modified hunk | net-new iff `startLine` in an added range | `precision: line\|file` |
 | Unchanged line in a changed file | pre-existing → never blocks | `precision: file` to flip |
-| Renamed / copied file | matched by head path; content changes line-matched |, |
-| Deleted file | dropped |, |
+| Renamed / copied file | matched by head path; content changes line-matched | no |
+| Deleted file | dropped | no |
 | Result with **no** file location (project-level: SBOM/license/some Trivy) | **not** net-new | `--no-location-policy block` |
 | Changed file, result with no `startLine` (common for SCA on a lockfile) | net-new (file-level fallback) | `--no-region-fallback` to disable |
 | Secret-scanner hit on a **SOPS-encrypted** value (`ENC[AES256_GCM,...]`) | dropped as a false positive → never blocks | `ignore_sops_encrypted: false` / `--no-sops-ignore` |
 | Same finding reported by **two engines** or a re-scan (same rule id + fingerprint) | collapsed → gates/comments once | `deduplicate: false` |
 | Multiple locations | uses the **primary** (`locations[0]`) | documented |
-| Missing merge-base / shallow clone | **fails loudly**, needs `fetch-depth: 0` |, |
+| Missing merge-base / shallow clone | **fails loudly**, needs `fetch-depth: 0` | no |
 
 These knobs are expressed on `FilterPolicy` in
 `src/chargate/sarif/filter.py`. The file-level fallback exists so a genuinely
