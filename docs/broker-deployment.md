@@ -17,6 +17,7 @@ consumer repo's workflow           any pinned chargate tag
         │
         ▼
   broker-chargate.magmamoose.com   Cloudflare DNS, PROXIED (orange cloud)
+  chargate.magmamoose.com          also served — the legacy name pinned consumers still call
         │                          CNAME → the API Gateway custom-domain target
         ▼
   API Gateway HTTP API             $default route + stage · throttle 2 rps / burst 10
@@ -165,9 +166,22 @@ Steps marked **H** need a human with credentials or a console.
 8. **H** Apply **phase 2**: `enable_custom_domain = true`, `disable_default_endpoint = true`.
    Applying phase 2 before the certificate is issued fails with a `BadRequestException`.
 9. Add the `broker-chargate.magmamoose.com` CNAME → the custom-domain target, **`proxied = true`**
-   (orange cloud). The hostname resolves for the first time. Note that consumers pinned to a
-   tag released *before* this change still default to the old `chargate.magmamoose.com`, which
-   does not resolve. They fail soft to `github-actions[bot]` until they bump.
+   (orange cloud). The hostname resolves for the first time.
+
+    !!! warning "Proxying needs the zone on Full (strict), and fails opaquely without it"
+        Proxied, every request returned Cloudflare **521** while AWS saw nothing — API Gateway's
+        `Count` metric had no datapoints and a unique probe path never reached the Lambda. The
+        origin was healthy throughout (TCP/443 on every IP, correct certificate for both
+        plausible SNIs, no AAAA records so not the IPv6 trap), and port 80 was refused on every
+        origin IP — the port a *Flexible* origin fetch dials. Setting the zone's SSL/TLS mode to
+        **Full (strict)** is what fixed it.
+
+    !!! danger "Serve the OLD hostname too, or no consumer gets the byline"
+        `token_broker_url` is an action input with a **default**, so the old hostname is frozen
+        into every tag released before a rename — and consumers pin chargate by SHA through a
+        centrally-provisioned workflow, so they cannot all move at once. The module takes
+        `additional_domain_names` for exactly this; each entry gets its own certificate, domain
+        and mapping, all free. Remove the entry once nothing references the old name.
 10. **H** Run `broker-smoke.yml` and confirm a real token is minted and accepted by GitHub.
     Then open a throwaway PR in a consumer repo and check the comment byline.
 11. **H** Confirm the SNS subscription email, until clicked it delivers nothing, which
