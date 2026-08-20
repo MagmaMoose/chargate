@@ -1,5 +1,7 @@
 # CLI reference
 
+<!-- sources: src/chargate/cli.py, src/chargate/gate.py -->
+
 Both GitHub surfaces drive the same `chargate` CLI. Exit codes: `0` pass ·
 `1` blocking net-new findings · `2` setup/usage error.
 
@@ -26,10 +28,10 @@ chargate filter-sarif --sarif report.sarif --base "$BASE" --head "$HEAD" \
 | `--precision` | `line` | Net-new precision: `line` or `file`. |
 | `--no-location-policy` | `ignore` | Treatment of results with no file location: `ignore` (never block) or `block`. |
 | `--no-region-fallback` | off | Disable file-level fallback for changed-file results lacking a `startLine`. |
-| `--no-sops-ignore` | off | Gate on secret-scanner hits even on SOPS-encrypted values (`ENC[AES256_GCM,...]`). By default these are dropped as false positives — see [Net-new gating](net-new.md#sops-encrypted-secrets). |
-| `--strip-prefix` | — | Path prefix to strip from SARIF URIs before matching (repeatable). |
+| `--no-sops-ignore` | off | Gate on secret-scanner hits even on SOPS-encrypted values (`ENC[AES256_GCM,...]`). By default these are dropped as false positives, see [Net-new gating](net-new.md#sops-encrypted-secrets). |
+| `--strip-prefix` |, | Path prefix to strip from SARIF URIs before matching (repeatable). |
 | `--no-merge-base` | off | Diff `base..head` directly instead of `merge-base(base, head)..head`. |
-| `--out` / `--full-out` / `--counts-json` | — | Write the net-new SARIF / a copy of the full SARIF / counts JSON. |
+| `--out` / `--full-out` / `--counts-json` |, | Write the net-new SARIF / a copy of the full SARIF / counts JSON. |
 | `--fail-on` | `any` | Severity threshold that blocks: `any\|critical\|high\|medium\|low\|none`. |
 | `--no-gate` | off | Always exit `0` (report only). |
 | `--quiet` | off | Suppress the human summary. |
@@ -56,30 +58,36 @@ Key flags beyond the shared filter options:
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--mode` | `auto` | `auto` (from `GITHUB_EVENT_NAME`), `pr` (net-new gate), or `baseline` (no gate). |
-| `--sarif` | — | Use an existing SARIF instead of running MegaLinter. |
+| `--sarif` |, | Use an existing SARIF instead of running MegaLinter. |
 | `--flavor` | `all` | MegaLinter flavor (`all` = full image). |
 | `--megalinter-tag` | `v10.0.0` | MegaLinter image tag, or a `sha256:…` digest to pin. |
 | `--megalinter-registry` | `ghcr.io` | Registry host. Docker Hub is frozen at `v9.4.0`, so it cannot serve `v9.5.0+`. |
 | `--megalinter-namespace` | `oxsecurity` | Image namespace (set for a mirror / pull-through cache). |
-| `--megalinter-image` | — | Full image reference, overriding registry/namespace/flavor/tag entirely. |
-| `--docker-platform` | — | Value for `docker run --platform` (e.g. `linux/amd64` to force emulation). |
+| `--megalinter-image` |, | Full image reference, overriding registry/namespace/flavor/tag entirely. |
+| `--docker-platform` |, | Value for `docker run --platform` (e.g. `linux/amd64` to force emulation). |
 | `--arch-strategy` | `auto` | `auto` (flavor image on amd64, per-linter images on arm64) · `flavor` · `standalone` · `fail`. |
-| `--standalone-linter` | — | Linter key for standalone mode (repeatable). Default: the flavor's SARIF-emitting set. |
+| `--standalone-linter` |, | Linter key for standalone mode (repeatable). Default: the flavor's SARIF-emitting set. |
 | `--jobs` | `4` | Standalone mode: concurrent linter containers. |
-| `--enable-linter` / `--disable-linter` | — | Toggle a linter (repeatable). |
-| `--sarif-out` / `--filtered-out` / `--counts-json` | — | Write the full / net-new / counts outputs. |
-| `--strict` | off | Fail the job if MegaLinter itself errors. (A SARIF with no runs fails without it — see [architecture](architecture.md).) |
-| `--defectdojo-url` | — | DefectDojo base URL (enables import of the full SARIF). |
+| `--enable-linter` / `--disable-linter` |, | Toggle a linter (repeatable). |
+| `--incremental` | off | PR/gate mode only. Runs MegaLinter over just the files changed vs the base (`VALIDATE_ALL_CODEBASE=false`) instead of the whole repo. The net-new gate still uses chargate's own diff, so this changes scan cost, not the verdict. |
+| `--default-branch` | `""` | Base branch for incremental change detection. Sets MegaLinter's `DEFAULT_BRANCH`. |
+| `--sarif-out` / `--filtered-out` / `--counts-json` |, | Write the full / net-new / counts outputs. |
+| `--strict` | off | Fail the job if MegaLinter itself errors. (A SARIF with no runs fails without it, see [architecture](architecture.md).) |
+| `--defectdojo-url` |, | DefectDojo base URL (enables import of the full SARIF). |
 | `--defectdojo-token-env` | `DEFECTDOJO_TOKEN` | Env var holding the DD API token. |
-| `--dd-product` / `--dd-engagement` / `--dd-engagement-id` | — | DefectDojo targeting. |
+| `--dd-product` / `--dd-engagement` / `--dd-engagement-id` |, | DefectDojo targeting. |
+| `--dd-product-type` |, | DefectDojo product type name. Required only when the product does not exist yet and has to be auto-created. |
+| `--dd-test-title` |, | Title for the DefectDojo test. |
+| `--dd-tag` |, | Tag to attach to the import. Repeatable. |
 | `--dd-import` / `--dd-no-close-old` / `--dd-insecure` | off | Use import (not reimport) / keep old findings / skip TLS verify. |
-| `--dependency-track-url` | — | Dependency-Track base URL (enables CycloneDX BOM upload). |
+| `--dependency-track-url` |, | Dependency-Track base URL (enables CycloneDX BOM upload). |
 | `--dt-api-key-env` | `DEPENDENCYTRACK_API_KEY` | Env var holding the DT API key. |
-| `--bom` | — | Path to the CycloneDX BOM to upload (the action generates this with Syft). |
-| `--dt-project-name` / `--dt-project-version` / `--dt-project-uuid` | — | Dependency-Track project targeting. |
+| `--bom` |, | Path to the CycloneDX BOM to upload (the action generates this with Syft). |
+| `--dt-project-name` / `--dt-project-version` / `--dt-project-uuid` |, | Dependency-Track project targeting. |
+| `--dt-parent-name` / `--dt-parent-version` |, | Parent project, when you keep Dependency-Track projects in a hierarchy. |
 | `--dt-no-auto-create` / `--dt-is-latest` / `--dt-insecure` | off | Don't auto-create the project / mark latest / skip TLS verify. |
 | `--pr-comment` | off | Post GHAS-style PR comments for net-new findings (PR/gate mode only). |
-| `--pr-number` / `--repo-slug` | — | Pull request number and `owner/repo` to comment on. |
+| `--pr-number` / `--repo-slug` |, | Pull request number and `owner/repo` to comment on. |
 | `--github-token-env` | `GITHUB_TOKEN` | Env var with a token that has `pull-requests: write`. |
 | `--pr-comment-mode` | `both` | `summary` (one updatable comment), `inline`, or `both`. |
 | `--pr-comment-max-inline` | `50` | Cap on inline comments; the rest stay in the summary. |

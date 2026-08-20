@@ -32,12 +32,16 @@ theme:
 
 nav:
   - Home: index.md
-  - Architecture: architecture.md
-  - Net-new gating: net-new.md
-  - SAST direction: sast-benchmark.md
   - Setup & usage: setup.md
-  - CLI reference: cli.md
-  - Broker deployment: broker-deployment.md
+  - Net-new gating: net-new.md
+  - Architecture: architecture.md
+  - Reference:
+      - CLI: cli.md
+      - Action: action-reference.md
+  - Operations:
+      - Broker deployment: broker-deployment.md
+      - Troubleshooting: troubleshooting.md
+  - SAST direction: sast-benchmark.md
 
 markdown_extensions:
   - admonition

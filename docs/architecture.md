@@ -1,12 +1,14 @@
 # Architecture
 
+<!-- sources: src/chargate/cli.py, src/chargate/gate.py, src/chargate/sarif/, broker/app/ -->
+
 Chargate is one `chargate` Python CLI (`src/chargate/cli.py:main`) behind two
 GitHub surfaces (a composite action and a pre-commit hook). The design splits
 cleanly into a **pure core** and a thin set of **side-effecting edges**.
 
 ## Module map
 
-```
+```text
 src/chargate/
   cli.py          # argparse dispatch: filter-sarif | ci | local | install-hooks | uninstall-hooks | version
   sarif/          # ★ THE PURE CORE — deterministic, no I/O, heavily tested
@@ -15,6 +17,7 @@ src/chargate/
     filter.py     #   net-new classification + FilterPolicy + filter_sarif()
     counts.py     #   totals + per-severity breakdowns
     sops.py       #   detect SOPS-encrypted values so secret scanners don't gate on them
+    dedup.py      #   collapse the same finding when several linters report it
   git.py          # the ONLY git/subprocess boundary (merge-base, diff, shallow detect)
   gate.py         # net-new verdicts + fail_on threshold -> pass/fail + exit code
   megalinter.py   # build env/command, run, locate the merged SARIF
@@ -31,14 +34,14 @@ A structured, machine-readable version (exports, dependencies, call graph,
 hotspots) lives at [`PROJECT_INDEX.json`](https://github.com/MagmaMoose/chargate/blob/main/PROJECT_INDEX.json)
 in the repo root.
 
-Separate from the CLI, the **token broker** (`broker/`) is a small FastAPI service
-— see [The token broker](#the-token-broker) below.
+Separate from the CLI, the **token broker** (`broker/`) is its own deployable. See
+[The token broker](#the-token-broker) below.
 
 ## The design rule
 
 `sarif/` is **pure**: it takes already-parsed data (a SARIF dict + a `DiffIndex`)
 and returns verdicts. `git.py` is the only thing that shells out, so the filter is
-unit-tested with synthetic diff text and SARIF dicts — no real repository
+unit-tested with synthetic diff text and SARIF dicts, with no real repository
 required.
 
 !!! warning "Keep the boundary"
@@ -66,10 +69,10 @@ required.
    sink outage can't fail the gate.
 7. **`github_comment.post_pr_feedback`** (PR events, opt-out) posts the net-new
    findings as one updatable summary comment + inline review comments. Also
-   failure-isolated — a GitHub API error never changes the gate outcome.
+   failure-isolated: a GitHub API error never changes the gate outcome.
 8. **`report`** writes the GitHub job summary and step outputs.
 
-Baseline mode skips steps 3–5's gating: it counts everything against an empty
+Baseline mode skips steps 3-5's gating: it counts everything against an empty
 `DiffIndex` with `fail_on=none`, ships the full SARIF, and never blocks.
 
 ## Exit-code contract
@@ -85,7 +88,7 @@ failure only fails the job under `--strict`.
 
 One condition is fatal **without** `--strict`: a SARIF carrying no `runs` at all.
 That is not a linter misbehaving, it is the gate having scanned nothing, so a pass
-carries no information — and since `strict` defaults to off, routing it through
+carries no information. Since `strict` defaults to off, routing it through
 `strict` would leave a repo green on an empty report indefinitely. That is precisely
 how the relative-`REPORT_OUTPUT_FOLDER` bug survived for months.
 
@@ -93,24 +96,29 @@ how the relative-`REPORT_OUTPUT_FOLDER` bug survived for months.
 
 To author PR comments as `Chargate[bot]` rather than `github-actions[bot]`, the
 action exchanges the run's GitHub Actions **OIDC token** for a short-lived
-Chargate App installation token. That exchange is done by a small **FastAPI
-service in [`broker/`](https://github.com/MagmaMoose/chargate/tree/main/broker)** —
-a *separate deployable*, not part of the CLI wheel (it keeps its FastAPI/httpx/PyJWT
-dependencies in a dedicated `broker` dependency-group so the CLI stays
-runtime-dependency-free).
+Chargate App installation token. That exchange is done by
+[`broker/`](https://github.com/MagmaMoose/chargate/tree/main/broker), a *separate
+deployable* that is not part of the CLI wheel. It keeps its pyjwt and httpx
+dependencies in its own `broker/pyproject.toml` and virtualenv, so the CLI stays
+runtime-dependency-free.
+
+`app/broker.py` holds the decisions with no HTTP framework attached.
+`app/lambda_handler.py` is what production runs. `app/main.py` is a FastAPI shell for
+local development and the test suite, and the build excludes it from the deployed zip
+by name.
 
 `POST /token` verifies the OIDC token (issuer-pinned, audience `chargate`, and the
 `repository` claim **must** equal the requested `owner/repo`) and mints a token
 scoped to that repo with `pull_requests: write` only. The whole flow is
 **fail-soft**: without `id-token: write`, or if the App isn't installed, the action
-silently falls back to `github-actions[bot]` — which also means a broken broker is
+silently falls back to `github-actions[bot]`. That also means a broken broker is
 **silent**, so treat "nothing failed" as no evidence at all. The service ships as a
 version-scoped zip in S3 and runs as an AWS Lambda behind an API Gateway HTTP API; the
 Terraform module and leaf live in
 [magmamoose/infra](https://github.com/magmamoose/infra) under `terraform/aws/chargate/`,
-and deploying is a reviewed one-line bump of `broker_artifact_version` there. Operating
-it — the GitHub App, its private key in SSM Parameter Store, and installing the App on
-consumer orgs — is the operator's responsibility; see
+and deploying is a reviewed one-line bump of `broker_artifact_version` there. Operating it
+(the GitHub App, its private key in SSM Parameter Store, and installing the App on
+consumer orgs) is the operator's responsibility; see
 [Token broker deployment](broker-deployment.md). Also see
 [PR comments → *Comment as `Chargate[bot]`*](setup.md#pr-comments-ghas-style) for the
 consumer-side setup.

@@ -1,5 +1,7 @@
 # Setup & usage
 
+<!-- sources: action.yml, .pre-commit-hooks.yaml, scripts/request-app-token.sh -->
+
 ## 1. Composite action (recommended)
 
 ```yaml
@@ -35,7 +37,7 @@ analysis, gates on net-new findings, and ships the full SARIF. Repository-level
 security scanners may still inspect the whole repo or history. On push to the default
 branch it runs a non-gating whole-repo baseline scan. Set `flavor: all` for the full
 lint image, or `incremental: 'false'` for a whole-repo PR scan. The action checks out
-with `fetch-depth: 0` by default (net-new needs the merge-base) — set
+with `fetch-depth: 0` by default (net-new needs the merge-base), set
 `checkout: 'false'` if you already checked out with full history.
 
 ## 2. pre-commit hook
@@ -55,7 +57,7 @@ pre-commit run -a
 ```
 
 The hook (`language: python`, no Docker) runs a **fast staged-file subset**
-(gitleaks for secrets, ruff for Python — each skipped if not installed). It is a
+(gitleaks for secrets, ruff for Python, each skipped if not installed). It is a
 first line, deliberately narrower than the CI whole-repo net. Local/CI disparity
 is intended.
 
@@ -74,14 +76,14 @@ pointed at a global `~/.pre-commit-config.yaml`, sets `core.hooksPath` (retroact
 across existing repos) and `init.templateDir` (new clones inherit them). It also
 installs the file-hygiene hooks (`actions-pin-sha`, `conventional-branch-name`).
 
-Chargate's entries live inside a regenerated `>>> chargate-managed >>>` block —
+Chargate's entries live inside a regenerated `>>> chargate-managed >>>` block:
 **add your own repos/hooks outside that block and they're preserved** on every
 reinstall. It refuses to clobber a hand-maintained config unless you pass `--force`,
 and `chargate uninstall-hooks` reverts everything (restoring any prior
 `core.hooksPath`).
 
 !!! warning "It repoints your global `core.hooksPath`"
-    If you already have global hooks at another path they stop running (intended —
+    If you already have global hooks at another path they stop running (intended:
     that's how Chargate takes over); the prior path is saved and restored on
     `uninstall-hooks`.
 
@@ -89,7 +91,7 @@ See the [CLI reference](cli.md#chargate-install-hooks) for flags.
 
 ## PR comments (GHAS-style)
 
-On pull requests Chargate posts feedback the way GitHub Advanced Security does —
+On pull requests Chargate posts feedback the way GitHub Advanced Security does:
 scoped to **net-new findings only**, so it stays quiet:
 
 - **One summary comment** that is *updated in place* on every push (found by a
@@ -110,7 +112,7 @@ and tune it with the action inputs:
 | `pr_comment` | `true` | Post the PR comments (set `false` to disable). |
 | `pr_comment_mode` | `both` | `summary`, `inline`, or `both`. |
 | `pr_comment_max_inline` | `50` | Cap on inline comments; the rest stay in the summary. |
-| `pr_comment_token` | `github_token` | Explicit override token for authorship (usually unset — see below). |
+| `pr_comment_token` | `github_token` | Explicit override token for authorship (usually unset, see below). |
 | `token_broker_url` | `https://broker-chargate.magmamoose.com` | Token broker for `Chargate[bot]` authorship; empty disables. |
 | `oidc_audience` | `chargate` | OIDC audience for the broker exchange (advanced). |
 
@@ -130,16 +132,16 @@ permissions:
   security-events: write
 ```
 
-That's it — no app keys to manage. The action exchanges the run's OIDC token at the
+That's it, no app keys to manage. The action exchanges the run's OIDC token at the
 Chargate token broker for a short-lived token scoped to your repo with
 `pull_requests: write` only. It is **fail-soft**: without `id-token: write`, or if
 the App isn't installed, comments simply fall back to `github-actions[bot]`.
 
 *Self-hosted alternative:* if you'd rather not depend on the broker, bring your own
-App token — `actions/create-github-app-token` → pass it as `pr_comment_token` (it
+App token, `actions/create-github-app-token` → pass it as `pr_comment_token` (it
 takes precedence over the broker). That App needs only **Pull requests: write**.
 
-**Less noise — one surface per finding.** To avoid double-reporting, the full
+**Less noise, one surface per finding.** To avoid double-reporting, the full
 SARIF is uploaded to the Security tab only on **non-PR events** (the default-branch
 baseline keeps the inventory current). On PRs the native code-scanning diff
 annotations are therefore suppressed, leaving Chargate's comments as the sole
@@ -149,7 +151,7 @@ on push, artifact, and any configured sink).
 ## Sinks (DefectDojo & Dependency-Track)
 
 Both external sinks share one enable rule: **set a Variable for the host and a
-Secret for the credential — the sink is active iff the host is set.** No separate
+Secret for the credential. The sink is active iff the host is set.** No separate
 on/off toggle. Both are optional, first-class, and failure-isolated (a sink outage
 is logged and never fails the gate).
 
@@ -176,7 +178,7 @@ product/engagement.
 
 The uploaded SARIF carries a leading findings-free `chargate` run. DefectDojo derives a
 Test's type from `runs[0].tool.driver.name` alone, and MegaLinter's merged report has no
-stable first run — whichever linter emitted first wins, which follows the file types in
+stable first run, whichever linter emitted first wins, which follows the file types in
 the diff. Without that stamp the derived type changes from PR to PR and `reimport-scan`
 returns HTTP 400 `Test type mismatch`, so the full SARIF silently stops arriving. Your
 Tests are therefore typed `chargate Scan (SARIF)`; if an engagement already holds a Test
@@ -201,12 +203,12 @@ Generates the BOM with `anchore/sbom-action` (Syft) and `POST`s it to
 `/api/v1/bom` (multipart), auto-creating the project/version on first upload. The
 API key needs `BOM_UPLOAD` (plus `PROJECT_CREATION_UPLOAD` for auto-create, and
 `VIEW_PORTFOLIO` so the PR-comment footer can resolve the project's UUID into a
-link — without it the upload still succeeds, just with no link).
+link, without it the upload still succeeds, just with no link).
 
 **Upload happens on push / tags only.** Dependency-Track tracks *shipped*
 artifacts, so the BOM is generated and uploaded only on non-PR events (push to the
-default branch, tags). On pull requests Chargate skips the upload entirely — no
-throwaway per-PR versions, faster PR CI — and instead links the PR comment to the
+default branch, tags). On pull requests Chargate skips the upload entirely, no
+throwaway per-PR versions, faster PR CI, and instead links the PR comment to the
 project's existing default-branch version. (DefectDojo still imports the full SARIF
 on PRs, since reimport updates one Test rather than spawning versions.)
 
@@ -220,11 +222,11 @@ tune which linters run; it is additive to the injected env.
 `REPORT_OUTPUT_FOLDER` is injected as an **absolute container path**
 (`/tmp/lint/megalinter-reports`) and must stay one. MegaLinter uses the value
 verbatim and its images declare `WORKDIR /`, so a relative value resolves to
-`/megalinter-reports` *inside* the container — outside the bind mount, and destroyed
+`/megalinter-reports` *inside* the container, outside the bind mount, and destroyed
 by `docker run --rm`. Do not override it to a relative path in `.mega-linter.yml`.
 
 Images come from `ghcr.io/oxsecurity` at `v10.0.0` by default. MegaLinter froze Docker
-Hub publishing at `v9.4.0`, so `docker.io` cannot serve any current version — point
+Hub publishing at `v9.4.0`, so `docker.io` cannot serve any current version. Point
 `megalinter_registry` / `megalinter_namespace` at a mirror if you need one, or
 `megalinter_image` at a full reference to bypass name composition entirely.
 
@@ -235,10 +237,10 @@ two of them:
 
 | Linter | What it checks | On the net-new gate? |
 | --- | --- | --- |
-| `KUBERNETES_KUBESCAPE` | Security posture (misconfig, RBAC, …) | **Yes** — it emits SARIF. |
+| `KUBERNETES_KUBESCAPE` | Security posture (misconfig, RBAC, …) | **Yes**, it emits SARIF. |
 | `KUBERNETES_KUBECONFORM` | Manifest schema validation | No SARIF; fails the job only under `strict: true`. |
 
-`kube-score` has **no** MegaLinter descriptor, so there is no linter key to enable — run
+`kube-score` has **no** MegaLinter descriptor, so there is no linter key to enable. Run
 it as a standalone [pre-commit hook](https://github.com/zegl/kube-score) if you want it.
 
 The chargate-recommended `.mega-linter.yml` enables `KUBERNETES_KUBECONFORM` with
@@ -247,7 +249,7 @@ an exclude regex that keeps it off files that are not standalone manifests:
 
 - **Kustomize / Flux overlays and patches** are fragments, not whole objects. kubeconform
   validates finished manifests, so render first (`kustomize build ./overlay | kubeconform`
-  or [`flux-local`](https://github.com/allenporter/flux-local)) and validate the output —
+  or [`flux-local`](https://github.com/allenporter/flux-local)) and validate the output:
   the security image ships kubeconform but not kustomize, so rendering runs outside it.
 - **SOPS-encrypted secrets** (`*.sops.yaml`, `secret*`) are ciphertext, not valid YAML.
 - **Chart templates** (`/templates/`) and CI config (`.github/`) are not K8s objects.
@@ -256,22 +258,22 @@ Tune the pattern for your layout via `KUBERNETES_KUBECONFORM_FILTER_REGEX_EXCLUD
 
 ## Troubleshooting
 
-**`exec /bin/bash: exec format error`** — the runner is arm64 and MegaLinter's flavor
+**`exec /bin/bash: exec format error`**: the runner is arm64 and MegaLinter's flavor
 images are `linux/amd64` only. Chargate's default `arch_strategy: auto` avoids this by
 running the multi-arch per-linter images instead; you see this error only with
 `arch_strategy: flavor`, and Chargate replaces it with a message naming the alternatives.
 See [Architecture support](https://github.com/MagmaMoose/chargate#architecture-support).
 
-**"MegaLinter linted 0 files" on a containerised (ARC / docker-in-docker) runner** — the
+**"MegaLinter linted 0 files" on a containerised (ARC / docker-in-docker) runner**, the
 `-v` bind mount is resolved by the *host* Docker daemon, not by the job container, so the
 workspace path must exist on the host with the same path. Mount the runner's work
 directory through at an identical path, or run Chargate on a runner with a local daemon.
 
-**"Permission denied" writing `megalinter-reports/` on a containerised runner** — Chargate
+**"Permission denied" writing `megalinter-reports/` on a containerised runner**, Chargate
 passes `MEGALINTER_UID`/`MEGALINTER_GID` from the calling process so the report tree is not
 left root-owned on a self-hosted runner. Where the job user and the workspace owner differ,
 that drops MegaLinter to a uid that cannot write, and the symptom is an empty scan rather
-than an obvious error. Override on the step — no action input needed:
+than an obvious error. Override on the step, no action input needed:
 
 ```yaml
 - uses: magmamoose/chargate@v2
@@ -280,17 +282,17 @@ than an obvious error. Override on the step — no action input needed:
     MEGALINTER_GID: '0'
 ```
 
-**The gate reports `net-new 0 / 0 total` on every PR** — the scan produced nothing.
+**The gate reports `net-new 0 / 0 total` on every PR**, the scan produced nothing.
 Chargate prints `ERROR: MegaLinter's SARIF contains no runs` and fails the job with
-exit `2` — with or without `strict`, because a gate that scanned nothing must not
+exit `2`, with or without `strict`, because a gate that scanned nothing must not
 report a pass. Check `REPORT_OUTPUT_FOLDER` (above) first.
 
-**`actions/setup-python` fails with "version not found" on arm64** — `setup-python`
+**`actions/setup-python` fails with "version not found" on arm64**, `setup-python`
 publishes `linux/arm64` builds only for the Ubuntu 22.04/24.04/26.04 images. Set
 `setup_python: 'false'` and provide Python 3.11+ on the runner image; Chargate is
 stdlib-only pure Python and needs nothing else.
 
-**PR comments are authored by `github-actions[bot]` instead of `Chargate[bot]`** — the
+**PR comments are authored by `github-actions[bot]` instead of `Chargate[bot]`**, the
 token broker step is fail-soft and logs a `::warning::` with the reason. On a minimal
 self-hosted image the usual reason is a missing `jq` or `curl`.
 

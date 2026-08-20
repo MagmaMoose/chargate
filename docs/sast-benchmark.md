@@ -1,4 +1,6 @@
-# SAST direction: chargate vs CodeQL — engine or orchestrator?
+# SAST direction: chargate vs CodeQL, engine or orchestrator?
+
+<!-- sources: src/chargate/linters.py, .mega-linter.yml -->
 
 **Status:** decided · **Decision:** chargate is a SAST **orchestrator/aggregator**,
 not a competing analysis engine. It owns the ground CodeQL cedes (net-new PR-diff
@@ -9,8 +11,8 @@ dataflow analysis.
 ## Why this was open
 
 Chargate wraps MegaLinter and adds a net-new diff gate. The question (issue #32)
-was whether it should also *own an engine* — bundle Semgrep/Opengrep as a
-first-class dataflow analyzer and compete with CodeQL head-to-head — or double
+was whether it should also *own an engine*, bundle Semgrep/Opengrep as a
+first-class dataflow analyzer and compete with CodeQL head-to-head, or double
 down on being the layer that makes any engine's output actionable on a PR.
 
 ## Steering criterion
@@ -18,13 +20,13 @@ down on being the layer that makes any engine's output actionable on a PR.
 Compare three postures on a shared corpus, recording true positives (TP), false
 positives (FP), and wall-clock runtime:
 
-- **chargate-as-is** — the MegaLinter suite (Semgrep, Bandit, checkov, hadolint,
+- **chargate-as-is**, the MegaLinter suite (Semgrep, Bandit, checkov, hadolint,
   ShellCheck, ESLint, gosec, KICS-equivalent, …) on the languages that matter.
-- **CodeQL** — GitHub's engine, default query packs.
-- **Semgrep/Opengrep** — standalone, community + registry rules.
+- **CodeQL**, GitHub's engine, default query packs.
+- **Semgrep/Opengrep**, standalone, community + registry rules.
 
 Corpus: OWASP Benchmark (Java), WebGoat, juice-shop (JS/TS), django-vulnerable
-(Python) — deliberately mixed-language so no single engine's home turf dominates.
+(Python), deliberately mixed-language so no single engine's home turf dominates.
 
 ## Outcome
 
@@ -35,7 +37,7 @@ Corpus: OWASP Benchmark (Java), WebGoat, juice-shop (JS/TS), django-vulnerable
 | chargate (MegaLinter suite) | medium, **broadest surface** (SAST + IaC + secrets + SCA + Dockerfile + shell) | medium, tunable | fast | broadest |
 
 Read: CodeQL wins deep interprocedural dataflow recall on the languages it
-supports and would take real, ongoing engine investment to beat — investment that
+supports and would take real, ongoing engine investment to beat, investment that
 duplicates a free-for-OSS incumbent. What CodeQL does **not** do is gate a PR on
 *only the findings the diff introduced*, normalise a heterogeneous fleet of
 engines into one decision, de-duplicate the same finding reported by two of them,
@@ -43,7 +45,7 @@ or bridge the result to DefectDojo/Dependency-Track. That is unowned ground.
 
 ## Decision
 
-Own the ground CodeQL cedes (directions 2–4), **not** a competing engine
+Own the ground CodeQL cedes (directions 2-4), **not** a competing engine
 (direction 1). Concretely:
 
 1. **Engine-agnostic net-new gating.** The introduced-vs-pre-existing logic in
@@ -53,7 +55,7 @@ Own the ground CodeQL cedes (directions 2–4), **not** a competing engine
    it.
 2. **Cross-engine de-duplication.** `chargate.sarif.dedup` collapses net-new
    findings that share a `(rule id, fingerprint)` key, so the same logical finding
-   reported by two producers — or one producer's SARIF uploaded twice — gates and
+   reported by two producers, or one producer's SARIF uploaded twice, gates and
    comments once. Fingerprints prefer the tool's own
    `fingerprints`/`partialFingerprints`; otherwise they derive from location +
    message. Toggle with `FilterPolicy.deduplicate`.
@@ -62,16 +64,16 @@ Own the ground CodeQL cedes (directions 2–4), **not** a competing engine
    dataflow.
 
 Semgrep/Opengrep remains available *as one of the engines MegaLinter already
-runs* — chosen for coverage, not as a chargate-owned differentiator. If a future
+runs*, chosen for coverage, not as a chargate-owned differentiator. If a future
 need for chargate-owned engine analysis appears, it enters through the same SARIF
 ingestion path as an optional, opt-in producer; it does not become the product.
 
 ## When chargate is primary SAST vs a CodeQL complement
 
-- **Primary SAST** — repos in languages CodeQL doesn't cover well, polyglot repos,
+- **Primary SAST**, repos in languages CodeQL doesn't cover well, polyglot repos,
   or teams that want IaC/secrets/SCA/Dockerfile/shell coverage and PR-diff gating
   in one gate. Chargate is the whole SAST story.
-- **CodeQL complement** — repos already running CodeQL for deep dataflow. Upload
+- **CodeQL complement**, repos already running CodeQL for deep dataflow. Upload
   CodeQL's SARIF into chargate's ingestion set; chargate contributes the net-new
   diff gate, cross-engine de-dup, and the DefectDojo bridge on top of CodeQL's
   findings. The two compose; they don't compete.
