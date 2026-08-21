@@ -95,6 +95,15 @@ inputs:
       SARIF-emitting linters of the selected flavor.
     required: false
     default: ''
+  jobs:
+    description: >-
+      Standalone mode only: how many per-linter containers to run concurrently
+      (CLI default 4). Standalone is what arm64 uses, and 4 concurrent MegaLinter
+      containers is a lot for a small self-hosted node — on a 2-OCPU / 4Gi runner
+      that is the difference between a scan and a scheduling fight. Lower it to 1-2
+      there. Ignored in flavor mode, which is a single container.
+    required: false
+    default: ''
   enable_linters:
     description: 'Comma-separated MegaLinter linter keys to enable (others off).'
     required: false
@@ -346,6 +355,7 @@ runs:
         ML_PLATFORM_IN: ${{ inputs.docker_platform }}
         ARCH_STRATEGY_IN: ${{ inputs.arch_strategy }}
         STANDALONE_LINTERS_IN: ${{ inputs.standalone_linters }}
+        JOBS_IN: ${{ inputs.jobs }}
         ENABLE_LINTERS_IN: ${{ inputs.enable_linters }}
         DISABLE_LINTERS_IN: ${{ inputs.disable_linters }}
         INCREMENTAL_IN: ${{ inputs.incremental }}
@@ -393,6 +403,7 @@ runs:
         [ -n "$ML_IMAGE_IN" ] && args+=(--megalinter-image "$ML_IMAGE_IN")
         [ -n "$ML_PLATFORM_IN" ] && args+=(--docker-platform "$ML_PLATFORM_IN")
         [ -n "$ARCH_STRATEGY_IN" ] && args+=(--arch-strategy "$ARCH_STRATEGY_IN")
+        [ -n "$JOBS_IN" ] && args+=(--jobs "$JOBS_IN")
         IFS=',' read -ra _sa <<< "$STANDALONE_LINTERS_IN"
         for l in "${_sa[@]}"; do [ -n "$l" ] && args+=(--standalone-linter "$l"); done
         [ -n "$base" ] && args+=(--base "$base")
