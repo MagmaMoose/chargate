@@ -16,6 +16,8 @@ from chargate.modes import Mode
 from chargate.sarif.counts import Counts
 from chargate.sarif.filter import ResultVerdict
 
+HEADING = "## Chargate: Security Assurance"
+
 
 def render_summary(
     counts: Counts,
@@ -29,7 +31,7 @@ def render_summary(
     scan_note: str | None = None,
 ) -> str:
     """Render the Markdown job summary for a CI run."""
-    lines: list[str] = ["## Chargate", ""]
+    lines: list[str] = [HEADING, ""]
     lines.append(
         f"**Mode:** `{mode.value}` · **Gate:** " + ("`fail`" if decision.failed else "`pass`")
     )
@@ -149,7 +151,7 @@ def render_pr_summary(
     ]
     lines: list[str] = [
         SUMMARY_MARKER,
-        "## Chargate: Security & Linting",
+        HEADING,
         "",
         f"**Mode:** `{mode.value}` · **Gate:** {gate}",
         "",
