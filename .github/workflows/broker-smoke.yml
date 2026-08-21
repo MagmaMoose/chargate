@@ -1,0 +1,87 @@
+# Prove the deployed broker actually mints a token.
+#
+# WHY THIS EXISTS AT ALL: `GET /healthz` returns 200 on a Lambda with no SSM parameters,
+# no permission to read them, and no GitHub App installed. It proves the function boots
+# and nothing else. Nievah's first AWS front door deployed clean, health-checked green,
+# and returned InvalidSignatureException on every POST — the failure hid behind exactly
+# the check that was supposed to catch it.
+#
+# The client here is the SHIPPED `scripts/request-app-token.sh`, not a curl written for
+# this workflow. That script is what runs inside every consumer's action, frozen into
+# every released tag, so running it regression-tests the wire format one broker has to
+# keep serving forever.
+#
+# AND IT MUST BE RUN DELIBERATELY, because the real client fails soft: on any error
+# `request-app-token.sh` emits an empty token and exits 0, so a broken broker produces no
+# red check anywhere — just PR comments quietly reverting to `github-actions[bot]`.
+# The weekly run is what notices that silence.
+
+name: Broker smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      broker_url:
+        description: 'Broker base URL to test (defaults to the production hostname)'
+        required: false
+        default: ''
+  schedule:
+    # Weekly, Monday 07:00 UTC. Frequent enough to catch a silent outage before a week
+    # of PRs have lost their byline; rare enough to stay far inside every free tier.
+    - cron: '0 7 * * 1'
+
+permissions:
+  contents: read
+  id-token: write   # the OIDC token the broker authenticates the caller with
+
+concurrency:
+  group: broker-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Request a Chargate[bot] token
+        id: token
+        shell: bash
+        env:
+          TOKEN_BROKER_URL: ${{ inputs.broker_url || 'https://broker-chargate.magmamoose.com' }}
+          OIDC_AUDIENCE: chargate
+        run: ./scripts/request-app-token.sh
+
+      - name: Assert a token was actually minted
+        shell: bash
+        env:
+          # Never echoed. Only ever tested for emptiness and sent as a header.
+          MINTED: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MINTED}" ]; then
+            echo "::error::The broker returned no token. It fails soft, so check the"
+            echo "::error::Lambda's CloudWatch logs — /healthz will look fine regardless."
+            exit 1
+          fi
+          echo "Broker returned a token."
+
+      - name: Assert GitHub accepts the token
+        shell: bash
+        env:
+          MINTED: ${{ steps.token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The only end-to-end proof: the App JWT signature, the installation lookup,
+          # the SSM read and the KMS decrypt all have to have been right for GitHub to
+          # honour this.
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            -H "Authorization: Bearer ${MINTED}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}")"
+          if [ "${code}" != "200" ]; then
+            echo "::error::GitHub rejected the minted token (HTTP ${code})."
+            exit 1
+          fi
+          echo "GitHub accepted the minted token."

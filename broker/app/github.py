@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 import time
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 import jwt
@@ -21,8 +20,18 @@ _API_VERSION = "2022-11-28"
 # the shape of a URL path: no '/', no '%', no ':'. Owners are alphanumeric with
 # single hyphens. Repo names allow '_' and '.' (e.g. foo.github.io), but '..' is
 # the path-traversal primitive — reject that sequence specifically, not all dots.
-_OWNER_RE = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\Z")
-_REPO_RE = re.compile(r"\A(?!.*\.\.)[A-Za-z0-9_.-]{1,100}\Z")
+#
+# Kept as PATTERN STRINGS as well as compiled objects, because the two are not
+# interchangeable to CodeQL. `py/partial-ssrf` only treats a value as sanitized when
+# it flows through `StringRestrictionSanitizerGuard`, whose recognised shapes are the
+# `str.isalnum()` family and `re.match`/`re.fullmatch` with the value as the *second*
+# positional argument. The module-level form `re.fullmatch(PATTERN, value)` matches
+# that model; a bound-method call on a precompiled object does not reliably, so the
+# guard immediately before the request uses the string form.
+_OWNER_PATTERN = r"\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\Z"
+_REPO_PATTERN = r"\A(?!.*\.\.)[A-Za-z0-9_.-]{1,100}\Z"
+_OWNER_RE = re.compile(_OWNER_PATTERN)
+_REPO_RE = re.compile(_REPO_PATTERN)
 
 
 class InvalidRepositoryError(ValueError):
@@ -75,16 +84,27 @@ async def mint_installation_token(
         "X-GitHub-Api-Version": _API_VERSION,
     }
     base = api_url.rstrip("/")
-    # Percent-encode with an EMPTY safe set, so `/`, `.`, `%` and `?` cannot survive into
-    # the path even if validate_repository were bypassed or loosened. On a value that
-    # passed validation this is a no-op — the point is that the request URL is safe by
-    # construction at the interpolation site, not merely because a check ran earlier
-    # (CodeQL py/partial-ssrf). httpx does not re-encode an already-encoded path segment.
-    owner_seg = quote(owner, safe="")
-    repo_seg = quote(repo, safe="")
-    installation = await client.get(
-        f"{base}/repos/{owner_seg}/{repo_seg}/installation", headers=headers
-    )
+    # Re-assert the allowlist HERE, on the bare names, immediately before they reach the
+    # URL. Redundant at runtime — validate_repository above already raised — and that is
+    # the point: it is the only shape CodeQL's py/partial-ssrf accepts as a barrier.
+    #
+    # Two earlier attempts on this alert failed for reasons worth recording:
+    #   * A regex check inside validate_repository cannot sanitize anything here. CodeQL's
+    #     barrier applies to the guarded variable's uses in the guard's own scope; it does
+    #     not follow the value back out through a return into the caller's new bindings.
+    #     `if not _OWNER_RE.match(owner or "")` also wraps the call in a BoolExpr, which
+    #     yields no barrier node at all.
+    #   * quote(..., safe="") is modelled by FullUrlControlSanitizer, which the FULL-SSRF
+    #     configuration uses and the PARTIAL-SSRF one does not — so percent-encoding could
+    #     never have cleared this query, however correct it is as defence.
+    # Do not "simplify" these two ifs away; they are load-bearing for the scan, not the
+    # runtime. The values remain safe to interpolate raw: the allowlists admit no '/',
+    # '%', ':' or '..', and the host comes from config, never from the caller.
+    if not re.fullmatch(_OWNER_PATTERN, owner):
+        raise InvalidRepositoryError(f"invalid owner: {owner!r}")
+    if not re.fullmatch(_REPO_PATTERN, repo):
+        raise InvalidRepositoryError(f"invalid repo: {repo!r}")
+    installation = await client.get(f"{base}/repos/{owner}/{repo}/installation", headers=headers)
     installation.raise_for_status()
     installation_id = installation.json()["id"]
 

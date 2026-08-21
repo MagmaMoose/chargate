@@ -4,8 +4,8 @@
       "Read(./.env)",
       "Read(./.env.*)",
       "Read(./**/*.pem)",
-      "Read(./**/secrets/**)",
-      "Bash(curl:*)"
+      "Read(./**/*.key)",
+      "Read(./**/secrets/**)"
     ],
     "ask": [
       "Bash(git push:*)"

@@ -7,33 +7,38 @@ name = "chargate-broker"
 version = "0.1.0"
 description = "Chargate token broker — GitHub Actions OIDC → repo-scoped App installation token"
 requires-python = ">=3.12"
-# pywrangler vendors exactly this list for the Worker, resolved against
-# cpython-3.13-emscripten-wasm32. Every entry here must have a wasm32 wheel on the
-# runtime named by wrangler.toml's compatibility_date.
+# THIS LIST IS WHAT SHIPS TO LAMBDA. `scripts/build_lambda_zip.py` vendors exactly what
+# `uv export --frozen --no-dev` resolves from it, so anything added here lands in the
+# deployed zip and anything needed only by the dev server belongs in an extra below.
+#
+# Every entry must have a compiled wheel for the Lambda target
+# (x86_64-manylinux_2_28 / cp312) — the build passes `--only-binary=:all:` so a
+# source-only distribution fails the build rather than silently compiling for the
+# build machine.
 dependencies = [
-    "fastapi>=0.115",
-    "pydantic>=2.9",
-    "pydantic-settings>=2.5",
-    "pyjwt>=2.9",
-    # Listed explicitly rather than left to pyjwt[crypto] so the wasm32 wheel
-    # requirement is visible at the point someone would bump the runtime date.
+    "pyjwt[crypto]>=2.9",
+    # Listed explicitly rather than left to pyjwt[crypto] so the compiled-wheel
+    # requirement is visible at the point someone would bump the runtime.
     "cryptography>=43.0",
     "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
-# uvicorn is how the container serves the app; on Workers the runtime's ASGI bridge
-# does that job and nothing imports uvicorn at all. It is out of the base dependency
-# set because uvicorn[standard] drags in httptools, which has no wasm32 wheel — one
-# unresolvable transitive dependency fails the whole vendor step.
-server = ["uvicorn[standard]>=0.30"]
+# The FastAPI shell in app/main.py and the server that runs it. NOT shipped: production
+# is app.lambda_handler on AWS Lambda, where API Gateway is the HTTP layer. Keeping
+# these out of the base set is ~7 MB of zip and roughly two-thirds of the cold start
+# (pydantic_core alone is a 4.7 MB compiled object).
+server = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 dev = [
     # Repeated rather than referenced as chargate-broker[server]: a self-referential
     # extra does not resolve for an editable local install.
+    "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
+    # Exercises the SSM client without reaching AWS.
+    "boto3>=1.35",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -47,8 +52,8 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
-# `app` and `entry` are imported as top-level modules, exactly as the Worker runtime
-# and uvicorn resolve them, so the test suite exercises the real import shape.
+# `app` is imported as a top-level package, exactly as the Lambda runtime and uvicorn
+# resolve it, so the test suite exercises the real import shape.
 pythonpath = ["."]
 testpaths = ["tests"]
 # The JWKS resolver is async, so its tests are coroutines; auto mode saves marking

@@ -85,6 +85,20 @@ def test_composite_action_defaults_to_security_incremental_scanning():
     assert re.search(r"incremental:\n(?:.*\n){0,15}\s+default: 'true'", action)
 
 
+def test_composite_action_exposes_jobs_so_standalone_concurrency_is_reachable():
+    """`jobs` must be an action input, not CLI-only.
+
+    Standalone mode is what arm64 uses, and it runs `jobs` per-linter containers at once
+    (CLI default 4). Without an action input there is no way for a consumer on a small
+    self-hosted runner to lower it — 4 concurrent MegaLinter containers on a 2-OCPU node
+    is a scheduling fight, not a scan. Empty default so the CLI default still wins.
+    """
+    action = (Path(__file__).parent.parent / "action.yml").read_text(encoding="utf-8")
+    assert re.search(r"^  jobs:\n(?:.*\n){0,12}?\s+default: ''", action, re.MULTILINE)
+    assert "JOBS_IN: ${{ inputs.jobs }}" in action
+    assert '[ -n "$JOBS_IN" ] && args+=(--jobs "$JOBS_IN")' in action
+
+
 def test_composite_action_leaves_image_inputs_empty_so_cli_defaults_apply():
     # An action default of 'v8' would shadow the CLI default AND the CHARGATE_* env
     # fallbacks; these inputs must ship empty and be appended only when set.
@@ -492,7 +506,7 @@ def test_build_env_excludes_chargate_own_workspace_artifacts():
     ):
         assert re.search(pattern, path), f"{path} should be excluded by {pattern}"
     # Real source is still scanned.
-    for path in ("src/chargate/cli.py", "k8s/base/deployment.yaml"):
+    for path in ("src/chargate/cli.py", "action.yml"):
         assert not re.search(pattern, path)
 
 
@@ -603,3 +617,37 @@ def test_run_raises_the_arch_guard_before_touching_docker(tmp_path: Path):
 
     with pytest.raises(ml.MegaLinterError):
         ml.run(config, runner=fake_runner, arch="arm64")
+
+
+def test_bandit_excludes_test_directories_by_default():
+    """B101 (assert_used) must not make every test-bearing PR unmergeable.
+
+    A pytest test is nothing but asserts, so with bandit scanning `tests/` the net-new
+    gate blocks once per NEW assertion. Observed on MagmaMoose/caldrith: one PR adding two
+    test files produced 58 blocking findings, 57 of them test assertions.
+
+    Scoped to bandit — every other linter still reads the tests — and bandit still scans
+    shipped code, where `python -O` really does strip an `assert`.
+    """
+    pattern = ml.build_env(ml.MegaLinterConfig())["PYTHON_BANDIT_FILTER_REGEX_EXCLUDE"]
+    for path in ("tests/test_files.py", "src/pkg/tests/test_x.py", "test/test_y.py"):
+        assert re.search(pattern, path), f"{path} should be excluded by {pattern}"
+    # Shipped code is still scanned, and a directory that merely CONTAINS "test" is not
+    # caught — the pattern is anchored to a path boundary.
+    for path in ("src/chargate/cli.py", "src/contests/views.py", "latest/thing.py"):
+        assert not re.search(pattern, path), f"{path} must still be scanned"
+
+    # The global file filter is a separate knob: excluding tests from bandit must not
+    # quietly exclude them from every other linter too.
+    assert not re.search(
+        ml.build_env(ml.MegaLinterConfig())["FILTER_REGEX_EXCLUDE"], "tests/test_files.py"
+    )
+
+
+def test_bandit_exclude_ors_consumer_pattern_rather_than_replacing_it():
+    env = ml.build_env(
+        ml.MegaLinterConfig(extra_env={"PYTHON_BANDIT_FILTER_REGEX_EXCLUDE": "(vendor/)"})
+    )
+    pattern = env["PYTHON_BANDIT_FILTER_REGEX_EXCLUDE"]
+    assert re.search(pattern, "vendor/thing.py")  # consumer's pattern honoured
+    assert re.search(pattern, "tests/test_x.py")  # chargate's default still applied

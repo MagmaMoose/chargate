@@ -46,5 +46,15 @@ jobs:
         run: uv run ruff check .
       - name: Ruff (format)
         run: uv run ruff format --check .
+      # Build the deployable artifact BEFORE pytest, because tests/test_lambda_package.py
+      # inspects and (on this runner) executes it. Doing it here means a dependency bump
+      # that resolves a wheel for the wrong platform, breaks the import, or blows the
+      # size budget fails on the pull request rather than at deploy time — where the
+      # symptom would be a cold-start ImportError on a fail-soft path, i.e. silence.
+      #
+      # The runner is ubuntu-latest/x86_64/py3.12, which is exactly the Lambda target,
+      # so TestImportable actually executes the artifact here instead of skipping.
+      - name: Build the Lambda zip
+        run: uv run python scripts/build_lambda_zip.py --out ../dist/chargate-broker.zip --platform x86_64-manylinux_2_28
       - name: Pytest
         run: uv run pytest -q

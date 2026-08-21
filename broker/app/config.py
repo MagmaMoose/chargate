@@ -2,61 +2,71 @@
 
 Two runtimes, one settings class:
 
-* **Container** — values arrive in the process environment (in k8s:
-  ExternalSecret → Secret → ``envFrom``) and pydantic-settings reads them.
-* **Cloudflare Worker** — there is no process environment. The runtime hands each
-  invocation an ``env`` object carrying vars and secrets, so ``entry.py`` publishes
-  it on :data:`cf_env` and :func:`load_config` overlays it on top of ``os.environ``.
+* **AWS Lambda** (production) — non-secret values arrive as function environment
+  variables; ``APP_ID`` and ``PRIVATE_KEY`` come from SSM Parameter Store under
+  ``SECRET_PATH`` and are overlaid on top of ``os.environ`` by :func:`load_config`.
+* **Local / CI** — everything is in the process environment, ``SECRET_PATH`` is
+  unset, the overlay is empty, and nothing imports boto3 at all.
+
+**No pydantic.** This module used to be a ``pydantic_settings.BaseSettings``. It is a
+frozen dataclass now because ``pydantic`` + ``pydantic_core`` is ~5 MB of the Lambda
+zip and the dominant cold-start term, to validate six strings. The public surface —
+the field names, ``allowed()``, ``permissions()``, and keyword construction — is
+unchanged, which is what keeps ``tests/test_config.py`` and ``tests/test_broker.py``
+pointed at the same API.
 
 The App private key arrives as a PEM string; secret stores commonly ``\\n``-escape
 it, so we un-escape (mirrors caldrith's ``settings`` normalizer). PKCS#1 (the
 ``BEGIN RSA PRIVATE KEY`` form GitHub hands out) is loaded as-is — ``pyjwt[crypto]``
-uses ``cryptography``, which reads it directly. No pkcs8 conversion is needed here;
-that is only a constraint of the JavaScript ``crypto.subtle.importKey`` path.
+uses ``cryptography``, which reads it directly.
 """
 
 from __future__ import annotations
 
 import json
-from contextvars import ContextVar
+import os
+from dataclasses import dataclass, fields
 from typing import Any
-
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 GITHUB_OIDC_JWKS = f"{GITHUB_OIDC_ISSUER}/.well-known/jwks"
 
-#: The Worker runtime's ``env`` for the current invocation, or ``None`` off-Worker.
-#: Set by ``Default.fetch`` in ``entry.py`` before anything reads configuration.
-cf_env: ContextVar[Any | None] = ContextVar("cf_env", default=None)
+
+class ConfigError(Exception):
+    """Configuration is missing or malformed.
+
+    Raised instead of pydantic's ``ValidationError``. ``/token`` turns this into a
+    503 ``config_unavailable`` and ``/readyz`` into a 503 — a deployment that was
+    never finished, not a broker bug.
+    """
 
 
-class BrokerConfig(BaseSettings):
-    # env_file is a no-op on Workers (no filesystem) and pydantic-settings ignores
-    # a missing file, so the same config class serves both runtimes unchanged.
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
+def _normalize_pem(value: str) -> str:
+    if "\\n" in value and "-----BEGIN" in value:
+        return value.replace("\\n", "\n")
+    return value
 
-    # Set from the ExternalSecret (Secret keys APP_ID / PRIVATE_KEY), or from
-    # `wrangler secret put APP_ID` / `PRIVATE_KEY` on the Worker.
+
+@dataclass(frozen=True)
+class BrokerConfig:
+    """The App identity and the policy applied to every mint request."""
+
+    # From SSM (production) or the environment (local).
     app_id: str
     private_key: str
 
     # The OIDC `aud` the consumer's action requests; must match on both sides.
     oidc_audience: str = "chargate"
     # Optional comma-separated owner/repo allowlist. Empty = allow any repo the
-    # App is installed on (the public-app model).
+    # App is installed on (the public-app model, which is what is deployed).
     allowed_repositories: str = ""
     github_api_url: str = "https://api.github.com"
     # Least privilege: minted tokens can only comment on PRs.
     token_permissions_json: str = '{"pull_requests": "write"}'
 
-    @field_validator("private_key")
-    @classmethod
-    def _normalize_pem(cls, value: str) -> str:
-        if "\\n" in value and "-----BEGIN" in value:
-            return value.replace("\\n", "\n")
-        return value
+    def __post_init__(self) -> None:
+        # frozen=True blocks plain assignment even here, so go through object.
+        object.__setattr__(self, "private_key", _normalize_pem(self.private_key))
 
     def allowed(self) -> set[str]:
         """The owner/repo allowlist as a set (empty set = allow any)."""
@@ -66,28 +76,43 @@ class BrokerConfig(BaseSettings):
         return json.loads(self.token_permissions_json)
 
 
-def _worker_overlay() -> dict[str, str]:
-    """This invocation's Worker ``env`` as settings kwargs, or ``{}`` off-Worker.
+def _ssm_overlay() -> dict[str, str]:
+    """Secrets from SSM Parameter Store, or ``{}`` when ``SECRET_PATH`` is unset.
 
-    Reads only declared fields: the ``env`` object also carries bindings, and
-    passing those to a settings model would be noise at best.
+    Unset is the local/CI case and must not import boto3 — see ``app.ssm`` for why
+    the import lives inside the function rather than at module scope.
     """
-    env = cf_env.get()
-    if env is None:
+    path = os.environ.get("SECRET_PATH", "").strip()
+    if not path:
         return {}
-    overlay: dict[str, str] = {}
-    for name in BrokerConfig.model_fields:
-        value = getattr(env, name.upper(), None)
-        if value is not None:
-            overlay[name] = str(value)
-    return overlay
+
+    from app.ssm import secrets
+
+    return secrets(path)
 
 
 def load_config() -> BrokerConfig:
     """Build config for the current invocation.
 
-    Explicit kwargs win over the process environment, so on a Worker the ``env``
-    overlay supplies everything and ``os.environ`` supplies nothing; in a container
-    the overlay is empty and pydantic-settings reads the environment as before.
+    The SSM overlay wins over the process environment: on Lambda the non-secret
+    fields are function env vars and the two secrets come from Parameter Store,
+    so neither ever appears in the function's configuration where
+    ``lambda:GetFunctionConfiguration`` would reveal it.
+
+    Resolved per request rather than at import so a Lambda whose SSM parameters are
+    seeded *after* the first deploy recovers without a redeploy — the same reason
+    the Worker needed it, for a different runtime.
     """
-    return BrokerConfig(**_worker_overlay())
+    names = {f.name for f in fields(BrokerConfig)}
+    values: dict[str, str] = {}
+    for name in names:
+        env_value = os.environ.get(name.upper())
+        if env_value is not None:
+            values[name] = env_value
+    values.update({k: v for k, v in _ssm_overlay().items() if k in names})
+
+    missing = [name for name in ("app_id", "private_key") if not values.get(name)]
+    if missing:
+        raise ConfigError(f"missing required configuration: {', '.join(sorted(missing))}")
+
+    return BrokerConfig(**values)

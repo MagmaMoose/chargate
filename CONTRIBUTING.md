@@ -13,10 +13,11 @@ uv run ruff check .          # lint
 uv run ruff format --check . # format check (CI gates on this)
 ```
 
-The `broker/` service is a separate deployable with its own dependency group:
+The `broker/` service is a separate deployable with its **own** `pyproject.toml` and
+virtualenv — it is not a dependency group of the root project, so `cd` into it:
 
 ```sh
-uv run --group broker python -m pytest broker/tests
+cd broker && uv sync --extra dev && uv run pytest -q
 ```
 
 (If `uv` is not on your PATH, `python -m uv ...` works after `pip install uv`.)
@@ -27,8 +28,8 @@ uv run --group broker python -m pytest broker/tests
   Actions imports in the SARIF core — it is unit-tested with synthetic diff text +
   SARIF dicts. The git/IO boundary lives only in `git.py`.
 - **Core stays stdlib-only.** The CLI has no runtime dependencies (the DefectDojo /
-  Dependency-Track clients use `urllib`). Keep the broker's FastAPI/httpx/PyJWT deps
-  in the `broker` dependency group.
+  Dependency-Track clients use `urllib`). Keep the broker's pyjwt/httpx deps in
+  `broker/pyproject.toml` so the CLI wheel stays dependency-free.
 - **Tests mirror modules 1:1** under `tests/` (e.g. `test_gate.py` for `gate.py`).
   Add or update tests with every change; the pure core should stay deterministic.
 - **SHA-pin external GitHub Actions** with a `# vX.Y.Z` comment.

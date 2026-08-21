@@ -23,7 +23,7 @@ for tool in jq curl; do
   command -v "${tool}" >/dev/null 2>&1 || emit_empty "${tool} not installed on this runner"
 done
 
-broker_url="${TOKEN_BROKER_URL:-https://chargate.magmamoose.com}"
+broker_url="${TOKEN_BROKER_URL:-https://broker-chargate.magmamoose.com}"
 audience="${OIDC_AUDIENCE:-chargate}"
 [ -n "${broker_url}" ] || emit_empty "broker disabled"
 

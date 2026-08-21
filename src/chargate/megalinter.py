@@ -216,6 +216,11 @@ class MegaLinterRun:
     linters_skipped: tuple[tuple[str, str], ...] = ()
 
 
+# Test directories, for bandit only. `tests?` covers both `test/` and `tests/`; anchored to
+# a path boundary so a source file named e.g. `contests/` is not caught.
+_BANDIT_TEST_EXCLUDE = r"(^|/)tests?/"
+
+
 def _artifact_exclude_regex(config: MegaLinterConfig) -> str:
     """A ``FILTER_REGEX_EXCLUDE`` pattern covering chargate's own workspace output.
 
@@ -325,6 +330,23 @@ def build_env(config: MegaLinterConfig, *, single_linter: str = "") -> dict[str,
     artifacts = _artifact_exclude_regex(config)
     consumer = env.get("FILTER_REGEX_EXCLUDE", "").strip()
     env["FILTER_REGEX_EXCLUDE"] = f"({consumer})|({artifacts})" if consumer else artifacts
+    # Bandit B101 (assert_used) fires on every `assert`, and a pytest test is nothing but
+    # asserts — so on a Python repo the net-new gate blocks once per NEW assertion and any
+    # PR that adds tests is unmergeable. Observed on MagmaMoose/caldrith: one PR adding two
+    # test files produced 58 blocking findings, 57 of them test assertions.
+    #
+    # This is a gate-quality default, not a security relaxation: B101 keeps running on
+    # shipped code, where `python -O` really does strip a runtime check. It only stops
+    # counting assertions in files that never ship.
+    #
+    # OR'd with any consumer value for the same reason as FILTER_REGEX_EXCLUDE above — a
+    # repo may exclude MORE from bandit, but re-admitting `tests/` is not something one
+    # repo should be able to do to the org's gate. Repos that genuinely need bandit inside
+    # tests should scope the exception per-finding with `# nosec`, which stays visible.
+    bandit_consumer = env.get("PYTHON_BANDIT_FILTER_REGEX_EXCLUDE", "").strip()
+    env["PYTHON_BANDIT_FILTER_REGEX_EXCLUDE"] = (
+        f"({bandit_consumer})|({_BANDIT_TEST_EXCLUDE})" if bandit_consumer else _BANDIT_TEST_EXCLUDE
+    )
     return env
 
 

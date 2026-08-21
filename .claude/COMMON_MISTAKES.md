@@ -31,9 +31,11 @@
   set (no on/off toggle); mirror this shape for any new sink. DT uploads on push/tags
   only (tracks shipped artifacts), never on PRs.
 - **The `broker/` service is a separate deployable**, not part of the CLI: keep its
-  FastAPI/httpx/pyjwt deps in the `broker` dep-group so the wheel stays dep-free.
-  Ships as `ghcr.io/magmamoose/chargate`, deploys via `k8s/` + Flux; the App + OCI-Vault
-  keys are operator-owned (see the token-broker design memory).
+  pyjwt/httpx deps in `broker/pyproject.toml` so the CLI wheel stays dep-free.
+  Ships as a zip in S3 and runs on AWS Lambda behind an API Gateway HTTP API; the
+  module and leaf live in `magmamoose/infra` under `terraform/aws/chargate/`, and
+  deploying is a reviewed one-line bump of `broker_artifact_version` there. The App
+  private key and the AWS account are operator-owned (see the token-broker design memory).
 - **DefectDojo types a Test from `runs[0]` and nothing else.** Its SARIF parser is a
   *dynamic test type* parser: `get_tests()` makes one ParserTest per run named after
   `run.tool.driver.name`, then `consolidate_dynamic_tests` does `test_raw = tests[0]` for
@@ -61,3 +63,60 @@
   false and means "a linter blew up, you decide"; zero runs means the gate scanned nothing,
   so a pass is meaningless. Gating the empty-report check on `strict` reintroduces the
   original bug for every consumer who never set it.
+- **`GET /healthz` proves the function booted and NOTHING else.** It returns 200 on a Lambda
+  with no SSM parameters, no IAM permission to read them, and no GitHub App installed —
+  because it deliberately answers before configuration is consulted (that is what makes
+  "deploy, then seed the secrets" work). The failures it hides are exactly the ones this
+  service has: the two-ARN SSM policy, the KMS decrypt grant, and an App that was never
+  installed on the repo. Verify with a real signed `POST /token` — `.github/workflows/broker-smoke.yml`
+  runs the SHIPPED `scripts/request-app-token.sh` and then hands the minted token back to
+  the GitHub API, which is the only thing that exercises all of it. Nievah's first AWS front
+  door deployed clean, health-checked green, and returned `InvalidSignatureException` on
+  every POST.
+- **`s3:GetObjectAttributes` does not authorise `HeadObject`.** Diatreme's s3 publisher
+  (`package-ecosystem: s3`) calls `aws s3api head-object` to refuse overwriting a published
+  key, and its AccessDenied branch is `exit 1`, not a skip — so a publish role missing
+  `s3:GetObject` fails the release outright. Reported on magmamoose/infra#638, which is where
+  the `artifacts` module's policy lives.
+- **The broker fails soft, so a broken deployment is SILENT.** `scripts/request-app-token.sh`
+  emits an empty token and `exit 0` on every error path, and the action falls back to
+  `github-actions[bot]`. Nothing goes red anywhere. That is correct behaviour — a security
+  gate must not break a consumer's build because a token minter is down — but it means the
+  only signals that the broker is broken are the weekly smoke run and a PR comment byline.
+  Never treat "no failures reported" as evidence the broker works.
+- **`app/main.py` must never enter the Lambda zip.** It is the one module importing FastAPI,
+  which is not in the shipped dependency set; `scripts/build_lambda_zip.py` excludes it by
+  name and `tests/test_lambda_package.py` asserts its absence. Shipping it turns a clean
+  deploy into a cold-start `ImportError` on the fail-soft path above — i.e. into silence.
+- **Diatreme runs its own `actions/checkout`, which `git clean -ffdx`s your build output.** The
+  composite action checks the repo out again internally (`fetch-depth: 0`), and
+  `actions/checkout` defaults to `clean: true` — so any artifact an earlier step wrote *inside*
+  the workspace is deleted before diatreme's publish step runs. A Lambda zip built to `./dist`
+  disappeared exactly this way, and the symptom blames the caller:
+  `s3: package-path must be the built artifact FILE. Not a file: dist/chargate-broker.zip`,
+  on a run whose own log shows the build succeeding two steps earlier. Build to
+  `${{ runner.temp }}` and pass that absolute path as `package-path`.
+- **`.github/workflows/release.yml` is provisioned by caldrith and will be overwritten.** It is
+  pushed directly as `chore: provision required workflows (caldrith)` — no in-file marker says
+  so, and four such commits already exist here. Broker publish wiring added to it survived one
+  release and then vanished, taking the deployment path with it and leaving no failing check
+  anywhere. Chargate-specific CI belongs in a file caldrith does not own; the publish lives in
+  `.github/workflows/publish-broker.yml`. `ci.yml` and `security.yml` are NOT managed.
+- **Diatreme's package publishing only fires on the run that CREATES a tag** — its step is gated
+  on `steps.normalize.outputs.released == 'true'`. A re-run of a failed release, or any release
+  whose version was already tagged, skips the publish silently and reports success. If an upload
+  fails for any other reason, you cannot simply re-run it; key the publish off the tag instead.
+- **The Lambda runtime pins the ROOT logger to WARNING, so `_log.info` is dropped.** A child
+  logger with no level of its own inherits that, and `app/broker.py`'s per-request outcome line —
+  the only observability this service has — emitted nothing in production. `app.broker` now sets
+  its own level (`CHARGATE_LOG_LEVEL`, default INFO).
+  **The reason it survived review is the lesson:** `caplog.at_level(logging.INFO, ...)` *sets*
+  the level the runtime does not, so the tests asserted against a configuration that exists
+  nowhere else and the observability was asserted into existence. A test for log output must
+  reproduce the deployed logging setup (root at WARNING, one handler) rather than configure it —
+  see `test_outcome_survives_a_root_logger_pinned_to_warning`.
+- **Do not bypass this repo's own git hooks.** `git -c core.hooksPath=/dev/null commit` (or
+  `--no-verify`) skips `chargate local`, `actions-pin-sha`, the conventional branch-name check and
+  `commit-msg`. Chargate is the tool that enforces these; routing around them here is
+  self-defeating, and it hides exactly the class of defect the gate exists to catch. If a hook
+  blocks a commit, fix the cause or raise it — do not disable the hook path.
