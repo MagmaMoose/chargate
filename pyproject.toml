@@ -4,7 +4,7 @@ version = "2.11.2"
 description = "Security + lint gate: a thin MegaLinter wrapper with net-new (PR-diff) finding gating."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "Apache-2.0"
 authors = [{ name = "Caleb Sargeant", email = "caleb@magmamoose.com" }]
 keywords = ["security", "lint", "sarif", "megalinter", "gate", "defectdojo"]
 # The core net-new filter is intentionally stdlib-only so it stays trivially
