@@ -35,6 +35,13 @@ against the live ghcr.io registry at ``v10.0.0``. ``tests/test_linters_registry.
 re-probes it on demand (and weekly in CI) so a MegaLinter bump cannot silently drop a
 linter, rename an image, or lose an arm64 build — a shrinking arm64 scan that nobody
 notices is exactly the failure mode this whole change exists to remove.
+
+``arm64`` was always probed that way. ``sarif`` was **not**, until brimyr#33: it lives
+in MegaLinter's descriptor rather than the registry, so three entries
+(``ACTION_ACTIONLINT``, ``PYTHON_PYLINT``, ``POWERSHELL_POWERSHELL``) sat here carrying
+the ``_entry`` default of ``True`` while upstream said otherwise — each one a container
+that starts, pulls, runs and contributes nothing the gate can read. The same test now
+cross-checks every ``sarif`` flag against the descriptors, so the two cannot drift again.
 """
 
 from __future__ import annotations
@@ -97,12 +104,29 @@ STANDALONE_LINTERS: dict[str, LinterImage] = dict(
         _entry("REPOSITORY_OSV_SCANNER", sarif=False),
         _entry("REPOSITORY_TRUFFLEHOG", sarif=False),
         _entry("TERRAFORM_TERRAGRUNT", sarif=False),
-        # ── Commonly requested via enable_linters / standalone_linters ──
-        _entry("ACTION_ACTIONLINT"),
+        # ── The `quality` set: SARIF-emitting quality linters, none of them security ──
+        # Probed at v10.0.0 the same way as the security set. ESLint's keys are
+        # JAVASCRIPT_ES / TYPESCRIPT_ES, NOT *_ESLINT — the `_eslint` image repositories
+        # do not exist and a run naming them 404s.
         _entry("GO_GOLANGCI_LINT"),
-        _entry("JSON_JSONLINT", sarif=False),
-        _entry("PYTHON_PYLINT"),
+        _entry("JAVASCRIPT_ES"),
+        _entry("JAVA_PMD"),
         _entry("PYTHON_RUFF"),
+        _entry("TYPESCRIPT_ES"),
+        # ── Commonly requested via enable_linters / standalone_linters ──
+        # actionlint and pylint carried `sarif=True` here purely because that is the
+        # `_entry` default — neither was ever probed, and at v10.0.0 neither descriptor
+        # sets `can_output_sarif`. Both therefore start a container whose output the
+        # net-new gate cannot see: a linter that runs, costs a pull, and reports nothing.
+        # That is the precise failure this table exists to make loud, so they are now
+        # skipped BY NAME WITH A REASON instead. `tests/test_linters_registry.py` re-probes
+        # every flag against the live descriptors so it cannot drift back.
+        _entry("ACTION_ACTIONLINT", sarif=False),
+        _entry("JAVA_CHECKSTYLE"),
+        _entry("JSON_JSONLINT", sarif=False),
+        _entry("KOTLIN_DETEKT"),
+        _entry("PHP_PHPSTAN"),
+        _entry("PYTHON_PYLINT", sarif=False),
         _entry("REPOSITORY_GIT_DIFF", sarif=False),
         _entry("REPOSITORY_LS_LINT", sarif=False),
         _entry("MARKDOWN_MARKDOWNLINT", sarif=False),
@@ -112,15 +136,28 @@ STANDALONE_LINTERS: dict[str, LinterImage] = dict(
         _entry("ARM_ARM_TTK", arm64=False, sarif=False),
         _entry("COPYPASTE_JSCPD", arm64=False, sarif=False),
         _entry("LATEX_CHKTEX", arm64=False, sarif=False),
-        _entry("POWERSHELL_POWERSHELL", arm64=False),
+        # Neither PowerShell linter sets can_output_sarif at v10.0.0 either; this was
+        # the third entry carrying the `_entry` default un-probed.
+        _entry("POWERSHELL_POWERSHELL", arm64=False, sarif=False),
     )
 )
 
+#: Flavors chargate defines *itself*. MegaLinter publishes no image for these, so there
+#: is nothing to substitute *for* — they are the standalone set, on every architecture,
+#: and :func:`chargate.megalinter.resolve_plan` routes them there rather than composing
+#: an image reference that would 404 on a pull.
+#:
+#: ``quality`` exists because MegaLinter has no quality *flavor*: the choice upstream
+#: offers is one language flavor at a time or ``all`` (100+ linters). Neither is the
+#: thing a quality gate wants, which is a small set of linters a team actually respects.
+SYNTHETIC_FLAVORS = frozenset({"quality"})
+
 #: Flavor → the standalone set chargate substitutes when it cannot run that flavor's
-#: image. Only flavors with a curated, registry-verified set appear here. ``all`` is
-#: deliberately absent: substituting it would mean 100+ container starts and multiple
-#: GB of pulls, which is not a sane thing to do behind an operator's back — with
-#: ``flavor: all`` on arm64 chargate raises and names the choices instead.
+#: image, or (for a :data:`SYNTHETIC_FLAVORS` entry) the set that *is* the flavor. Only
+#: flavors with a curated, registry-verified set appear here. ``all`` is deliberately
+#: absent: substituting it would mean 100+ container starts and multiple GB of pulls,
+#: which is not a sane thing to do behind an operator's back — with ``flavor: all`` on
+#: arm64 chargate raises and names the choices instead.
 FLAVOR_STANDALONE_SETS: dict[str, tuple[str, ...]] = {
     # The 18 SARIF-emitting linters of the v10 `security` flavor. The other six
     # security-flavor linters emit no SARIF and so could never have reached the gate.
@@ -143,5 +180,31 @@ FLAVOR_STANDALONE_SETS: dict[str, tuple[str, ...]] = {
         "REPOSITORY_TRIVY",
         "REPOSITORY_TRIVY_SBOM",
         "TERRAFORM_TFLINT",
+    ),
+    # Five linters, not a flavor's worth — deliberately. MegaLinter's quality half over
+    # a mature repo produces hundreds of net-new findings on the first pull request,
+    # because "changed line touched by a formatter-opinionated linter" is a far denser
+    # event than "changed line with a security finding". A gate that goes red with 200
+    # findings on its first real PR gets switched off, and then it is decoration. So:
+    # start with five that earn their noise, and grow the set from evidence.
+    #
+    # Every one is SARIF-emitting at v10.0.0 (a linter that is not is invisible to the
+    # net-new gate) and multi-arch, and NONE is in the `security` set above — a repo
+    # running both gates must not have one finding block it twice.
+    #
+    # Chosen for signal over style: golangci-lint is Go's meta-linter (so GO_REVIVE is
+    # redundant), Ruff covers the flake8/isort/pyupgrade families in one container, and
+    # PMD finds Java bugs and code smells where JAVA_CHECKSTYLE — also available, also
+    # verified — reports formatting opinion, which is the densest noise there is.
+    #
+    # There is no .NET entry: at v10.0.0 no C#/VB.NET linter sets `can_output_sarif`, so
+    # none of them could reach the gate. Said here rather than discovered later by a
+    # .NET team whose quality gate reports zero findings forever.
+    "quality": (
+        "GO_GOLANGCI_LINT",
+        "JAVASCRIPT_ES",
+        "JAVA_PMD",
+        "PYTHON_RUFF",
+        "TYPESCRIPT_ES",
     ),
 }

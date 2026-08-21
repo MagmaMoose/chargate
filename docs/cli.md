@@ -14,6 +14,12 @@ chargate <filter-sarif | ci | local | install-hooks | uninstall-hooks | version>
 The pure net-new filter: a SARIF report + a base/head → filtered SARIF + counts +
 a gate exit code. Decoupled from GitHub Actions and unit-tested in isolation.
 
+This subcommand and the counts JSON it writes are a **stable public interface** for
+other tools: the counts document carries a `schema_version`, and a consumer must
+hard-fail on a version it does not recognise rather than gate on a document it cannot
+read. Key-by-key contract, invariants, and the exit codes a consumer must distinguish:
+[Consuming the output](consuming-output.md).
+
 ```sh
 chargate filter-sarif --sarif report.sarif --base "$BASE" --head "$HEAD" \
     --out net-new.sarif --counts-json counts.json --fail-on any
@@ -59,7 +65,7 @@ Key flags beyond the shared filter options:
 | --- | --- | --- |
 | `--mode` | `auto` | `auto` (from `GITHUB_EVENT_NAME`), `pr` (net-new gate), or `baseline` (no gate). |
 | `--sarif` | (none) | Use an existing SARIF instead of running MegaLinter. |
-| `--flavor` | `all` | MegaLinter flavor (`all` = full image). |
+| `--flavor` | `all` | MegaLinter flavor (`all` = full image), or `quality` — a five-linter set chargate curates, with no upstream image, so it always runs standalone. See [The `quality` flavor](setup.md#the-quality-flavor). |
 | `--megalinter-tag` | `v10.0.0` | MegaLinter image tag, or a `sha256:…` digest to pin. |
 | `--megalinter-registry` | `ghcr.io` | Registry host. Docker Hub is frozen at `v9.4.0`, so it cannot serve `v9.5.0+`. |
 | `--megalinter-namespace` | `oxsecurity` | Image namespace (set for a mirror / pull-through cache). |
@@ -71,7 +77,7 @@ Key flags beyond the shared filter options:
 | `--enable-linter` / `--disable-linter` | (none) | Toggle a linter (repeatable). |
 | `--incremental` | off | PR/gate mode only. Runs MegaLinter over just the files changed vs the base (`VALIDATE_ALL_CODEBASE=false`) instead of the whole repo. The net-new gate still uses chargate's own diff, so this changes scan cost, not the verdict. |
 | `--default-branch` | `""` | Base branch for incremental change detection. Sets MegaLinter's `DEFAULT_BRANCH`. |
-| `--sarif-out` / `--filtered-out` / `--counts-json` | (none) | Write the full / net-new / counts outputs. |
+| `--sarif-out` / `--filtered-out` / `--counts-json` | (none) | Write the full / net-new / counts outputs. The action always passes all three; the last two are the [documented consumer interface](consuming-output.md). |
 | `--strict` | off | Fail the job if MegaLinter itself errors. (A SARIF with no runs fails without it, see [architecture](architecture.md).) |
 | `--defectdojo-url` | (none) | DefectDojo base URL (enables import of the full SARIF). |
 | `--defectdojo-token-env` | `DEFECTDOJO_TOKEN` | Env var holding the DD API token. |

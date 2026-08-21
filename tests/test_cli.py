@@ -10,6 +10,7 @@ import pytest
 
 from chargate.cli import main
 from chargate.gate import EXIT_BLOCKED, EXIT_ERROR, EXIT_OK
+from chargate.sarif.counts import COUNTS_SCHEMA_VERSION
 
 pytestmark = pytest.mark.skipif(
     subprocess.run(["git", "--version"], capture_output=True).returncode != 0,
@@ -113,6 +114,36 @@ def test_filter_sarif_writes_filtered_and_counts(pr_repo, tmp_path: Path):
     assert data["net_new_count"] == 1
     assert data["total_count"] == 3
     assert data["pre_existing_count"] == 2
+
+
+def test_counts_json_carries_the_schema_version(pr_repo, tmp_path: Path):
+    # The counts document is a public interface across a process boundary — brimyr's
+    # quality gate reads it and hard-fails on a version it does not know (brimyr#33).
+    # Dropping this key would make every consumer refuse to gate, so it is asserted.
+    repo, base, head, sarif_path = pr_repo
+    counts = tmp_path / "counts.json"
+    main(
+        [
+            "filter-sarif",
+            "--sarif",
+            str(sarif_path),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--repo",
+            str(repo),
+            "--counts-json",
+            str(counts),
+            "--quiet",
+        ]
+    )
+    data = json.loads(counts.read_text(encoding="utf-8"))
+    assert data["schema_version"] == COUNTS_SCHEMA_VERSION
+    # Consumers gate on the per-LEVEL breakdown (quality linters emit no
+    # security-severity, so the band map is empty on a quality scan). Every net-new
+    # result contributes exactly one level, so these two are the same number twice.
+    assert sum(data["per_level_net_new"].values()) == data["net_new_count"]
 
 
 def test_no_gate_exits_zero_but_still_reports(pr_repo):

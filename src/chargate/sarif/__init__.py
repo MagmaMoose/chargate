@@ -17,7 +17,7 @@ shallow clone) lives in :mod:`chargate.git` so this package can be unit-tested
 with synthetic diff text and SARIF dicts — no real repository required.
 """
 
-from chargate.sarif.counts import Counts, count_results
+from chargate.sarif.counts import COUNTS_SCHEMA_VERSION, Counts, count_results
 from chargate.sarif.dedup import dedup_key, finding_fingerprint
 from chargate.sarif.diff import DiffIndex, FileDiff, parse_unified_diff
 from chargate.sarif.filter import (
@@ -31,6 +31,7 @@ from chargate.sarif.filter import (
 )
 
 __all__ = [
+    "COUNTS_SCHEMA_VERSION",
     "Counts",
     "DiffIndex",
     "FileDiff",

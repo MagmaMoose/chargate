@@ -38,6 +38,7 @@ nav:
   - Reference:
       - CLI: cli.md
       - Action: action-reference.md
+      - Consuming the output: consuming-output.md
   - Operations:
       - Broker deployment: broker-deployment.md
       - Troubleshooting: troubleshooting.md

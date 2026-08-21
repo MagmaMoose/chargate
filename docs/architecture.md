@@ -15,7 +15,7 @@ src/chargate/
     diff.py       #   unified-diff text -> DiffIndex (changed files + added line ranges)
     model.py      #   defensive SARIF result accessors (uri, startLine, level, severity)
     filter.py     #   net-new classification + FilterPolicy + filter_sarif()
-    counts.py     #   totals + per-severity breakdowns
+    counts.py     #   totals + per-severity breakdowns; owns COUNTS_SCHEMA_VERSION
     sops.py       #   detect SOPS-encrypted values so secret scanners don't gate on them
     dedup.py      #   collapse the same finding when several linters report it
   git.py          # the ONLY git/subprocess boundary (merge-base, diff, shallow detect)
@@ -91,6 +91,13 @@ That is not a linter misbehaving, it is the gate having scanned nothing, so a pa
 carries no information. Since `strict` defaults to off, routing it through
 `strict` would leave a repo green on an empty report indefinitely. That is precisely
 how the relative-`REPORT_OUTPUT_FOLDER` bug survived for months.
+
+The output documents are written **before** that decision. `cmd_ci` writes
+`--filtered-out` and `--counts-json` as soon as the filter has run, then reaches the
+runs-less check and exits `2`, so a run that scanned nothing still leaves a well-formed
+counts file of zeros behind. The documents describe whatever was classified, which is
+the right contract — but it means a downstream consumer must read the exit code, not the
+file's existence. See [Consuming the output](consuming-output.md).
 
 ## The token broker
 

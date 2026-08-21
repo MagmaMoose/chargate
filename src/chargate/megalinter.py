@@ -44,7 +44,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from chargate.linters import FLAVOR_STANDALONE_SETS, STANDALONE_LINTERS
+from chargate.linters import FLAVOR_STANDALONE_SETS, STANDALONE_LINTERS, SYNTHETIC_FLAVORS
 
 # MegaLinter froze Docker Hub publishing at v9.4.0 (2026-02-28); v9.5.0, v9.6.0 and
 # v10.x exist ONLY on ghcr.io, which is also what upstream's own constants.py now
@@ -100,6 +100,18 @@ Pick one:
   * install qemu-user-static + binfmt on the runner and set docker_platform:
     linux/amd64 — it works, but an emulated MegaLinter run is roughly 5-10x slower."""
 
+SYNTHETIC_FLAVOR_HELP = """\
+`flavor: {flavor}` is a set chargate curates itself — MegaLinter publishes no
+`{image_repo}` image, so there is no flavor image to run and `arch_strategy: {strategy}`
+cannot be honoured. It runs as per-linter `megalinter-only-*` containers on every
+architecture, which is what `arch_strategy: auto` (the default) already does.
+
+Pick one:
+  * arch_strategy: auto — the default, and the only strategy this flavor supports.
+  * flavor: security (or a real MegaLinter flavor) if you did want a flavor image.
+  * megalinter_image: <your own custom flavor> if you have built one:
+    https://megalinter.io/latest/custom-flavors/"""
+
 # The CycloneDX BOM chargate writes into the workspace for the Dependency-Track
 # sink. Kept here as the single source of truth; `action.yml` ("Generate CycloneDX
 # SBOM") must emit this exact name so `_artifact_exclude_regex` can exclude it.
@@ -147,8 +159,22 @@ class MegaLinterConfig:
         separator = "@" if tag.startswith("sha256:") else ":"
         return f"{base}{separator}{tag}"
 
+    def is_synthetic_flavor(self) -> bool:
+        """Whether this flavor is one chargate curates rather than one MegaLinter ships.
+
+        An explicit ``image_ref`` settles it: the operator has named an image, so there
+        is one to run and chargate stops reasoning about whether upstream publishes it.
+        """
+        return not self.image_ref and self.flavor.strip().lower() in SYNTHETIC_FLAVORS
+
     def image(self) -> str:
-        """The flavor image reference. An explicit ``image_ref`` wins outright."""
+        """The flavor image reference. An explicit ``image_ref`` wins outright.
+
+        For a :data:`~chargate.linters.SYNTHETIC_FLAVORS` flavor this composes a
+        reference that does not exist upstream. That is intentional and harmless:
+        :func:`resolve_plan` never reaches flavor mode for one, and the composed name is
+        what the error message needs to quote.
+        """
         if self.image_ref:
             return self.image_ref
         flavor = self.flavor.strip().lower()
@@ -462,12 +488,29 @@ def resolve_plan(config: MegaLinterConfig, arch: str) -> RunPlan:
     An explicit ``image_ref`` or ``platform`` is the operator taking the wheel — a
     custom arm64 flavor or a qemu/binfmt runner — so chargate stops second-guessing the
     architecture and runs the flavor image as asked.
+
+    A :data:`~chargate.linters.SYNTHETIC_FLAVORS` flavor has no upstream image at all,
+    so it is standalone on every architecture — including amd64, where every other
+    flavor would take the flavor path. Asking for `flavor`/`fail` there is not a
+    degradation to refuse but a request that cannot be satisfied, so it raises with
+    :data:`SYNTHETIC_FLAVOR_HELP` rather than the arm64 guidance, which would be a
+    confusing answer to a question nobody asked.
     """
     strategy = (config.strategy or "auto").strip().lower()
     if strategy not in ARCH_STRATEGIES:
         raise MegaLinterError(
             f"Unknown arch strategy '{strategy}'. Choose one of: {', '.join(ARCH_STRATEGIES)}."
         )
+    if config.is_synthetic_flavor():
+        if strategy in ("flavor", "fail"):
+            raise MegaLinterError(
+                SYNTHETIC_FLAVOR_HELP.format(
+                    flavor=config.flavor.strip().lower(),
+                    image_repo=config.image(),
+                    strategy=strategy,
+                )
+            )
+        strategy = "standalone"
     can_run_flavor = arch == "amd64" or bool(config.image_ref) or bool(config.platform)
 
     if strategy == "auto":
