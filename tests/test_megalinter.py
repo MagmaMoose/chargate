@@ -651,3 +651,55 @@ def test_bandit_exclude_ors_consumer_pattern_rather_than_replacing_it():
     pattern = env["PYTHON_BANDIT_FILTER_REGEX_EXCLUDE"]
     assert re.search(pattern, "vendor/thing.py")  # consumer's pattern honoured
     assert re.search(pattern, "tests/test_x.py")  # chargate's default still applied
+
+
+# ── Run planning: the synthetic `quality` flavor (brimyr#33) ──
+
+
+def test_quality_flavor_runs_standalone_on_amd64_too():
+    # Every other flavor takes the flavor path on amd64. `quality` cannot: MegaLinter
+    # publishes no megalinter-quality image, so composing one would 404 on the pull.
+    plan = ml.resolve_plan(ml.MegaLinterConfig(flavor="quality"), "amd64")
+    assert plan.strategy == "standalone"
+    assert len(plan.steps) == 5
+    images = {step.image for step in plan.steps}
+    assert "ghcr.io/oxsecurity/megalinter-only-python_ruff:v10.0.0" in images
+    assert all("megalinter-only-" in image for image in images)
+
+
+def test_quality_flavor_runs_standalone_on_arm64():
+    plan = ml.resolve_plan(ml.MegaLinterConfig(flavor="quality"), "arm64")
+    assert plan.strategy == "standalone"
+    assert len(plan.steps) == 5
+
+
+def test_quality_flavor_refuses_arch_strategy_flavor_with_its_own_guidance():
+    # NOT the arm64 help: telling an amd64 operator their flavor image is amd64-only
+    # is a confusing answer to a question they did not ask.
+    with pytest.raises(ml.MegaLinterError) as excinfo:
+        ml.resolve_plan(ml.MegaLinterConfig(flavor="quality", strategy="flavor"), "amd64")
+    message = str(excinfo.value)
+    assert "curates itself" in message
+    assert "arch_strategy: auto" in message
+    assert "linux/amd64 ONLY" not in message
+
+
+def test_quality_flavor_refuses_arch_strategy_fail_too():
+    with pytest.raises(ml.MegaLinterError, match="curates itself"):
+        ml.resolve_plan(ml.MegaLinterConfig(flavor="quality", strategy="fail"), "arm64")
+
+
+def test_an_explicit_image_ref_overrides_the_synthetic_flavor():
+    # The operator has named an image, so there IS one to run — chargate stops
+    # reasoning about what upstream publishes and does as it is told.
+    config = ml.MegaLinterConfig(flavor="quality", image_ref="ghcr.io/acme/ml-quality:1")
+    assert config.is_synthetic_flavor() is False
+    plan = ml.resolve_plan(config, "amd64")
+    assert plan.strategy == "flavor"
+    assert plan.steps[0].image == "ghcr.io/acme/ml-quality:1"
+
+
+def test_the_security_flavor_is_not_synthetic():
+    # Live behaviour unchanged: `security` still resolves to the flavor image on amd64.
+    assert ml.MegaLinterConfig(flavor="security").is_synthetic_flavor() is False
+    assert ml.resolve_plan(ml.MegaLinterConfig(flavor="security"), "amd64").strategy == "flavor"

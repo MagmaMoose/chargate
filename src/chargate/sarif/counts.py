@@ -3,6 +3,11 @@
 Kept dependency-light and decoupled from :mod:`chargate.sarif.filter` (which
 imports this module): it takes the set of net-new ``(run_index, result_index)``
 keys rather than verdict objects, so there is no import cycle.
+
+The shape :class:`Counts` is serialised into by ``--counts-json`` is a **public
+interface** across a process boundary — brimyr reads it to run its own quality gate
+(MagmaMoose/brimyr#33) without importing any of this. :data:`COUNTS_SCHEMA_VERSION`
+is what lets the far side tell a document it understands from one it does not.
 """
 
 from __future__ import annotations
@@ -18,6 +23,19 @@ from chargate.sarif.model import (
     security_severity,
     severity_band,
 )
+
+#: Version of the JSON document ``chargate ... --counts-json`` writes.
+#:
+#: **Bump this only on a breaking change** — a key removed, renamed, or given a new
+#: meaning. Adding a key is not breaking: a reader that does not know it ignores it.
+#: Consumers are expected to hard-fail on a version they do not recognise rather than
+#: guess, so a bump is a coordinated release on both sides of the boundary, not a
+#: cosmetic edit.
+#:
+#: 1 — net_new_count, total_count, pre_existing_count, suppressed_count,
+#:     sops_ignored_count, deduped_count, per_level_total, per_level_net_new,
+#:     per_severity_total, per_severity_net_new.
+COUNTS_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)

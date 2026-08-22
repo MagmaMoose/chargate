@@ -29,7 +29,7 @@ still sees everything, including inherited debt.
 - [Net-new semantics](#net-new-semantics)
 - [PR comments](#pr-comments-ghas-style)
 - [Sinks: DefectDojo & Dependency-Track](#sinks-defectdojo--dependency-track)
-- [Modes](#modes) · [CLI](#cli) · [Architecture support](#architecture-support)
+- [Modes](#modes) · [CLI](#cli) · [Consuming the output](#consuming-the-output) · [Architecture support](#architecture-support)
 - [Versioning & pinning](#versioning--pinning) · [Security](#security)
 - [What MegaLinter covers](#what-megalinter-covers-vs-the-old-hand-rolled-set) · [Migrating from v1](#migrating-from-v1)
 - [Documentation & contributing](#documentation--contributing)
@@ -216,7 +216,7 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `flavor` | `security` | MegaLinter flavor: `security` (focused default) · `all` (full lint image) · `python` · `go` · … |
+| `flavor` | `security` | MegaLinter flavor: `security` (focused default) · `all` (full lint image) · `python` · `go` · … — plus `quality`, a five-linter set **Chargate** curates (MegaLinter publishes no quality flavor). See [The `quality` flavor](docs/setup.md#the-quality-flavor). |
 | `megalinter_registry` | `ghcr.io` | Registry host for the MegaLinter images. MegaLinter froze Docker Hub publishing at `v9.4.0`, so `docker.io` cannot serve `v9.5.0+`. Point this at a mirror / pull-through cache if you have one. |
 | `megalinter_namespace` | `oxsecurity` | Image namespace under the registry. |
 | `megalinter_image` | `''` | **Full image reference**, overriding registry + namespace + flavor + tag entirely (e.g. a [custom flavor](https://megalinter.io/latest/custom-flavors/): `ghcr.io/you/repo/megalinter-custom-flavor:v10.0.0`). When set, Chargate never composes an image name. |
@@ -286,6 +286,8 @@ All inputs are optional. **DefectDojo / Dependency-Track are each active iff the
 | `net_new_count` | Number of net-new (PR-introduced) findings. |
 | `total_count` | Total findings in the full SARIF (net-new + pre-existing). |
 | `sarif_path` | Path to the full (unfiltered) SARIF report. |
+| `filtered_sarif_path` | Path to the net-new-only SARIF (`chargate-reports/net-new.sarif`). Written on every run. |
+| `counts_path` | Path to the counts JSON (`chargate-reports/counts.json`) — the versioned document another gate reads. Written on every run. See [Consuming the output](#consuming-the-output). |
 | `scan_mode` | How MegaLinter actually ran: `flavor` · `standalone` · `provided`. Assert on it to refuse a release built on a reduced scan. |
 | `linters_skipped` | Linters standalone mode could not run, with a reason for each (empty otherwise). |
 
@@ -424,6 +426,32 @@ chargate local path/to/file.py        # what the pre-commit hook runs
 
 Exit codes: `0` pass · `1` blocking net-new findings · `2` setup/usage error.
 
+## Consuming the output
+
+Chargate classifies; the caller decides. Every run writes two documents another tool can
+read without importing any of Chargate — `filtered_sarif_path`
+(`chargate-reports/net-new.sarif`) and `counts_path` (`chargate-reports/counts.json`) —
+and the counts JSON is a **stable public interface**:
+
+```json
+{ "schema_version": 1, "net_new_count": 3, "total_count": 128,
+  "per_level_net_new": { "error": 1, "warning": 2 }, "per_severity_net_new": { "high": 1 } }
+```
+
+- **`schema_version` first.** A key added is not breaking; a key removed, renamed, or
+  re-defined is. A consumer must **hard-fail on a version it does not recognise** rather
+  than gate on a document it cannot read — a key you cannot find reads as zero, and zero
+  net-new reads as a pass.
+- **The file's existence proves nothing.** `chargate ci` writes both documents *before*
+  it decides its exit code, so a run that scanned nothing leaves a well-formed counts
+  file full of zeros and *then* exits `2`. Trust the step outcome, not the file.
+- **Report-only:** `fail_on: none` on the action, `--no-gate` on `filter-sarif`.
+
+The first consumer is [brimyr](https://github.com/MagmaMoose/brimyr), which folds these
+findings into its own pull-request verdict
+([brimyr#33](https://github.com/MagmaMoose/brimyr/issues/33)). Key-by-key contract,
+invariants, and a worked workflow: [Consuming the output](docs/consuming-output.md).
+
 ## Architecture support
 
 MegaLinter's **flavor** images (`megalinter`, `megalinter-security`, …) are published
@@ -448,6 +476,14 @@ linters (trivy, semgrep, checkov, grype, syft, bandit, betterleaks, kingfisher, 
 devskim, dustilock, kubescape, tflint, hadolint, shellcheck, cfn-lint, ansible-lint,
 trivy-sbom). Upstream's 13 amd64-only linters are all style/language tooling (jscpd,
 powershell, chktex, …); those are skipped by name, never silently.
+
+Missing arm64 is not the only reason to skip one. The gate reads the merged SARIF and
+nothing else, so a linter whose MegaLinter descriptor does not set `can_output_sarif` is
+invisible to it however cleanly it runs — standalone mode names it and its reason
+instead of paying for the pull. `flavor: quality` is the one flavor that runs standalone
+on **every** architecture: Chargate curates that set itself and there is no upstream
+image to take the flavor path with. See
+[The `quality` flavor](docs/setup.md#the-quality-flavor).
 
 Two other routes, both supported:
 
@@ -513,6 +549,16 @@ adopts them without being asked, so they are listed rather than left to be disco
   leading chargate identity run so the derived type stops changing per PR; the first
   upload after upgrading creates one new Test in the engagement and reimports into it
   from then on. See [the DefectDojo sink](#defectdojo-optional-sink).
+
+The release that added `flavor: quality` corrects three more, in the linter registry that
+backs standalone mode. `ACTION_ACTIONLINT`, `PYTHON_PYLINT` and `POWERSHELL_POWERSHELL`
+were recorded as SARIF-emitting purely because that is the table's default — none had
+ever been probed, and none of them sets `can_output_sarif` at MegaLinter `v10.0.0`. Each
+was a container pull per standalone run that contributed nothing the gate could read,
+which reads exactly like a clean repo. They are now **skipped by name with a reason** and
+appear in `linters_skipped`; if you named one in `standalone_linters` expecting findings,
+there were never any to have. A registry test now cross-references every `sarif` flag
+against MegaLinter's own descriptors so the two cannot drift again.
 
 ## Security
 
@@ -588,8 +634,9 @@ you migrate. Move to the `v2` composite action when ready.
 
 - **Full docs** (MkDocs): [architecture](docs/architecture.md) ·
   [net-new gating](docs/net-new.md) · [SAST direction](docs/sast-benchmark.md) ·
-  [setup & usage](docs/setup.md) ·
-  [CLI reference](docs/cli.md). Preview locally with `uv run --group docs mkdocs serve`.
+  [setup & usage](docs/setup.md) · [CLI reference](docs/cli.md) ·
+  [consuming the output](docs/consuming-output.md). Preview locally with
+  `uv run --group docs mkdocs serve`.
 - **Contributing:** issues and PRs are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
   Dev stack: Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only core.
   External GitHub Actions are SHA-pinned; releases are automated (Conventional Commits

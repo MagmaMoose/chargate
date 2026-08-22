@@ -58,6 +58,10 @@ value unset and the CLI's own default applies.
 | `setup_python` | `true` | Run actions/setup-python. Set false on a runner that already has a suitable Python 3.11+, setup-python only publishes linux/arm64 builds for the Ubuntu 22.04/24.04/26.04 images, so on any other arm64 self-hosted/ARC image it fails with "version not found". Chargate itself is stdlib-only pure Python and runs anywhere. |
 | `python_version` | `3.12` | Python version used to run the chargate CLI. |
 
+One `flavor` value is not a MegaLinter flavor: `quality` is a five-linter set Chargate
+curates itself and runs as per-linter images on every architecture. See
+[The `quality` flavor](setup.md#the-quality-flavor).
+
 ## Outputs
 
 | Output | Description |
@@ -67,6 +71,8 @@ value unset and the CLI's own default applies.
 | `net_new_count` | Number of net-new (PR-introduced) findings. |
 | `total_count` | Total findings in the full SARIF (net-new + pre-existing). |
 | `sarif_path` | Path to the full (unfiltered) SARIF report. |
+| `filtered_sarif_path` | Path to the net-new-only SARIF (`chargate-reports/net-new.sarif`). Written on every run, baseline included, where the net-new set is empty by construction. |
+| `counts_path` | Path to the counts JSON (`chargate-reports/counts.json`), the versioned document a downstream gate reads. Written on every run. See [Consuming the output](consuming-output.md). |
 | `scan_mode` | How MegaLinter actually ran: flavor (the flavor image) \| standalone (per-linter megalinter-only-* images, the arm64 path) \| provided (an existing SARIF was passed in). Assert on this to fail a release job that would otherwise ship on a reduced scan. |
 | `linters_skipped` | Linters standalone mode could not run, with the reason for each (empty otherwise). |
 

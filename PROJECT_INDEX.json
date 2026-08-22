@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-20T00:00:00Z",
+  "generated": "2026-08-21T00:00:00Z",
   "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact) and a CycloneDX BOM (Syft) is shipped to Dependency-Track. One `chargate` CLI backs TWO GitHub surfaces: a composite action (action.yml) and a pre-commit hook (.pre-commit-hooks.yaml). The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary. A SEPARATE deployable under broker/ mints Chargate[bot] tokens for PR-comment authorship via GitHub Actions OIDC \u2014 an AWS Lambda behind an API Gateway HTTP API, with its own pyproject and virtualenv, NOT part of the stdlib-only CLI wheel and NOT a dependency group of it.",
   "entrypoints": [
     "src/chargate/cli.py:main",
@@ -11,7 +11,7 @@
   "modules": {
     "cli": {
       "path": "src/chargate/cli.py",
-      "purpose": "argparse dispatch for the 6 subcommands; wires git -> filter -> gate -> report -> DefectDojo/Dependency-Track/PR-comments, and the standalone install-hooks/uninstall-hooks. The only module that touches os.environ + file writes + working-tree reads (SOPS) for the CLI flow.",
+      "purpose": "argparse dispatch for the 6 subcommands; wires git -> filter -> gate -> report -> DefectDojo/Dependency-Track/PR-comments, and the standalone install-hooks/uninstall-hooks. The only module that touches os.environ + file writes + working-tree reads (SOPS) for the CLI flow. counts_to_dict emits the versioned counts document (schema_version first) — a public interface, see sarif.counts — and cmd_ci writes it BEFORE the scanned_nothing check that exits 2, so a zeroed counts file on disk is never evidence that anything was scanned.",
       "exports": [
         "main",
         "build_parser",
@@ -103,10 +103,11 @@
     },
     "sarif.counts": {
       "path": "src/chargate/sarif/counts.py",
-      "purpose": "Tally totals + net-new + suppressed + sops_ignored + per-level + per-severity-band breakdowns. Takes net-new/suppressed/sops (run_index, result_index) keys (not verdicts) to avoid an import cycle with filter; pre_existing = total - net_new - suppressed - sops_ignored. Pure.",
+      "purpose": "Tally totals + net-new + suppressed + sops_ignored + per-level + per-severity-band breakdowns. Takes net-new/suppressed/sops (run_index, result_index) keys (not verdicts) to avoid an import cycle with filter; pre_existing = total - net_new - suppressed - sops_ignored. Pure. The shape cli.counts_to_dict serialises this into (--counts-json) is a VERSIONED PUBLIC INTERFACE read across a process boundary by brimyr's gate (brimyr#33): COUNTS_SCHEMA_VERSION bumps only on a breaking change (key removed/renamed/re-defined); adding a key is additive. Contract: docs/consuming-output.md.",
       "exports": [
         "count_results",
-        "Counts"
+        "Counts",
+        "COUNTS_SCHEMA_VERSION"
       ],
       "depends_on": [
         "sarif.model"
@@ -147,7 +148,7 @@
     },
     "megalinter": {
       "path": "src/chargate/megalinter.py",
-      "purpose": "Build the MegaLinter env (DISABLE_ERRORS=true so it never gates; SARIF/JSON reporters on; normalized URIs; REPORT_OUTPUT_FOLDER ABSOLUTE under /tmp/lint, or the merged SARIF is written inside the container and destroyed by --rm) + the docker run command; detect the Docker DAEMON architecture and plan the run: the amd64-only flavor image, or MegaLinter multi-arch per-linter megalinter-only-* images merged back into one SARIF (arm64), or a precise error naming every way out. Images default to ghcr.io because Docker Hub is frozen at v9.4.0. Planning/env/command assembly are pure/testable; the runner is injectable.",
+      "purpose": "Build the MegaLinter env (DISABLE_ERRORS=true so it never gates; SARIF/JSON reporters on; normalized URIs; REPORT_OUTPUT_FOLDER ABSOLUTE under /tmp/lint, or the merged SARIF is written inside the container and destroyed by --rm) + the docker run command; detect the Docker DAEMON architecture and plan the run: the amd64-only flavor image, or MegaLinter multi-arch per-linter megalinter-only-* images merged back into one SARIF (arm64), or a precise error naming every way out. A SYNTHETIC_FLAVORS flavor (MegaLinterConfig.is_synthetic_flavor) has no upstream image at all, so resolve_plan forces standalone on amd64 too and raises SYNTHETIC_FLAVOR_HELP — not the arm64 guidance — under arch_strategy flavor/fail; an explicit image_ref overrides. Images default to ghcr.io because Docker Hub is frozen at v9.4.0. Planning/env/command assembly are pure/testable; the runner is injectable.",
       "exports": [
         "run",
         "resolve_plan",
@@ -166,7 +167,8 @@
         "DEFAULT_TAG",
         "CONTAINER_WORKSPACE",
         "ARCH_STRATEGIES",
-        "ARM64_HELP"
+        "ARM64_HELP",
+        "SYNTHETIC_FLAVOR_HELP"
       ],
       "depends_on": [
         "linters"
@@ -174,10 +176,11 @@
     },
     "linters": {
       "path": "src/chargate/linters.py",
-      "purpose": "Version-pinned table of MegaLinter standalone (megalinter-only-*) images: which linters have an arm64 manifest at DEFAULT_TAG, and which can emit SARIF (one that cannot is invisible to the gate, so running it is pure cost). Plus the per-flavor substitution set used when the amd64-only flavor image cannot run. Re-verified against the live registry by tests/test_linters_registry.py.",
+      "purpose": "Version-pinned table of MegaLinter standalone (megalinter-only-*) images: which linters have an arm64 manifest at DEFAULT_TAG, and which can emit SARIF (one that cannot is invisible to the gate, so running it is pure cost). Plus the per-flavor substitution set used when the amd64-only flavor image cannot run, and SYNTHETIC_FLAVORS ('quality') — sets chargate curates that MegaLinter publishes no image for, so they run standalone on EVERY architecture. Both flags are re-verified by tests/test_linters_registry.py: arm64 against the live registry, sarif against MegaLinter's own descriptors (it is not registry-visible, which is how three entries carried the _entry default un-probed).",
       "exports": [
         "STANDALONE_LINTERS",
         "FLAVOR_STANDALONE_SETS",
+        "SYNTHETIC_FLAVORS",
         "LinterImage"
       ],
       "depends_on": []

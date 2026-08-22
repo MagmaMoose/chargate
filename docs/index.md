@@ -40,6 +40,10 @@ wire one up, [Architecture](architecture.md) for how it fits together, and
 [Net-new gating](net-new.md) for the precise classification rules. Every input and
 output of the action is listed in the [Action reference](action-reference.md).
 
+Another tool can gate on Chargate's classification without importing any of it: every
+run writes a net-new SARIF and a versioned counts JSON, documented as a stable
+interface in [Consuming the output](consuming-output.md).
+
 ## PR comments
 
 On a pull request Chargate posts its net-new findings as GHAS-style comments. Give the

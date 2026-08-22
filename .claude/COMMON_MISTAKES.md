@@ -115,6 +115,28 @@
   nowhere else and the observability was asserted into existence. A test for log output must
   reproduce the deployed logging setup (root at WARNING, one handler) rather than configure it —
   see `test_outcome_survives_a_root_logger_pinned_to_warning`.
+- **`_entry()`'s `sarif=True` default is a claim, and it was never checked.** `arm64` in
+  `linters.STANDALONE_LINTERS` was always probed against the live registry; `sarif` lives in
+  MegaLinter's *descriptor*, not the registry, so `ACTION_ACTIONLINT`, `PYTHON_PYLINT` and
+  `POWERSHELL_POWERSHELL` carried the default `True` for their whole life while upstream said
+  `can_output_sarif: false`. The failure is the quiet kind: the container pulls, starts, runs,
+  and contributes zero findings the gate can read — indistinguishable from a clean repo, and
+  paid for on every standalone run. `tests/test_linters_registry.py` now cross-checks every
+  `sarif` flag against the descriptors at `DEFAULT_TAG` (indentation-parsed, no PyYAML — the
+  dev group has no YAML parser and the core has no runtime deps). Never add a linter entry on
+  the defaults alone; probe it, and note that an explicit `name:` in the descriptor overrides
+  the derived key (ESLint is `JAVASCRIPT_ES`, **not** `JAVASCRIPT_ESLINT`, whose image 404s).
+- **The counts JSON is a versioned public interface, not an internal dump.**
+  `cli.counts_to_dict` + `sarif.counts.COUNTS_SCHEMA_VERSION` are read across a process
+  boundary by brimyr's gate (brimyr#33), which hard-fails on a version it does not know.
+  Adding a key is additive; removing, renaming, or re-defining one is breaking and needs a
+  version bump coordinated with the consumer — a key a reader cannot find reads as zero, and
+  zero net-new reads as a pass. Contract lives in `docs/consuming-output.md`; keep the two in
+  step. Related trap: `cmd_ci` writes `--filtered-out`/`--counts-json` (~line 412) *before*
+  the `scanned_nothing` check that exits `2` (~line 472), so a run that scanned nothing still
+  leaves a well-formed counts document full of zeros on disk. That ordering is fine — the
+  documents describe whatever was classified — but it means the file's existence is never
+  evidence of a scan, and any consumer doc must say so.
 - **Do not bypass this repo's own git hooks.** `git -c core.hooksPath=/dev/null commit` (or
   `--no-verify`) skips `chargate local`, `actions-pin-sha`, the conventional branch-name check and
   `commit-msg`. Chargate is the tool that enforces these; routing around them here is

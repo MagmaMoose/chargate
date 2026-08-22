@@ -36,7 +36,8 @@ On PRs it uses MegaLinter's focused `security` flavor and requests changed-files
 analysis, gates on net-new findings, and ships the full SARIF. Repository-level
 security scanners may still inspect the whole repo or history. On push to the default
 branch it runs a non-gating whole-repo baseline scan. Set `flavor: all` for the full
-lint image, or `incremental: 'false'` for a whole-repo PR scan. The action checks out
+lint image, `flavor: quality` for the [curated quality set](#the-quality-flavor), or
+`incremental: 'false'` for a whole-repo PR scan. The action checks out
 with `fetch-depth: 0` by default (net-new needs the merge-base), set
 `checkout: 'false'` if you already checked out with full history.
 
@@ -229,6 +230,48 @@ Images come from `ghcr.io/oxsecurity` at `v10.0.0` by default. MegaLinter froze 
 Hub publishing at `v9.4.0`, so `docker.io` cannot serve any current version. Point
 `megalinter_registry` / `megalinter_namespace` at a mirror if you need one, or
 `megalinter_image` at a full reference to bypass name composition entirely.
+
+### The `quality` flavor
+
+`flavor: quality` is **not** a MegaLinter flavor. MegaLinter publishes no
+`megalinter-quality` image, so Chargate curates the set itself: five SARIF-emitting
+quality linters, run as per-linter `megalinter-only-*` containers.
+
+| Linter | Covers |
+| --- | --- |
+| `GO_GOLANGCI_LINT` | Go — the meta-linter, so `GO_REVIVE` would be redundant. |
+| `JAVASCRIPT_ES` | JavaScript (ESLint). |
+| `TYPESCRIPT_ES` | TypeScript (ESLint). |
+| `JAVA_PMD` | Java bugs and code smells. |
+| `PYTHON_RUFF` | Python — the flake8 / isort / pyupgrade families in one container. |
+
+**Five, not a flavor's worth, deliberately.** MegaLinter's quality half over a mature
+repo produces hundreds of net-new findings on the first pull request, because "changed
+line touched by a formatter-opinionated linter" is a far denser event than "changed line
+with a security finding". A gate that goes red with 200 findings on its first real PR
+gets switched off, and then it is decoration. The set starts at five that earn their
+noise and grows from evidence. `JAVA_CHECKSTYLE` is verified and available via
+`standalone_linters`, but is not in the set: it reports formatting opinion, which is the
+densest noise there is.
+
+Every entry is disjoint from the `security` set, so a repo running both gates never has
+one finding block it twice. There is **no .NET entry**: at MegaLinter `v10.0.0` no
+C#/VB.NET linter sets `can_output_sarif`, so none of them could reach the net-new gate
+at all. Said here rather than discovered later by a .NET team whose quality gate reports
+zero findings forever.
+
+!!! note "It always runs standalone, on every architecture"
+    With no flavor image to run, `quality` takes the per-linter path on amd64 too — the
+    one place every other flavor uses a single container. `arch_strategy: flavor` or
+    `fail` therefore cannot be honoured and Chargate raises, naming this reason rather
+    than the arm64 guidance, which would be a confusing answer to a question nobody
+    asked. `arch_strategy: auto` (the default) is the strategy this flavor supports.
+    Setting `megalinter_image` overrides all of it: an image has been named, so Chargate
+    stops reasoning about what upstream publishes and runs it.
+
+Quality linters emit a SARIF `level` and no numeric `security-severity`, which decides
+how you threshold over them — see
+[the band note in Consuming the output](consuming-output.md#the-counts-document).
 
 ### Kubernetes manifests
 

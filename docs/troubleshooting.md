@@ -46,12 +46,48 @@ still gates, which is deliberate.
 If a genuinely encrypted value still blocks, check that the file is actually SOPS
 output and that the finding is classified as a secret.
 
+### A linter runs (or is skipped) and its findings never reach the gate
+
+The gate only ever reads the merged SARIF, so a linter whose descriptor does not set
+`can_output_sarif` is invisible to it however cleanly it runs. Standalone mode therefore
+skips those by name, with the reason `linter emits no SARIF — it could never reach the
+gate`, and lists them in `linters_skipped` and on the PR rather than dropping them
+silently.
+
+Three entries used to be missing from that list. `ACTION_ACTIONLINT`, `PYTHON_PYLINT`
+and `POWERSHELL_POWERSHELL` carried `sarif=True` in Chargate's registry purely because
+that is the `_entry` default — none had ever been probed, and none of them sets
+`can_output_sarif` at MegaLinter `v10.0.0`. Each one cost a container pull per run and
+contributed nothing the gate could read, which looks exactly like a clean repo. They are
+now recorded as `sarif=False` and skipped with that reason.
+
+`tests/test_linters_registry.py` cross-references every `sarif` flag against MegaLinter's
+own descriptors at the pinned tag, so the table and upstream cannot drift apart again —
+the same way the `arm64` flags are re-probed against the live registry.
+
+If you enabled one of these expecting findings: there are none to have. Use a linter that
+emits SARIF (the `quality` set is five of them,
+see [The `quality` flavor](setup.md#the-quality-flavor)), or accept that this one gates
+only via `strict`, as a tool error.
+
 ### The scan reports nothing and the gate passes
 
 A SARIF report with zero `runs` means nothing was scanned. Chargate fails this on its
 own rather than behind `--strict`, because a pass on an empty report is meaningless.
 If you see it, the linter container failed to start. Read the MegaLinter output above
 the gate step.
+
+### A downstream tool read `counts.json` and saw a clean pull request
+
+`chargate ci` writes `--filtered-out` and `--counts-json` *before* it decides its own
+exit code. A run whose SARIF carried no `runs` therefore leaves a well-formed counts
+document full of zeros on disk and then exits `2` for exactly that reason. A consumer
+reading only the file sees `net_new_count: 0` and reports green.
+
+The file's existence is not evidence that anything was scanned. Gate on the step's
+outcome (or the CLI's exit code) as well as the document, and treat exit `2` as *no
+answer* rather than *no findings*. Full contract:
+[Consuming the output](consuming-output.md).
 
 ## Chargate[bot] comments are attributed to github-actions[bot]
 

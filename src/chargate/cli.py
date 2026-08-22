@@ -34,7 +34,9 @@ from chargate import megalinter as ml
 from chargate import report as report_mod
 from chargate.gate import EXIT_ERROR, EXIT_OK, FAIL_ON_CHOICES, decide_gate, effective_band
 from chargate.install_hooks import HookInstallError, install_hooks, uninstall_hooks
+from chargate.linters import SYNTHETIC_FLAVORS
 from chargate.modes import Mode, resolve_mode
+from chargate.sarif.counts import COUNTS_SCHEMA_VERSION
 from chargate.sarif.diff import DiffIndex
 from chargate.sarif.filter import (
     FilterPolicy,
@@ -128,8 +130,15 @@ def _build_sops_index(repo: str, sarif: dict[str, Any], policy: FilterPolicy) ->
 
 
 def counts_to_dict(result: FilterResult) -> dict[str, Any]:
+    """Serialise the counts for ``--counts-json``. A documented public interface.
+
+    ``schema_version`` leads deliberately: it is the first thing a consumer on the far
+    side of the process boundary must read, and the thing it must refuse to proceed
+    without. See :data:`chargate.sarif.counts.COUNTS_SCHEMA_VERSION`.
+    """
     c = result.counts
     return {
+        "schema_version": COUNTS_SCHEMA_VERSION,
         "net_new_count": c.net_new,
         "total_count": c.total,
         "pre_existing_count": c.pre_existing,
@@ -253,18 +262,28 @@ def _policy_from_args(
     )
 
 
-def _render_scan_note(ml_run: ml.MegaLinterRun) -> str | None:
+def _render_scan_note(ml_run: ml.MegaLinterRun, flavor: str = "") -> str | None:
     """One line for the job summary / PR comment describing a non-standard scan.
 
     A degraded scan that reports nothing is indistinguishable from a clean repo, so
     standalone runs say so on the PR — including which linters were skipped and why.
+
+    A synthetic flavor gets a different sentence: it is standalone by construction, not
+    because the runner is arm64, and telling an amd64 user their flavor image is
+    amd64-only is a wrong answer to a question they did not ask.
     """
     if ml_run.strategy != "standalone":
         return None
-    note = (
-        f"Ran on a `{ml_run.arch}` runner using MegaLinter's per-linter images "
-        f"(`megalinter-only-*`) — the flavor image is `linux/amd64` only."
-    )
+    if flavor.strip().lower() in SYNTHETIC_FLAVORS:
+        note = (
+            f"`flavor: {flavor.strip().lower()}` is a set chargate curates — it runs as "
+            "MegaLinter per-linter images (`megalinter-only-*`), not a flavor image."
+        )
+    else:
+        note = (
+            f"Ran on a `{ml_run.arch}` runner using MegaLinter's per-linter images "
+            f"(`megalinter-only-*`) — the flavor image is `linux/amd64` only."
+        )
     if ml_run.linters_skipped:
         note += (
             " Skipped: "
@@ -320,7 +339,7 @@ def cmd_ci(args: argparse.Namespace) -> int:
         megalinter_ok = ml_run.returncode == 0
         scan_mode = ml_run.strategy
         linters_skipped = ml_run.linters_skipped
-        scan_note = _render_scan_note(ml_run)
+        scan_note = _render_scan_note(ml_run, args.flavor)
         if ml_run.strategy == "standalone" and not args.quiet:
             _eprint(
                 f"chargate: {ml_run.arch} runner — ran {len(ml_run.linters_run)} MegaLinter "

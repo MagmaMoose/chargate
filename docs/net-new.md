@@ -88,6 +88,15 @@ Severity uses the SARIF `security-severity` band when present
 (`≥9.0` critical, `≥7.0` high, `≥4.0` medium, `>0` low), else the SARIF `level`
 (`error`→high, `warning`→medium, `note`→low).
 
+That fallback (`gate.effective_band`) is why `fail_on` is **not** blind to quality
+findings. Ruff, ESLint, PMD and golangci-lint emit a `level` and no numeric
+`security-severity`, so `fail_on: high` blocks on an `error` from a
+[`flavor: quality`](setup.md#the-quality-flavor) run just as it would on a scanner
+finding scored 7.0. What stays empty is the **counts document's** `per_severity_*`
+maps, which are populated only from a real `security-severity` — so a *downstream*
+consumer thresholding on those bands sees nothing and must threshold on levels
+instead. See [Consuming the output](consuming-output.md#the-counts-document).
+
 !!! tip "Full vs filtered SARIF"
     The gate only ever looks at the **net-new** subset, but the **full**,
     unfiltered SARIF is what gets shipped to DefectDojo / the Security tab /

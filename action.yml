@@ -250,6 +250,19 @@ outputs:
   sarif_path:
     description: 'Path to the full (unfiltered) SARIF report.'
     value: ${{ steps.chargate.outputs.sarif_path }}
+  filtered_sarif_path:
+    description: >-
+      Path to the net-new-only SARIF — the same set `filter-sarif --out` writes. Part of
+      the documented interface another gate consumes (MagmaMoose/brimyr#33): Chargate
+      reports, the caller decides. Always written, including on baseline runs, where the
+      net-new set is empty by construction.
+    value: ${{ steps.chargate.outputs.filtered_sarif_path }}
+  counts_path:
+    description: >-
+      Path to the counts JSON — the same document `filter-sarif --counts-json` writes,
+      carrying `schema_version`. A consumer must hard-fail on a version it does not
+      recognise rather than gate on a document it cannot read.
+    value: ${{ steps.chargate.outputs.counts_path }}
   scan_mode:
     description: >-
       How MegaLinter actually ran: flavor (the flavor image) | standalone (per-linter
@@ -375,12 +388,22 @@ runs:
         # upload steps) can see it; emit a workspace-relative output path.
         sarif_rel="chargate-reports/full.sarif"
         sarif_abs="${GITHUB_WORKSPACE:-$PWD}/$sarif_rel"
+        # The net-new pair, for a caller that gates on Chargate's classification without
+        # importing any of it (MagmaMoose/brimyr#33). Written unconditionally: a
+        # consumer that finds no file cannot tell "no findings" from "the step never
+        # produced one", and one of those two must not read as a pass.
+        filtered_rel="chargate-reports/net-new.sarif"
+        filtered_abs="${GITHUB_WORKSPACE:-$PWD}/$filtered_rel"
+        counts_rel="chargate-reports/counts.json"
+        counts_abs="${GITHUB_WORKSPACE:-$PWD}/$counts_rel"
         # Matches the "Generate CycloneDX SBOM" step's output-file: RUNNER_TEMP, not the
         # workspace, so MegaLinter never scans chargate's own generated BOM. Keep the two
         # in lockstep — a mismatch silently skips the Dependency-Track upload.
         bom_abs="${RUNNER_TEMP:-${GITHUB_WORKSPACE:-$PWD}}/chargate-sbom.cdx.json"
         mkdir -p "$(dirname "$sarif_abs")"
         echo "sarif_path=$sarif_rel" >> "$GITHUB_OUTPUT"
+        echo "filtered_sarif_path=$filtered_rel" >> "$GITHUB_OUTPUT"
+        echo "counts_path=$counts_rel" >> "$GITHUB_OUTPUT"
 
         base="${BASE_REF_IN:-$PR_BASE_SHA}"
         head="${HEAD_REF_IN:-${PR_HEAD_SHA:-$GH_SHA}}"
@@ -392,7 +415,9 @@ runs:
           --flavor "$FLAVOR_IN"
           --repo "."
           --head "$head"
-          --sarif-out "$sarif_abs")
+          --sarif-out "$sarif_abs"
+          --filtered-out "$filtered_abs"
+          --counts-json "$counts_abs")
         # Image-selection inputs default to EMPTY and are appended only when set, so
         # the CLI's own defaults (and its CHARGATE_* env fallbacks, which let a
         # self-hosted fleet redirect every repo at once) stay reachable. Passing the
