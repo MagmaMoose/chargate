@@ -56,51 +56,93 @@ resolve_sha() {
   return 0
 }
 
+# Rank candidate tag names on stdin and print the best one.
+#
+# Several tags routinely point at ONE commit. actions/deploy-pages carries v5.0.0,
+# the floating v5, AND a legacy v3.0.2-node.24 on the same SHA — so "whichever tag
+# the API happened to list first" is not a choice, it is a coin flip. Picking the
+# legacy one writes `# v3.0.2-node.24` next to a v5.0.0 SHA, which understates the
+# version to every human reader and, worse, to Caldrith: its downgrade guard parses
+# the version out of exactly this comment, so a wrong comment corrupts the ordering
+# it uses to decide whether a repo is ahead of the admin baseline.
+#
+# Ordering, best first:
+#   1. Clean release tags (v1 / v1.2 / v1.2.3) beat suffixed ones (v5.0.0-rc.1,
+#      v3.0.2-node.24). A suffix means prerelease or legacy, never "newer".
+#   2. Higher semver — major, then minor, then patch.
+#   3. More specific — v5.0.0 beats the floating major v5 at the same version.
+#
+# Ranking on segment COUNT first (the previous approach) is what broke: the four
+# segments of v3.0.2-node.24 outscored the three of v5.0.0 before either version
+# was compared.
+_TAG_RANK_AWK='
+function rank(t,   n, i, p) {
+  sub(/^v/, "", t)
+  clean = (t ~ /^[0-9]+(\.[0-9]+){0,2}$/) ? 1 : 0
+  n = split(t, p, /[.-]/)
+  spec = 0
+  for (i = 1; i <= 3; i++) {
+    if (i <= n && p[i] ~ /^[0-9]+$/) { ver[i] = p[i] + 0; spec = i } else { ver[i] = 0 }
+  }
+}
+BEGIN { best = ""; bclean = -1; b1 = -1; b2 = -1; b3 = -1; bspec = -1 }
+{
+  rank($0)
+  better = 0
+  if (clean > bclean) better = 1
+  else if (clean == bclean) {
+    if (ver[1] > b1) better = 1
+    else if (ver[1] == b1) {
+      if (ver[2] > b2) better = 1
+      else if (ver[2] == b2) {
+        if (ver[3] > b3) better = 1
+        else if (ver[3] == b3 && spec > bspec) better = 1
+      }
+    }
+  }
+  if (better) { best = $0; bclean = clean; b1 = ver[1]; b2 = ver[2]; b3 = ver[3]; bspec = spec }
+}
+END { print best }'
+
+# Strip refs/tags/ and the ^{} peel marker, leaving bare tag names (deduplicated).
+_TAG_NAMES_AWK='{t=$2; gsub("refs/tags/","",t); gsub(/\^\{\}$/,"",t); print t}'
+
 best_tag_for_sha() {
-  # $1=remote, $2=sha -> pick a reasonable tag pointing to sha (semver-ish preference)
+  # $1=remote, $2=sha -> the best tag pointing at that exact commit
   local remote="$1" sha="$2" tags matches
   tags=$(git ls-remote --tags "$remote") || true
   [[ -n "$tags" ]] || { printf '' ; return 0; }
-  matches=$(printf '%s\n' "$tags" | awk -v s="$sha" '$1==s{t=$2; gsub("refs/tags/","",t); gsub(/\^\{\}$/,"",t); print t}' | sort -u)
+  matches=$(printf '%s
+' "$tags" | awk -v s="$sha" '$1==s'"$_TAG_NAMES_AWK" | sort -u)
   [[ -n "$matches" ]] || { printf '' ; return 0; }
-  printf '%s\n' "$matches" | awk '
-    function parse(t, arr,    s, n, i, m){gsub(/^v/,"",t); n=split(t,arr,/[.-]/); for(i=1;i<=3;i++){s=(i<=n?arr[i]:0); m=(s ~ /^[0-9]+$/? s+0:0); arr[i]=m} return n}
-    BEGIN{best="";b1=b2=b3=0;bseg=0}
-    {seg=parse($0,a); if(seg>3)seg=3; if(seg>bseg || (seg==bseg && (a[1]>b1 || (a[1]==b1 && (a[2]>b2 || (a[2]==b2 && a[3]>b3)))))){best=$0;bseg=seg;b1=a[1];b2=a[2];b3=a[3]}}
-    END{print best}'
+  printf '%s
+' "$matches" | awk "$_TAG_RANK_AWK"
   return 0
 }
 
 latest_semver_tag() {
-  # $1=remote -> choose the highest semver-ish tag overall
+  # $1=remote -> the highest release tag overall
   local remote="$1" tags names
   tags=$(git ls-remote --tags "$remote") || true
   [[ -n "$tags" ]] || { printf '' ; return 0; }
-  names=$(printf '%s\n' "$tags" | awk '{t=$2; gsub("refs/tags/","",t); gsub(/\^\{\}$/,"",t); print t}' | sort -u)
-  printf '%s\n' "$names" | awk '
-    function parse(t, arr,    s, n, i, m){if(t !~ /^v?[0-9]/) return 0; gsub(/^v/,"",t); n=split(t,arr,/[.-]/); for(i=1;i<=3;i++){s=(i<=n?arr[i]:0); m=(s ~ /^[0-9]+$/? s+0:0); arr[i]=m} return n}
-    BEGIN{best="";b1=b2=b3=0;bseg=0}
-    {seg=parse($0,a); if(seg==0) next; if(seg>3)seg=3; if(seg>bseg || (seg==bseg && (a[1]>b1 || (a[1]==b1 && (a[2]>b2 || (a[2]==b2 && a[3]>b3)))))){best=$0;bseg=seg;b1=a[1];b2=a[2];b3=a[3]}}
-    END{print best}'
+  names=$(printf '%s
+' "$tags" | awk "$_TAG_NAMES_AWK" | sort -u | grep -E '^v?[0-9]' || true)
+  [[ -n "$names" ]] || { printf '' ; return 0; }
+  printf '%s
+' "$names" | awk "$_TAG_RANK_AWK"
   return 0
 }
 
 latest_tag_with_prefix() {
-  # $1=remote, $2=prefix without leading v (e.g., "1" or "1.2"); picks highest tag starting with v?prefix.
+  # $1=remote, $2=prefix without leading v (e.g. "1" or "1.2") -> highest tag under it
   local remote="$1" prefix="$2" tags names
   tags=$(git ls-remote --tags "$remote") || true
   [[ -n "$tags" ]] || { printf '' ; return 0; }
-  names=$(printf '%s\n' "$tags" | awk '{t=$2; gsub("refs/tags/","",t); gsub(/\^\{\}$/,"",t); print t}' | sort -u)
-  printf '%s\n' "$names" | awk -v p="$2" '
-    function parse(t, arr,    s, n, i, m){gsub(/^v/,"",t); n=split(t,arr,/[.-]/); for(i=1;i<=3;i++){s=(i<=n?arr[i]:0); m=(s ~ /^[0-9]+$/? s+0:0); arr[i]=m} return n}
-    BEGIN{best="";b1=b2=b3=0;bseg=0}
-    {
-      t=$0; gsub(/^v/,"",t);
-      if (index(t, p ".") != 1) next;
-      seg=parse($0,a); if(seg>3)seg=3;
-      if(seg>bseg || (seg==bseg && (a[1]>b1 || (a[1]==b1 && (a[2]>b2 || (a[2]==b2 && a[3]>b3)))))) {best=$0;bseg=seg;b1=a[1];b2=a[2];b3=a[3]}
-    }
-    END{print best}'
+  names=$(printf '%s
+' "$tags" | awk "$_TAG_NAMES_AWK" | sort -u     | awk -v p="$prefix" '{t=$0; sub(/^v/,"",t); if (t == p || index(t, p ".") == 1) print $0}')
+  [[ -n "$names" ]] || { printf '' ; return 0; }
+  printf '%s
+' "$names" | awk "$_TAG_RANK_AWK"
   return 0
 }
 
@@ -223,4 +265,8 @@ main() {
   return 0
 }
 
-main "$@"
+# Sourcing this file exposes the pure ranking helpers (and _TAG_RANK_AWK) without
+# running the hook — that is how tests exercise the tag ordering offline.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
