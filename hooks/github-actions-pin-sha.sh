@@ -79,7 +79,7 @@ resolve_sha() {
 _TAG_RANK_AWK='
 function rank(t,   n, i, p) {
   sub(/^v/, "", t)
-  clean = (t ~ /^[0-9]+(\.[0-9]+){0,2}$/) ? 1 : 0
+  clean = (t ~ /^[0-9]+(\.[0-9]+)?(\.[0-9]+)?$/) ? 1 : 0
   n = split(t, p, /[.-]/)
   spec = 0
   for (i = 1; i <= 3; i++) {
