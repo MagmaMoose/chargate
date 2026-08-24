@@ -75,6 +75,7 @@ resolve_sha() {
 # Ranking on segment COUNT first (the previous approach) is what broke: the four
 # segments of v3.0.2-node.24 outscored the three of v5.0.0 before either version
 # was compared.
+# shellcheck disable=SC2016  # awk program: $0/$1 are awk fields, not shell vars
 _TAG_RANK_AWK='
 function rank(t,   n, i, p) {
   sub(/^v/, "", t)
@@ -105,6 +106,7 @@ BEGIN { best = ""; bclean = -1; b1 = -1; b2 = -1; b3 = -1; bspec = -1 }
 END { print best }'
 
 # Strip refs/tags/ and the ^{} peel marker, leaving bare tag names (deduplicated).
+# shellcheck disable=SC2016  # awk program: $2 is an awk field, not a shell var
 _TAG_NAMES_AWK='{t=$2; gsub("refs/tags/","",t); gsub(/\^\{\}$/,"",t); print t}'
 
 best_tag_for_sha() {
