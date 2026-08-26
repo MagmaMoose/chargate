@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-21T00:00:00Z",
+  "generated": "2026-08-26T00:00:00Z",
   "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact) and a CycloneDX BOM (Syft) is shipped to Dependency-Track. One `chargate` CLI backs TWO GitHub surfaces: a composite action (action.yml) and a pre-commit hook (.pre-commit-hooks.yaml). The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary. A SEPARATE deployable under broker/ mints Chargate[bot] tokens for PR-comment authorship via GitHub Actions OIDC \u2014 an AWS Lambda behind an API Gateway HTTP API, with its own pyproject and virtualenv, NOT part of the stdlib-only CLI wheel and NOT a dependency group of it.",
   "entrypoints": [
     "src/chargate/cli.py:main",
@@ -42,7 +42,7 @@
     },
     "sarif.filter": {
       "path": "src/chargate/sarif/filter.py",
-      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O. ResultVerdict carries the finding `message` + an `inline_safe` flag (added-line/new-file only) for picking valid inline PR-comment targets. A secret-scanner hit on a SOPS-encrypted value (via an optional SopsIndex + FilterPolicy.ignore_sops_encrypted, default on) is dropped as a false positive (reason `sops-encrypted`). In-source suppressed results are surfaced as a distinct count and never gate.",
+      "purpose": "CROWN JEWEL. Classify each SARIF result as net-new vs pre-existing against a DiffIndex under a FilterPolicy; return a pruned deep copy (net-new only) + per-result verdicts + Counts. Never mutates the input. Pure, no I/O. ResultVerdict carries the finding `message` + an `inline_safe` flag (added-line/new-file only) for picking valid inline PR-comment targets. A secret-scanner hit on a SOPS-encrypted value (via an optional SopsIndex + FilterPolicy.ignore_sops_encrypted, default on) is dropped as a false positive (reason `sops-encrypted`). In-source suppressed results are surfaced as a distinct count and never gate. FilterPolicy.deduplicate (default on) collapses net-new findings sharing a (rule_id, fingerprint) key via sarif.dedup so multi-engine re-reports gate once.",
       "exports": [
         "filter_sarif",
         "classify_results",
@@ -55,6 +55,7 @@
       ],
       "depends_on": [
         "sarif.counts",
+        "sarif.dedup",
         "sarif.diff",
         "sarif.model",
         "sarif.sops"
@@ -103,7 +104,7 @@
     },
     "sarif.counts": {
       "path": "src/chargate/sarif/counts.py",
-      "purpose": "Tally totals + net-new + suppressed + sops_ignored + per-level + per-severity-band breakdowns. Takes net-new/suppressed/sops (run_index, result_index) keys (not verdicts) to avoid an import cycle with filter; pre_existing = total - net_new - suppressed - sops_ignored. Pure. The shape cli.counts_to_dict serialises this into (--counts-json) is a VERSIONED PUBLIC INTERFACE read across a process boundary by brimyr's gate (brimyr#33): COUNTS_SCHEMA_VERSION bumps only on a breaking change (key removed/renamed/re-defined); adding a key is additive. Contract: docs/consuming-output.md.",
+      "purpose": "Tally totals + net-new + suppressed + sops_ignored + deduped + per-level + per-severity-band breakdowns. Takes net-new/suppressed/sops/deduped (run_index, result_index) keys (not verdicts) to avoid an import cycle with filter; pre_existing = total - net_new - suppressed - sops_ignored - deduped. The `Counts` dataclass has a `deduped` field for de-duplicated net-new findings (same rule id + fingerprint from multiple producers). Pure. The shape cli.counts_to_dict serialises this into (--counts-json) is a VERSIONED PUBLIC INTERFACE read across a process boundary by brimyr's gate (brimyr#33): COUNTS_SCHEMA_VERSION bumps only on a breaking change (key removed/renamed/re-defined); adding a key is additive. Contract: docs/consuming-output.md.",
       "exports": [
         "count_results",
         "Counts",
@@ -309,8 +310,11 @@
     },
     "sarif.dedup": {
       "path": "src/chargate/sarif/dedup.py",
-      "purpose": "Collapses duplicate findings reported by more than one linter at the same location.",
-      "exports": [],
+      "purpose": "Engine-agnostic finding fingerprints for net-new de-duplication. Collapses the same logical finding when two SARIF producers (or the same engine run twice) report it, so gating and PR comments treat it as ONE finding. The de-dup key is `(rule_id, fingerprint)`: `fingerprint` prefers a tool-provided stable fingerprint from `result.fingerprints`/`result.partialFingerprints` (survives line shifts, what GitHub code-scanning keys on), else derives it from primary location + message text. Tool/driver name is deliberately NOT part of the key (different engines emit different rule ids, so their findings never silently merge). Pure; used by sarif.filter via `FilterPolicy.deduplicate` (on by default).",
+      "exports": [
+        "finding_fingerprint",
+        "dedup_key"
+      ],
       "depends_on": [
         "sarif.model"
       ]
