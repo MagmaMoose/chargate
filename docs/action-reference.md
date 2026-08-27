@@ -9,7 +9,7 @@ Every input and output of the `magmamoose/chargate` composite action, read from
 
 ## Inputs
 
-All 43 inputs are optional. A blank default means the action leaves the
+All 44 inputs are optional. A blank default means the action leaves the
 value unset and the CLI's own default applies.
 
 | Input | Default | Description |
@@ -30,6 +30,7 @@ value unset and the CLI's own default applies.
 | `docker_platform` | (none) | Value for `docker run --platform`. Only needed to force emulation, e.g. linux/amd64 on an arm64 runner that has qemu-user-static + binfmt installed. Setting it also tells Chargate you have taken responsibility for the architecture, so it stops substituting the per-linter images. |
 | `arch_strategy` | `auto` | How to run MegaLinter when the Docker daemon is not linux/amd64. auto (default): the flavor image on amd64, MegaLinter's per-linter `megalinter-only-*` images (multi-arch from v10.0.0) on arm64. flavor: always the flavor image, fails fast with an actionable error on arm64 instead of `exec format error`. standalone: always per-linter images. fail: refuse to run rather than degrade. |
 | `standalone_linters` | (none) | Comma-separated MegaLinter linter keys to run in standalone mode. Default: the SARIF-emitting linters of the selected flavor. |
+| `jobs` | (none) | Standalone mode only: how many per-linter containers to run concurrently (CLI default 4). Standalone is what arm64 uses, and 4 concurrent MegaLinter containers is a lot for a small self-hosted node — on a 2-OCPU / 4Gi runner that is the difference between a scan and a scheduling fight. Lower it to 1-2 there. Ignored in flavor mode, which is a single container. |
 | `enable_linters` | (none) | Comma-separated MegaLinter linter keys to enable (others off). |
 | `disable_linters` | (none) | Comma-separated MegaLinter linter keys to disable. |
 | `incremental` | `true` | PR events only: ask MegaLinter to analyze just the files the PR changes (VALIDATE_ALL_CODEBASE=false) instead of the whole repo, faster on large repos. Repository-level scanners may still read the whole repo or history. The net-new gate still uses Chargate's own diff. Baseline (push) scans are always whole-repo. Default on. |
