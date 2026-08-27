@@ -35,6 +35,8 @@ nav:
   - Setup & usage: setup.md
   - Net-new gating: net-new.md
   - Architecture: architecture.md
+  - Security model: security-model.md
+  - Linter coverage: linter-coverage.md
   - Reference:
       - CLI: cli.md
       - Action: action-reference.md
