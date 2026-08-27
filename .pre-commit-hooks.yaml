@@ -35,7 +35,18 @@
     proceed (standard pre-commit auto-fixer behaviour).
   entry: hooks/github-actions-pin-sha.sh
   language: script
-  files: '^\.github/workflows/.*\.ya?ml$'
+  # Every file that can carry a `uses:` line, not just the workflows directory.
+  #
+  # `.github/settings.yml` is the one that mattered: an admin repo holds the
+  # workflow bodies for the WHOLE org inside that file as literal blocks, so it
+  # is where a floating ref does the most damage — and it was the only place the
+  # hook never looked. A `@v2` committed there reached 38 default branches
+  # unpinned. `tests/test_pre_commit_hooks_yaml.py` pins this list.
+  #
+  # The hook itself needs no change: its `uses:` matcher already tolerates the
+  # deep indentation of a literal block, and it uses the filenames pre-commit
+  # hands it verbatim.
+  files: '^(\.github/workflows/.*\.ya?ml|\.github/settings\.ya?ml|\.github/actions/.+/action\.ya?ml|action\.ya?ml)$'
   stages: [pre-commit]
   require_serial: true
 
