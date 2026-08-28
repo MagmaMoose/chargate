@@ -2,6 +2,7 @@ site_name: Chargate
 site_description: >-
   Security + lint gate — a thin MegaLinter wrapper with net-new (PR-diff)
   finding gating.
+site_url: https://magmamoose.github.io/chargate/
 repo_url: https://github.com/MagmaMoose/chargate
 repo_name: MagmaMoose/chargate
 edit_uri: edit/main/docs/
