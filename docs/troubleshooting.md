@@ -1,6 +1,8 @@
 # Troubleshooting
 
-<!-- sources: src/chargate/gate.py, broker/app/broker.py, broker/app/lambda_handler.py, scripts/request-app-token.sh -->
+<!-- sources: src/chargate/gate.py, broker/app/broker.py, broker/app/lambda_handler.py, scripts/request-
+     app-token.sh
+     -->
 
 Symptom, cause, fix. Start with the exit code or the error string you actually saw.
 

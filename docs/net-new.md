@@ -1,6 +1,7 @@
 # Net-new gating
 
-<!-- sources: src/chargate/sarif/filter.py, src/chargate/sarif/diff.py, src/chargate/sarif/sops.py -->
+<!-- sources: src/chargate/sarif/filter.py, src/chargate/sarif/diff.py, src/chargate/sarif/sops.py
+     -->
 
 A SARIF result is **net-new** (and therefore gate-blocking) iff its primary
 location's file is in the PR diff **and**, at line precision, its `startLine`
