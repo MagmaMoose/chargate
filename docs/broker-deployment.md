@@ -1,6 +1,7 @@
 # Token broker deployment
 
-<!-- sources: broker/app/, broker/scripts/build_lambda_zip.py, .github/workflows/publish-broker.yml -->
+<!-- sources: broker/app/, broker/scripts/build_lambda_zip.py, .github/workflows/publish-broker.yml
+     -->
 
 The broker exchanges a consumer's GitHub Actions OIDC token for a short-lived, repo-scoped
 `Chargate[bot]` installation token, so Chargate's PR comments carry that byline instead of
@@ -73,7 +74,8 @@ than at the first real request.
 
 ## Publishing and deploying are different acts
 
-**Publishing** is `.github/workflows/publish-broker.yml`, triggered by the release tag. It builds the zip, gates on whether anything shipped
+**Publishing** is `.github/workflows/publish-broker.yml`, triggered by the release tag. It
+builds the zip, gates on whether anything shipped
 actually changed since the previous tag, and uploads it with `s3api put-object`, refusing to
 overwrite an existing key. It is deliberately NOT in `release.yml`, which caldrith provisions
 centrally and overwrites in place.
