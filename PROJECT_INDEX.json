@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-26T00:00:00Z",
+  "generated": "2026-09-02T00:00:00Z",
   "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact) and a CycloneDX BOM (Syft) is shipped to Dependency-Track. One `chargate` CLI backs TWO GitHub surfaces: a composite action (action.yml) and a pre-commit hook (.pre-commit-hooks.yaml). The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary. A SEPARATE deployable under broker/ mints Chargate[bot] tokens for PR-comment authorship via GitHub Actions OIDC \u2014 an AWS Lambda behind an API Gateway HTTP API, with its own pyproject and virtualenv, NOT part of the stdlib-only CLI wheel and NOT a dependency group of it.",
   "entrypoints": [
     "src/chargate/cli.py:main",
