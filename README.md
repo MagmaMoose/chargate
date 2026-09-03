@@ -4,7 +4,7 @@
 [![CI](https://github.com/MagmaMoose/chargate/actions/workflows/ci.yml/badge.svg)](https://github.com/MagmaMoose/chargate/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/MagmaMoose/chargate?sort=semver&logo=github)](https://github.com/MagmaMoose/chargate/releases)
 [![Docs](https://img.shields.io/badge/docs-chargate-blue)](https://magmamoose.github.io/chargate/)
-[![License: MIT](https://img.shields.io/github/license/MagmaMoose/chargate)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/github/license/MagmaMoose/chargate)](LICENSE)
 
 > **Gate pull requests on the findings _this PR_ introduced — not your whole backlog.**
 
@@ -71,7 +71,7 @@ default. A shallow clone fails loudly rather than silently passing.
 | `defectdojo_url` | — | Set to enable the DefectDojo import. |
 | `dependency_track_url` | — | Set to enable the CycloneDX BOM upload. |
 
-All 43 inputs and every output → **[Action reference](https://magmamoose.github.io/chargate/action-reference/)**
+All inputs and every output → **[Action reference](https://magmamoose.github.io/chargate/action-reference/)**
 
 ## Documentation
 
@@ -110,4 +110,4 @@ v2 is a ground-up re-platform onto MegaLinter — coming from `@v1`, see
 ## Security · Contributing · License
 
 [Report a vulnerability](SECURITY.md) · [Contributing](CONTRIBUTING.md) ·
-MIT, see [LICENSE](LICENSE).
+Apache 2.0, see [LICENSE](LICENSE).
