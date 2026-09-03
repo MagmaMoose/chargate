@@ -18,7 +18,7 @@ with. Detail below in the architecture map.
 Python ≥ 3.11, **uv + Ruff + pytest**, full type hints, stdlib-only **core** (no
 runtime deps — the DefectDojo/Dependency-Track clients use `urllib`); the `broker/`
 service has its own `broker/pyproject.toml` and virtualenv. SHA-pin external
-GitHub Actions with a `# vX.Y.Z` comment. MIT. Tests mirror modules 1:1 under `tests/`.
+GitHub Actions with a `# vX.Y.Z` comment. Apache 2.0. Tests mirror modules 1:1 under `tests/`.
 
 **Releases** are automated: pushing to `main` runs Diatreme + python-semantic-release
 (single-env TBD, `.github/workflows/release.yml`), which cuts the next stable
