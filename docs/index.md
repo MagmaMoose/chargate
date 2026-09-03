@@ -71,4 +71,4 @@ file-hygiene / Actions-SHA-pinning hooks stay in `pre-commit-hooks`; the
 
 ## License
 
-MIT.
+Apache 2.0.

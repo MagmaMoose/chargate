@@ -47,7 +47,7 @@ with `fetch-depth: 0` by default (net-new needs the merge-base), set
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/MagmaMoose/chargate
-    rev: v2.0.0
+    rev: v2
     hooks:
       - id: chargate
 ```
