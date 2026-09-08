@@ -703,3 +703,67 @@ def test_the_security_flavor_is_not_synthetic():
     # Live behaviour unchanged: `security` still resolves to the flavor image on amd64.
     assert ml.MegaLinterConfig(flavor="security").is_synthetic_flavor() is False
     assert ml.resolve_plan(ml.MegaLinterConfig(flavor="security"), "amd64").strategy == "flavor"
+
+
+# ── sbom_only (the push-time BOM path with no scan attached) ──
+
+
+def _action_text() -> str:
+    return (Path(__file__).parent.parent / "action.yml").read_text(encoding="utf-8")
+
+
+def test_composite_action_keeps_both_bom_paths_in_lockstep():
+    """The gate step and the sbom_only step each resolve the BOM path themselves.
+
+    Two literals, one meaning: they must match each other AND the "Generate CycloneDX
+    SBOM" step's output-file. A drift here does not error — the upload just finds no
+    file and the repo quietly stops appearing in Dependency-Track, which is exactly the
+    failure this mode exists to fix.
+    """
+    lines = [ln.strip() for ln in _action_text().splitlines() if ln.strip().startswith("bom_abs=")]
+    assert len(lines) == 2, lines
+    assert len(set(lines)) == 1, lines
+    assert f'bom_abs="${{RUNNER_TEMP:-${{GITHUB_WORKSPACE:-$PWD}}}}/{ml.SBOM_FILE_NAME}"' in lines
+
+
+def test_composite_action_sbom_only_replaces_the_gate_rather_than_joining_it():
+    # The two steps are mutually exclusive: sbom_only must not also run MegaLinter, and
+    # a normal run must not also fire a second upload.
+    action = _action_text()
+    assert re.search(r"^  sbom_only:\n(?:.*\n){0,20}?\s+default: 'false'", action, re.MULTILINE)
+    assert "if: ${{ inputs.sbom_only == 'true' }}" in action
+    assert "if: ${{ inputs.sbom_only != 'true' }}" in action
+
+
+def test_composite_action_sbom_only_refuses_pull_request_events():
+    """A per-PR BOM would create throwaway `N/merge` project versions in DT.
+
+    The gate step declines this by falling through a `case`; the sbom_only step has no
+    other work to fall through to, so it must fail loudly instead of exiting clean.
+    """
+    action = _action_text()
+    sbom_step = action[
+        action.index("- name: Chargate SBOM upload") : action.index("- name: Chargate gate")
+    ]
+    assert "pull_request|pull_request_target)" in sbom_step
+    assert "::error::" in sbom_step
+    assert "exit 1" in sbom_step
+
+
+def test_composite_action_sbom_only_passes_flags_the_cli_accepts():
+    # The wiring is bash assembling an argv; nothing else would catch a flag the
+    # subcommand does not define until a consumer's push run failed.
+    from chargate.cli import build_parser
+
+    action = _action_text()
+    sbom_step = action[
+        action.index("- name: Chargate SBOM upload") : action.index("- name: Chargate gate")
+    ]
+    flags = set(re.findall(r"(--[a-z][a-z-]+)", sbom_step))
+    parser = build_parser()
+    argv = ["sbom"]
+    for flag in sorted(flags):
+        argv.append(flag)
+        if flag not in ("--dt-no-auto-create", "--strict"):
+            argv.append("x")
+    parser.parse_args(argv)  # raises SystemExit(2) on an unknown flag

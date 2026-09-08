@@ -220,6 +220,19 @@ inputs:
     description: 'Auto-create the project/version on first upload.'
     required: false
     default: 'true'
+  sbom_only:
+    description: >-
+      Ship the CycloneDX BOM to Dependency-Track and do nothing else: no MegaLinter, no
+      SARIF, no gate. For the common consumer shape where the gate itself runs on
+      `pull_request` only (a full scan on every merge is the most expensive thing in org
+      CI) — that workflow never sees a push event, so it never reaches the BOM upload
+      inside the gate and the repo silently never appears in Dependency-Track. Add a
+      second, cheap push-triggered job with this set instead. Push/tag events only: a
+      per-PR BOM would create throwaway `N/merge` project versions. Unlike the sink on
+      the gate, a MISCONFIGURED sink here fails the job (this job has no other purpose),
+      while a Dependency-Track outage only warns unless `strict` is also set.
+    required: false
+    default: 'false'
 
   setup_python:
     description: >-
@@ -310,7 +323,7 @@ runs:
     # actually works. (It is also why the PR run never caught this: the step is skipped
     # on pull_request, so the BOM only ever exists on a push.)
     - name: Generate CycloneDX SBOM
-      if: ${{ inputs.dependency_track_url != '' && github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
+      if: ${{ (inputs.dependency_track_url != '' || inputs.sbom_only == 'true') && github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
       uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       with:
         path: '.'
@@ -332,8 +345,50 @@ runs:
         OIDC_AUDIENCE: ${{ inputs.oidc_audience }}
       run: "$GITHUB_ACTION_PATH/scripts/request-app-token.sh"
 
+    # sbom_only: ship the BOM and stop. Deliberately NOT a variant of the gate step —
+    # it runs no MegaLinter, produces no SARIF and reaches no verdict, so every step
+    # below (which keys off steps.chargate.outputs.*) stays inert on its own.
+    #
+    # `chargate sbom` exits 2 on a misconfigured sink rather than skipping quietly: on
+    # the gate an unset URL legitimately means "this sink is off", but a job whose only
+    # purpose is the upload has nothing left to do, and treating that as success is what
+    # let a whole org's worth of repos go missing from Dependency-Track unnoticed. A DT
+    # outage still only warns, unless `strict` is set.
+    - name: Chargate SBOM upload
+      if: ${{ inputs.sbom_only == 'true' }}
+      shell: bash
+      env:
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        DEPENDENCYTRACK_API_KEY: ${{ inputs.dependency_track_api_key }}
+        DT_URL_IN: ${{ inputs.dependency_track_url }}
+        DT_PROJECT_NAME_IN: ${{ inputs.dependency_track_project_name }}
+        DT_PROJECT_VERSION_IN: ${{ inputs.dependency_track_project_version }}
+        DT_AUTO_CREATE_IN: ${{ inputs.dependency_track_auto_create }}
+        STRICT_IN: ${{ inputs.strict }}
+      run: |
+        set -euo pipefail
+        case "$GITHUB_EVENT_NAME" in
+          pull_request|pull_request_target)
+            echo "::error::sbom_only runs on push/tag events only — a per-PR BOM would" \
+                 "create throwaway N/merge project versions in Dependency-Track."
+            exit 1
+            ;;
+        esac
+        # Matches the "Generate CycloneDX SBOM" step's output-file: RUNNER_TEMP, not the
+        # workspace. Keep the two in lockstep.
+        bom_abs="${RUNNER_TEMP:-${GITHUB_WORKSPACE:-$PWD}}/chargate-sbom.cdx.json"
+        args=(sbom
+          --dependency-track-url "$DT_URL_IN"
+          --bom "$bom_abs"
+          --dt-project-name "$DT_PROJECT_NAME_IN")
+        [ -n "$DT_PROJECT_VERSION_IN" ] && args+=(--dt-project-version "$DT_PROJECT_VERSION_IN")
+        [ "$DT_AUTO_CREATE_IN" != "true" ] && args+=(--dt-no-auto-create)
+        [ "$STRICT_IN" = "true" ] && args+=(--strict)
+        chargate "${args[@]}"
+
     - name: Chargate gate
       id: chargate
+      if: ${{ inputs.sbom_only != 'true' }}
       shell: bash
       env:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
