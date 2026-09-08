@@ -848,7 +848,7 @@ def test_sbom_uploads_and_reports_the_project_link(bom_file, capsys, monkeypatch
     [
         (["--dependency-track-url", ""], False, "needs --dependency-track-url"),
         (["--dt-project-name", ""], False, "needs --dt-project-uuid or --dt-project-name"),
-        ([], True, "needs a Dependency-Track API key"),
+        ([], True, "needs a Dependency-Track API key. Set the environment"),
     ],
 )
 def test_sbom_misconfiguration_is_fatal(

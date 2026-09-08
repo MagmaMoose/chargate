@@ -591,7 +591,15 @@ def cmd_sbom(args: argparse.Namespace) -> int:
         return _fail("chargate sbom needs --bom (the CycloneDX BOM to upload).")
     api_key = os.environ.get(args.dt_api_key_env, "")
     if not api_key:
-        return _fail(f"chargate sbom needs a Dependency-Track API key in ${args.dt_api_key_env}.")
+        # The env var's NAME is deliberately not interpolated here. It is not a secret,
+        # but `py/clear-text-logging-sensitive-data` classifies any `*key*` expression as
+        # one, and a flow from it into _eprint would have to be suppressed at _eprint —
+        # blanket-silencing that query for every message chargate ever prints. Naming the
+        # flag instead costs nothing and is arguably clearer for the caller.
+        return _fail(
+            "chargate sbom needs a Dependency-Track API key. Set the environment "
+            "variable named by --dt-api-key-env (default DEPENDENCYTRACK_API_KEY)."
+        )
     bom_path = Path(args.bom)
     if not bom_path.is_file():
         return _fail(f"chargate sbom: BOM not found: {bom_path}")
