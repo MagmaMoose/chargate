@@ -786,3 +786,158 @@ def test_build_sops_index_reads_only_secret_finding_files(tmp_path: Path, make_s
     assert not _build_sops_index(
         str(tmp_path), secret_sarif, FilterPolicy(ignore_sops_encrypted=False)
     )
+
+
+# ── chargate sbom ────────────────────────────────────────────────────────────
+# The push-time BOM path standing alone, for consumers whose gate runs on
+# pull_request only. Its exit policy is the inverse of the sink-on-a-gate rule and
+# that inversion is the point: a MISCONFIGURED sink fails here (the job has no other
+# purpose, and quietly succeeding is what hid an org's worth of missing projects),
+# while a Dependency-Track OUTAGE stays non-fatal unless --strict.
+
+
+@pytest.fixture
+def bom_file(tmp_path: Path) -> Path:
+    path = tmp_path / "sbom.cdx.json"
+    path.write_text(
+        json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": []}),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _sbom_args(bom: Path, *extra: str) -> list[str]:
+    return [
+        "sbom",
+        "--dependency-track-url", "https://dt.example.com",
+        "--dt-project-name", "org/repo",
+        "--bom", str(bom),
+        *extra,
+    ]  # fmt: skip
+
+
+def _fake_upload(*, ok: bool, message: str, url: str | None = None):
+    from chargate.dependencytrack import DependencyTrackResult
+
+    def _upload(_config, _bom_path, **_kw):
+        return DependencyTrackResult(
+            ok=ok,
+            endpoint="https://dt.example.com/api/v1/bom",
+            status=200 if ok else 503,
+            message=message,
+            project_url=url,
+        )
+
+    return _upload
+
+
+def test_sbom_uploads_and_reports_the_project_link(bom_file, capsys, monkeypatch):
+    monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
+    monkeypatch.setattr(
+        "chargate.dependencytrack.upload_bom",
+        _fake_upload(ok=True, message="uploaded", url="https://dt.example.com/projects/u-1"),
+    )
+    assert main(_sbom_args(bom_file)) == EXIT_OK
+    err = capsys.readouterr().err
+    assert "Dependency-Track: uploaded" in err
+    assert "https://dt.example.com/projects/u-1" in err
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "drop_key", "expected"),
+    [
+        (["--dependency-track-url", ""], False, "needs --dependency-track-url"),
+        (["--dt-project-name", ""], False, "needs --dt-project-uuid or --dt-project-name"),
+        ([], True, "needs a Dependency-Track API key. Set the environment"),
+    ],
+)
+def test_sbom_misconfiguration_is_fatal(
+    bom_file, capsys, monkeypatch, extra_args, drop_key, expected
+):
+    # Every one of these is a deterministic, always-broken state. Skipping quietly
+    # would make a typo'd variable name indistinguishable from "this sink is off" —
+    # the exact failure that emptied Dependency-Track across the org.
+    if drop_key:
+        monkeypatch.delenv("DEPENDENCYTRACK_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
+    monkeypatch.setattr(
+        "chargate.dependencytrack.upload_bom",
+        _fake_upload(ok=True, message="uploaded"),
+    )
+    assert main(_sbom_args(bom_file, *extra_args)) == EXIT_ERROR
+    assert expected in capsys.readouterr().err
+
+
+def test_sbom_missing_bom_file_is_fatal(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
+    assert main(_sbom_args(tmp_path / "nope.json")) == EXIT_ERROR
+    assert "BOM not found" in capsys.readouterr().err
+
+
+def test_sbom_upload_failure_is_non_blocking_by_default(bom_file, capsys, monkeypatch):
+    # A Dependency-Track that is merely down must not turn every repo's CI red.
+    monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
+    monkeypatch.setattr(
+        "chargate.dependencytrack.upload_bom",
+        _fake_upload(ok=False, message="HTTP 503: unavailable"),
+    )
+    assert main(_sbom_args(bom_file)) == EXIT_OK
+    err = capsys.readouterr().err
+    assert "::warning::" in err
+    assert "HTTP 503" in err
+
+
+def test_sbom_upload_failure_is_fatal_under_strict(bom_file, capsys, monkeypatch):
+    monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
+    monkeypatch.setattr(
+        "chargate.dependencytrack.upload_bom",
+        _fake_upload(ok=False, message="HTTP 503: unavailable"),
+    )
+    assert main(_sbom_args(bom_file, "--strict")) == EXIT_ERROR
+    assert "HTTP 503" in capsys.readouterr().err
+
+
+def test_sbom_writes_the_step_summary_and_output(bom_file, tmp_path, monkeypatch):
+    summary = tmp_path / "summary.md"
+    output = tmp_path / "output.txt"
+    monkeypatch.setenv("DEPENDENCYTRACK_API_KEY", "key")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(
+        "chargate.dependencytrack.upload_bom",
+        _fake_upload(ok=True, message="uploaded", url="https://dt.example.com/projects/u-1"),
+    )
+    assert main(_sbom_args(bom_file, "--quiet")) == EXIT_OK
+    assert "https://dt.example.com/projects/u-1" in summary.read_text(encoding="utf-8")
+    assert "dependency_track_url=https://dt.example.com/projects/u-1" in output.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_sbom_and_ci_parse_the_dependency_track_flags_identically():
+    # Both subcommands address the same project on the same server, so they share one
+    # flag definition (_add_dependency_track_args). Round-trip a full DT argv through
+    # each and compare: a flag that drifted would point the two paths at different
+    # projects for one repo, and the mismatch would only ever show up in production.
+    from chargate.cli import build_parser
+
+    dt_argv = [
+        "--dependency-track-url", "https://dt.example.com",
+        "--dt-api-key-env", "MY_KEY",
+        "--bom", "sbom.cdx.json",
+        "--dt-project-name", "org/repo",
+        "--dt-project-version", "main",
+        "--dt-project-uuid", "u-1",
+        "--dt-no-auto-create",
+        "--dt-parent-name", "org",
+        "--dt-parent-version", "v1",
+        "--dt-is-latest",
+        "--dt-insecure",
+    ]  # fmt: skip
+
+    def _dt_namespace(*argv: str) -> dict[str, object]:
+        parsed = vars(build_parser().parse_args([*argv, *dt_argv]))
+        return {k: v for k, v in parsed.items() if k.startswith(("dt_", "dependency_track", "bom"))}
+
+    assert _dt_namespace("sbom") == _dt_namespace("ci", "--sarif", "x.sarif")

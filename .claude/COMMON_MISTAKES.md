@@ -142,3 +142,34 @@
   `commit-msg`. Chargate is the tool that enforces these; routing around them here is
   self-defeating, and it hides exactly the class of defect the gate exists to catch. If a hook
   blocks a commit, fix the cause or raise it — do not disable the hook path.
+- **"Active iff the URL is set" makes a typo'd variable name indistinguishable from
+  "sink off".** The org template in `MagmaMoose/admin` (`.github/settings.yml`, provisioned
+  by caldrith into every repo, `skip_repos: ["chargate"]`) passed
+  `vars.MM_DEPENDENCY_TRACK_URL` / `secrets.MM_DEPENDENCY_TRACK_API_KEY`; the org actually
+  defines `MM_DEPENDENCYTRACK_URL` / `MM_DEPENDENCYTRACK_API_KEY`. An undefined `vars.X`
+  expands to the empty string, so every consumer passed `dependency_track_url: ''` and
+  chargate read that as a deliberately-disabled sink. DefectDojo's names matched, so DD
+  filled up normally — and the resulting "DD works, DT is empty" reads like a
+  Dependency-Track problem, which is where the debugging time goes. **Compare the exact
+  variable names against `gh variable list --org` before believing a sink is off.**
+- **A gate on `pull_request` only never ships a BOM.** Chargate uploads to Dependency-Track
+  on non-PR events only (deliberate: a per-PR BOM litters DT with `N/merge` versions), so a
+  consumer that dropped the push trigger for cost — the org template did — cannot reach the
+  upload at all. This compounded the variable-name bug above: fixing the names alone would
+  still have shipped nothing. Hence `chargate sbom` / `sbom_only`, the push-time BOM path
+  with no MegaLinter attached. Its exit policy inverts the sink rule ON PURPOSE: a
+  misconfigured sink exits `2` there, because a job whose only purpose is the upload has
+  nothing left to do, and reporting success is what hid this for three months. Only an
+  outage stays non-fatal. Don't "make it consistent" with the gate's silent skip.
+- **`GET /api/v1/bom` returning 200 + a token does NOT mean the BOM landed.** DT processes
+  asynchronously; `chargate: Dependency-Track: uploaded` in the log only proves the POST was
+  accepted. Confirm against the server (project's Components count and `lastBomImport`), not
+  the action log. Note also that the DT dashboard's zeroes are *vulnerability* counts, not a
+  component count — a project with a fully-ingested BOM and no known CVEs looks identical to
+  one that ingested nothing.
+- **Diatreme's Dependency-Track sink is a different project from chargate's, and is wired
+  nowhere.** `diatreme`'s `scripts/upload-sbom-dependency-track.sh` ships the *assembled-image*
+  SBOM (base-image packages + whatever the Dockerfile added); chargate ships the
+  *source-dependency* SBOM. Two projects per repo on one server, by design — so seeing a repo
+  in DT does not mean its images are covered. No workflow in the org passes
+  `dependency-track-url` to diatreme today.

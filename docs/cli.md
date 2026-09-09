@@ -6,7 +6,7 @@ Both GitHub surfaces drive the same `chargate` CLI. Exit codes: `0` pass ·
 `1` blocking net-new findings · `2` setup/usage error.
 
 ```sh
-chargate <filter-sarif | ci | local | install-hooks | uninstall-hooks | version> [options]
+chargate <filter-sarif | ci | sbom | local | install-hooks | uninstall-hooks | version> [options]
 ```
 
 ## `chargate filter-sarif`
@@ -102,6 +102,46 @@ Key flags beyond the shared filter options:
 PR comments are net-new only and failure-isolated: a GitHub API error is logged and
 never changes the gate outcome. The host action sets `--pr-number` / `--repo-slug`
 from the event and honors `GITHUB_API_URL` for GHES.
+
+## `chargate sbom`
+
+Ship a CycloneDX BOM to Dependency-Track on its own — no MegaLinter, no SARIF, no
+gate. Seconds, not the ~15 minutes a scan costs.
+
+`chargate ci` already carries the BOM sink, but only fires it on **non-PR** events:
+a BOM per pull request would litter Dependency-Track with throwaway `N/merge`
+project versions. A consumer whose gate runs on `pull_request` only — the usual
+shape, because a full scan on every merge is the most expensive thing in CI — never
+reaches that path, so the repo never appears in Dependency-Track at all. This
+subcommand is that missing push-time path standing alone.
+
+```sh
+chargate sbom \
+  --dependency-track-url https://dtrack.example.com \
+  --bom sbom.cdx.json \
+  --dt-project-name "$GITHUB_REPOSITORY" \
+  --dt-project-version main
+```
+
+It takes the same Dependency-Track flags as `chargate ci` (`--dependency-track-url`,
+`--dt-api-key-env`, `--bom`, `--dt-project-*`, `--dt-parent-*`, `--dt-no-auto-create`,
+`--dt-is-latest`, `--dt-insecure`) plus:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--strict` | off | Treat a Dependency-Track upload failure as fatal (exit `2`). |
+| `--quiet` | off | Suppress the human summary. |
+
+**Exit policy is the inverse of the sink-on-a-gate rule, deliberately.** A
+*misconfigured* sink — no URL, no project, no API key, no BOM file — exits `2`.
+This command exists only to upload, so "nothing to upload to" is a broken job, not
+a sink someone switched off; silence in exactly that case is what let a whole org's
+repos go missing from Dependency-Track unnoticed. A Dependency-Track *outage* stays
+failure-isolated (warn, exit `0`) unless `--strict`, so a server that is merely down
+cannot turn every repo's CI red.
+
+On success it writes the project link to the job summary and to a
+`dependency_track_url` action output.
 
 ## `chargate local`
 

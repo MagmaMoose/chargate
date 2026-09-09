@@ -213,6 +213,50 @@ throwaway per-PR versions, faster PR CI, and instead links the PR comment to the
 project's existing default-branch version. (DefectDojo still imports the full SARIF
 on PRs, since reimport updates one Test rather than spawning versions.)
 
+#### If your gate runs on `pull_request` only
+
+A workflow triggered on `pull_request` alone never sees a push event, so it never
+reaches the upload above and the repo **silently never appears in Dependency-Track**
+— while DefectDojo, which imports on every event, fills up normally. That asymmetry
+is easy to miss for months.
+
+Don't add `push` to the gate itself (a full MegaLinter run on every merge, bot
+commits included, is usually the most expensive thing in CI). Add a second, cheap
+job with `sbom_only` instead — it ships the BOM and nothing else, in seconds:
+
+```yaml
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: magmamoose/chargate@v2
+        with:
+          dependency_track_url: https://dtrack.example.com
+          dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
+
+  sbom:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: magmamoose/chargate@v2
+        with:
+          sbom_only: 'true'
+          dependency_track_url: https://dtrack.example.com
+          dependency_track_api_key: ${{ secrets.DEPENDENCYTRACK_API_KEY }}
+```
+
+`sbom_only` runs on push/tag events only (a per-PR BOM would create throwaway
+`N/merge` versions) and inverts the usual sink rule: a **misconfigured** sink fails
+the job, because this job has no other purpose and quietly succeeding is what hides
+the problem. A Dependency-Track **outage** still only warns, unless you also set
+`strict: 'true'`.
+
 ## MegaLinter configuration
 
 Chargate injects the critical env (`DISABLE_ERRORS`, `SARIF_REPORTER`,

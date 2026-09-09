@@ -6,6 +6,9 @@ Subcommands:
   filtered SARIF + counts + gate exit code). Decoupled from GitHub Actions and
   unit-tested in isolation.
 * ``chargate ci`` — the full CI flow (run MegaLinter, filter, gate, ship).
+* ``chargate sbom`` — ship a CycloneDX BOM to Dependency-Track on its own, for
+  consumers whose gate runs on ``pull_request`` only and so never reaches
+  ``ci``'s push-time BOM upload.
 * ``chargate local`` — fast staged-file checks for the pre-commit framework.
 * ``chargate install-hooks`` / ``uninstall-hooks`` — wire chargate's hooks into
   git globally (via pre-commit), or revert that.
@@ -518,15 +521,8 @@ def _maybe_import_defectdojo(args: argparse.Namespace, sarif_doc: dict[str, Any]
     return _SinkOutcome(f"upload failed (non-blocking): {result.message}")
 
 
-def _maybe_upload_dependencytrack(args: argparse.Namespace) -> _SinkOutcome:
-    if not args.dependency_track_url:
-        return _SinkOutcome()
-    if not args.dt_project_uuid and not args.dt_project_name:
-        return _SinkOutcome("skipped (need --dt-project-uuid or --dt-project-name)")
-    api_key = os.environ.get(args.dt_api_key_env, "")
-    if not api_key:
-        return _SinkOutcome(f"skipped (no API key in ${args.dt_api_key_env})")
-    config = dt.DependencyTrackConfig(
+def _dt_config_from_args(args: argparse.Namespace, api_key: str) -> dt.DependencyTrackConfig:
+    return dt.DependencyTrackConfig(
         base_url=args.dependency_track_url,
         api_key=api_key,
         project_name=args.dt_project_name,
@@ -538,6 +534,17 @@ def _maybe_upload_dependencytrack(args: argparse.Namespace) -> _SinkOutcome:
         is_latest=args.dt_is_latest,
         verify_ssl=not args.dt_insecure,
     )
+
+
+def _maybe_upload_dependencytrack(args: argparse.Namespace) -> _SinkOutcome:
+    if not args.dependency_track_url:
+        return _SinkOutcome()
+    if not args.dt_project_uuid and not args.dt_project_name:
+        return _SinkOutcome("skipped (need --dt-project-uuid or --dt-project-name)")
+    api_key = os.environ.get(args.dt_api_key_env, "")
+    if not api_key:
+        return _SinkOutcome(f"skipped (no API key in ${args.dt_api_key_env})")
+    config = _dt_config_from_args(args, api_key)
 
     # No --bom → don't upload (e.g. on PRs); just resolve the project link so the
     # PR comment can point at the existing (default-branch) project.
@@ -552,6 +559,72 @@ def _maybe_upload_dependencytrack(args: argparse.Namespace) -> _SinkOutcome:
     if result.ok:
         return _SinkOutcome(result.message, result.project_url)
     return _SinkOutcome(f"upload failed (non-blocking): {result.message}")
+
+
+def cmd_sbom(args: argparse.Namespace) -> int:
+    """Ship a CycloneDX BOM to Dependency-Track. No scan, no gate, no MegaLinter.
+
+    ``chargate ci`` already carries the BOM sink, but only fires it on non-PR events —
+    a BOM per pull request would litter Dependency-Track with throwaway ``N/merge``
+    versions. A consumer that runs the gate on ``pull_request`` only (the common
+    shape, because a full MegaLinter run on every merge is the single most expensive
+    thing in org CI) therefore never reaches that path and ships no BOM at all. That
+    is not a hypothetical: it is how every repo but chargate's own ended up absent
+    from Dependency-Track while DefectDojo — which imports on *every* event — filled
+    up normally. This subcommand is that missing push-time path standing alone, so a
+    repo can ship its inventory in seconds without paying for a scan it already ran
+    on the pull request.
+
+    Exit policy differs from the sink-on-a-gate rule deliberately. A **misconfigured**
+    sink here (no URL, no project, no key, no BOM) is a usage error and exits ``2``:
+    this command exists only to upload, so "nothing to upload to" is a broken job, not
+    a sink that is switched off. Silence in exactly that case is what hid the org-wide
+    breakage for three months. A sink **outage** stays failure-isolated (warn, exit
+    ``0``) unless ``--strict``, because a Dependency-Track that is merely down must not
+    turn every repo's CI red.
+    """
+    if not args.dependency_track_url:
+        return _fail("chargate sbom needs --dependency-track-url (nothing to upload to).")
+    if not args.dt_project_uuid and not args.dt_project_name:
+        return _fail("chargate sbom needs --dt-project-uuid or --dt-project-name.")
+    if not args.bom:
+        return _fail("chargate sbom needs --bom (the CycloneDX BOM to upload).")
+    api_key = os.environ.get(args.dt_api_key_env, "")
+    if not api_key:
+        # The env var's NAME is deliberately not interpolated here. It is not a secret,
+        # but `py/clear-text-logging-sensitive-data` classifies any `*key*` expression as
+        # one, and a flow from it into _eprint would have to be suppressed at _eprint —
+        # blanket-silencing that query for every message chargate ever prints. Naming the
+        # flag instead costs nothing and is arguably clearer for the caller.
+        return _fail(
+            "chargate sbom needs a Dependency-Track API key. Set the environment "
+            "variable named by --dt-api-key-env (default DEPENDENCYTRACK_API_KEY)."
+        )
+    bom_path = Path(args.bom)
+    if not bom_path.is_file():
+        return _fail(f"chargate sbom: BOM not found: {bom_path}")
+
+    result = dt.upload_bom(_dt_config_from_args(args, api_key), bom_path)
+    if result.ok:
+        target = result.project_url or result.endpoint
+        if not args.quiet:
+            _eprint(f"chargate: Dependency-Track: {result.message} -> {target}")
+        report_mod.append_step_summary(
+            f"### Chargate SBOM\n\nUploaded `{bom_path.name}` to Dependency-Track: {target}\n"
+        )
+        report_mod.write_outputs({"dependency_track_url": result.project_url or ""})
+        return EXIT_OK
+
+    # An outage is not a misconfiguration: warn and let the job stay green unless the
+    # caller asked for the opposite.
+    if args.strict:
+        return _fail(f"Dependency-Track upload failed: {result.message}")
+    _eprint(f"::warning::chargate: Dependency-Track upload failed (non-blocking): {result.message}")
+    report_mod.append_step_summary(
+        f"### Chargate SBOM\n\n:warning: Dependency-Track upload failed "
+        f"(non-blocking): {result.message}\n"
+    )
+    return EXIT_OK
 
 
 def _resolve_head_sha(args: argparse.Namespace) -> str:
@@ -669,6 +742,46 @@ def cmd_uninstall_hooks(_args: argparse.Namespace) -> int:
     for message in messages:
         _eprint(f"chargate: {message}")
     return EXIT_OK
+
+
+def _add_dependency_track_args(parser: argparse.ArgumentParser) -> None:
+    """The Dependency-Track flag set, shared by ``ci`` and ``sbom``.
+
+    One definition on purpose: the two subcommands address the same project the same
+    way, and a flag that drifted between them would point the two paths at different
+    projects for one repo.
+    """
+    parser.add_argument(
+        "--dependency-track-url",
+        help="Dependency-Track base URL (enables CycloneDX BOM upload).",
+    )
+    parser.add_argument(
+        "--dt-api-key-env",
+        default="DEPENDENCYTRACK_API_KEY",
+        help="Env var holding the Dependency-Track API key.",
+    )
+    parser.add_argument("--bom", help="Path to the CycloneDX BOM to upload to Dependency-Track.")
+    parser.add_argument("--dt-project-name", help="Dependency-Track project name.")
+    parser.add_argument("--dt-project-version", help="Dependency-Track project version.")
+    parser.add_argument(
+        "--dt-project-uuid",
+        help="Existing Dependency-Track project UUID (instead of name+version).",
+    )
+    parser.add_argument(
+        "--dt-no-auto-create",
+        action="store_true",
+        help="Do not auto-create the project/version on first upload.",
+    )
+    parser.add_argument("--dt-parent-name", help="Parent project name (for project hierarchy).")
+    parser.add_argument("--dt-parent-version", help="Parent project version.")
+    parser.add_argument(
+        "--dt-is-latest",
+        action="store_true",
+        help="Mark this version as the latest in Dependency-Track.",
+    )
+    parser.add_argument(
+        "--dt-insecure", action="store_true", help="Disable TLS verification for Dependency-Track."
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -898,37 +1011,7 @@ def build_parser() -> argparse.ArgumentParser:
     ci.add_argument(
         "--dd-insecure", action="store_true", help="Disable TLS verification for DefectDojo."
     )
-    ci.add_argument(
-        "--dependency-track-url",
-        help="Dependency-Track base URL (enables CycloneDX BOM upload).",
-    )
-    ci.add_argument(
-        "--dt-api-key-env",
-        default="DEPENDENCYTRACK_API_KEY",
-        help="Env var holding the Dependency-Track API key.",
-    )
-    ci.add_argument("--bom", help="Path to the CycloneDX BOM to upload to Dependency-Track.")
-    ci.add_argument("--dt-project-name", help="Dependency-Track project name.")
-    ci.add_argument("--dt-project-version", help="Dependency-Track project version.")
-    ci.add_argument(
-        "--dt-project-uuid",
-        help="Existing Dependency-Track project UUID (instead of name+version).",
-    )
-    ci.add_argument(
-        "--dt-no-auto-create",
-        action="store_true",
-        help="Do not auto-create the project/version on first upload.",
-    )
-    ci.add_argument("--dt-parent-name", help="Parent project name (for project hierarchy).")
-    ci.add_argument("--dt-parent-version", help="Parent project version.")
-    ci.add_argument(
-        "--dt-is-latest",
-        action="store_true",
-        help="Mark this version as the latest in Dependency-Track.",
-    )
-    ci.add_argument(
-        "--dt-insecure", action="store_true", help="Disable TLS verification for Dependency-Track."
-    )
+    _add_dependency_track_args(ci)
     ci.add_argument(
         "--pr-comment",
         action="store_true",
@@ -960,6 +1043,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ci.add_argument("--quiet", action="store_true", help="Suppress the human summary.")
     ci.set_defaults(func=cmd_ci)
+
+    sbom = sub.add_parser(
+        "sbom",
+        help="Upload a CycloneDX BOM to Dependency-Track (no scan, no gate).",
+        description=(
+            "Ship a repo's CycloneDX BOM to Dependency-Track on its own, without "
+            "running MegaLinter. For consumers whose gate runs on pull_request only "
+            "and so never reaches `chargate ci`'s push-time BOM upload. A "
+            "misconfigured sink exits 2; a Dependency-Track outage warns and exits 0 "
+            "unless --strict."
+        ),
+    )
+    _add_dependency_track_args(sbom)
+    sbom.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat a Dependency-Track upload failure as fatal (exit 2).",
+    )
+    sbom.add_argument("--quiet", action="store_true", help="Suppress the human summary.")
+    sbom.set_defaults(func=cmd_sbom)
 
     local = sub.add_parser(
         "local",

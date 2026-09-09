@@ -56,6 +56,7 @@ value unset and the CLI's own default applies.
 | `dependency_track_project_name` | (none) | Dependency-Track project name (auto-created if missing). |
 | `dependency_track_project_version` | (none) | Dependency-Track project version. |
 | `dependency_track_auto_create` | `true` | Auto-create the project/version on first upload. |
+| `sbom_only` | `false` | Ship the CycloneDX BOM to Dependency-Track and do nothing else: no MegaLinter, no SARIF, no gate. For consumers whose gate runs on `pull_request` only, which never reaches the BOM upload inside the gate. Push/tag events only. A misconfigured sink fails the job; a Dependency-Track outage only warns unless `strict` is also set. |
 | `setup_python` | `true` | Run actions/setup-python. Set false on a runner that already has a suitable Python 3.11+, setup-python only publishes linux/arm64 builds for the Ubuntu 22.04/24.04/26.04 images, so on any other arm64 self-hosted/ARC image it fails with "version not found". Chargate itself is stdlib-only pure Python and runs anywhere. |
 | `python_version` | `3.12` | Python version used to run the chargate CLI. |
 
