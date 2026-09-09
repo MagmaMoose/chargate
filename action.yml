@@ -220,6 +220,17 @@ inputs:
     description: 'Auto-create the project/version on first upload.'
     required: false
     default: 'true'
+  dependency_track_project_tags:
+    description: >-
+      Extra Dependency-Track project tags, comma-separated. `repo:<name>` is always
+      added: a repo has BOTH a source project (this one) and an assembled-image
+      project pushed by Diatreme, and for a repo building several images the project
+      names cannot be mapped back to the repo at all. Only the workflow knows it, so
+      anything grouping a repo's projects — one DefectDojo product per repo, say —
+      needs this join key.
+    required: false
+    default: ''
+
   sbom_only:
     description: >-
       Ship the CycloneDX BOM to Dependency-Track and do nothing else: no MegaLinter, no
@@ -364,6 +375,8 @@ runs:
         DT_PROJECT_NAME_IN: ${{ inputs.dependency_track_project_name }}
         DT_PROJECT_VERSION_IN: ${{ inputs.dependency_track_project_version }}
         DT_AUTO_CREATE_IN: ${{ inputs.dependency_track_auto_create }}
+        DT_TAGS_IN: ${{ inputs.dependency_track_project_tags }}
+        REPO_FULL_IN: ${{ github.repository }}
         STRICT_IN: ${{ inputs.strict }}
       run: |
         set -euo pipefail
@@ -384,6 +397,14 @@ runs:
         [ -n "$DT_PROJECT_VERSION_IN" ] && args+=(--dt-project-version "$DT_PROJECT_VERSION_IN")
         [ "$DT_AUTO_CREATE_IN" != "true" ] && args+=(--dt-no-auto-create)
         [ "$STRICT_IN" = "true" ] && args+=(--strict)
+        # `repo:<name>` always; caller tags appended. Blank entries dropped.
+        dt_tags="repo:${REPO_FULL_IN##*/},sbom:source"
+        [ -n "$DT_TAGS_IN" ] && dt_tags="$dt_tags,$DT_TAGS_IN"
+        IFS=',' read -ra _tags <<< "$dt_tags"
+        for t in "${_tags[@]}"; do
+          t="$(printf '%s' "$t" | tr -d '[:space:]')"
+          [ -n "$t" ] && args+=(--dt-project-tag "$t")
+        done
         chargate "${args[@]}"
 
     - name: Chargate gate
@@ -437,6 +458,8 @@ runs:
         DT_PROJECT_NAME_IN: ${{ inputs.dependency_track_project_name }}
         DT_PROJECT_VERSION_IN: ${{ inputs.dependency_track_project_version }}
         DT_AUTO_CREATE_IN: ${{ inputs.dependency_track_auto_create }}
+        DT_TAGS_IN: ${{ inputs.dependency_track_project_tags }}
+        REPO_FULL_IN: ${{ github.repository }}
       run: |
         set -euo pipefail
         # Keep the SARIF under the workspace so hashFiles() (used to guard the
@@ -509,6 +532,14 @@ runs:
         if [ -n "$DT_URL_IN" ]; then
           args+=(--dependency-track-url "$DT_URL_IN")
           [ -n "$DT_PROJECT_NAME_IN" ] && args+=(--dt-project-name "$DT_PROJECT_NAME_IN")
+        # `repo:<name>` always; caller tags appended. Blank entries dropped.
+        dt_tags="repo:${REPO_FULL_IN##*/},sbom:source"
+        [ -n "$DT_TAGS_IN" ] && dt_tags="$dt_tags,$DT_TAGS_IN"
+        IFS=',' read -ra _tags <<< "$dt_tags"
+        for t in "${_tags[@]}"; do
+          t="$(printf '%s' "$t" | tr -d '[:space:]')"
+          [ -n "$t" ] && args+=(--dt-project-tag "$t")
+        done
           case "$GITHUB_EVENT_NAME" in
             pull_request|pull_request_target)
               # PRs don't upload (no throwaway N/merge versions); just link the

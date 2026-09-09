@@ -52,6 +52,12 @@ class DependencyTrackConfig:
     parent_version: str | None = None
     parent_uuid: str | None = None
     is_latest: bool = False
+    # Dependency-Track project tags. `repo:<name>` is a join key for anything
+    # grouping a repo's projects: a repo has BOTH a source project (this one) and
+    # an assembled-image project pushed by Diatreme, and for a repo building
+    # several images the project names cannot be mapped back to it. Only the
+    # workflow knows the repo.
+    project_tags: tuple[str, ...] = ()
     verify_ssl: bool = True
     timeout: float = 60.0
 
@@ -108,10 +114,16 @@ def encode_multipart(
     filename: str,
     file_bytes: bytes,
     boundary: str = _BOUNDARY,
+    repeated: tuple[tuple[str, str], ...] = (),
 ) -> bytes:
-    """Encode ``fields`` plus one file as a multipart/form-data body."""
+    """Encode ``fields`` plus one file as a multipart/form-data body.
+
+    ``repeated`` carries fields that may appear more than once under one name —
+    ``projectTags`` is Dependency-Track's shape for a list — which a flat dict
+    cannot express.
+    """
     parts: list[bytes] = []
-    for name, value in fields.items():
+    for name, value in (*fields.items(), *repeated):
         parts.append(f"--{boundary}\r\n".encode())
         parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
         parts.append(f"{value}\r\n".encode())
@@ -132,6 +144,9 @@ def build_request(config: DependencyTrackConfig, bom_path: Path) -> urllib.reque
         file_field="bom",
         filename=bom_path.name,
         file_bytes=strip_bom_marker(bom_path.read_bytes()),
+        # Blank entries are dropped rather than sent: Dependency-Track creates a tag
+        # named "" quite happily, and removing it afterwards is awkward.
+        repeated=tuple(("projectTags", t.strip()) for t in config.project_tags if t.strip()),
     )
     request = urllib.request.Request(config.endpoint_url(), data=body, method="POST")
     request.add_header("X-Api-Key", config.api_key)

@@ -532,6 +532,7 @@ def _dt_config_from_args(args: argparse.Namespace, api_key: str) -> dt.Dependenc
         parent_name=args.dt_parent_name,
         parent_version=args.dt_parent_version,
         is_latest=args.dt_is_latest,
+        project_tags=tuple(args.dt_project_tag or ()),
         verify_ssl=not args.dt_insecure,
     )
 
@@ -781,6 +782,15 @@ def _add_dependency_track_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--dt-insecure", action="store_true", help="Disable TLS verification for Dependency-Track."
+    )
+    parser.add_argument(
+        "--dt-project-tag",
+        action="append",
+        metavar="TAG",
+        help=(
+            "Dependency-Track project tag, repeatable (e.g. repo:myrepo). A `repo:` tag "
+            "is the join key for anything grouping a repo's projects."
+        ),
     )
 
 

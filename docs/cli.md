@@ -92,6 +92,7 @@ Key flags beyond the shared filter options:
 | `--dt-project-name` / `--dt-project-version` / `--dt-project-uuid` | (none) | Dependency-Track project targeting. |
 | `--dt-parent-name` / `--dt-parent-version` | (none) | Parent project, when you keep Dependency-Track projects in a hierarchy. |
 | `--dt-no-auto-create` / `--dt-is-latest` / `--dt-insecure` | off | Don't auto-create the project / mark latest / skip TLS verify. |
+| `--dt-project-tag` | (none) | Dependency-Track project tag, repeatable. A `repo:<name>` tag is the join key for grouping a repo's projects. |
 | `--pr-comment` | off | Post GHAS-style PR comments for net-new findings (PR/gate mode only). |
 | `--pr-number` / `--repo-slug` | (none) | Pull request number and `owner/repo` to comment on. |
 | `--github-token-env` | `GITHUB_TOKEN` | Env var with a token that has `pull-requests: write`. |

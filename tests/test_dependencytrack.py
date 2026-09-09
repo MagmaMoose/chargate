@@ -237,3 +237,61 @@ def test_upload_missing_file_is_not_ok(tmp_path: Path):
     result = dt.upload_bom(_config(), tmp_path / "missing.json", opener=opener)
     assert not result.ok
     assert opener.request is None  # never attempted the upload
+
+
+# ── project tags ───────────────────────────────────────────────────────────
+# `repo:<name>` is a join key, not decoration. A repo has BOTH a source project
+# (this one) and Diatreme's assembled-image project, and a repo building several
+# images produces project names that cannot be mapped back to it — dunmir yields
+# dunmir-agent / -backend / -frontend. Only the workflow knows the repo, so anything
+# grouping a repo's projects depends on the tag being here.
+
+
+def _body(**kw) -> str:
+    cfg = dt.DependencyTrackConfig(
+        base_url="https://dt.example.com", api_key="k", project_name="p", **kw
+    )
+    return dt.encode_multipart(
+        dt.build_form_fields(cfg),
+        file_field="bom",
+        filename="bom.json",
+        file_bytes=b"{}",
+        repeated=tuple(("projectTags", t.strip()) for t in cfg.project_tags if t.strip()),
+    ).decode()
+
+
+def test_tags_are_repeated_fields_not_one_joined_value():
+    # Dependency-Track's shape for a list is the same field name repeated; a single
+    # comma-joined value becomes ONE tag with a comma in its name.
+    body = _body(project_tags=("repo:dunmir", "sbom:source"))
+    assert body.count('name="projectTags"') == 2
+    assert "repo:dunmir" in body and "sbom:source" in body
+    assert "repo:dunmir,sbom:source" not in body
+
+
+def test_no_tags_means_no_field():
+    assert 'name="projectTags"' not in _body()
+
+
+def test_blank_tags_are_dropped_not_sent_empty():
+    # Dependency-Track creates a tag named "" quite happily, and removing it later
+    # is awkward.
+    body = _body(project_tags=("repo:x", "", "   ", "sbom:source"))
+    assert body.count('name="projectTags"') == 2
+
+
+def test_tags_are_stripped():
+    body = _body(project_tags=(" repo:x ", "\tsbom:source\n"))
+    assert "repo:x" in body and "sbom:source" in body
+    assert 'name="projectTags"\r\n\r\n repo:x ' not in body
+
+
+def test_tags_do_not_disturb_the_existing_fields():
+    body = _body(project_version="main", project_tags=("repo:x",))
+    for expected in (
+        'name="projectName"',
+        'name="projectVersion"',
+        'name="autoCreate"',
+        'name="bom"',
+    ):
+        assert expected in body
