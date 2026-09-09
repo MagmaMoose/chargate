@@ -295,3 +295,20 @@ def test_tags_do_not_disturb_the_existing_fields():
         'name="bom"',
     ):
         assert expected in body
+
+
+def test_build_request_includes_project_tags(tmp_path: Path):
+    # Goes through build_request itself so a typo in the field name or a change to
+    # the repeated= expression there would be caught — the _body helper above does not.
+    bom = tmp_path / "bom.json"
+    bom.write_bytes(b"{}")
+    cfg = dt.DependencyTrackConfig(
+        base_url="https://dt.example.com",
+        api_key="k",
+        project_name="p",
+        project_tags=("repo:chargate", "sbom:source"),
+    )
+    req = dt.build_request(cfg, bom)
+    body = req.data.decode()
+    assert body.count('name="projectTags"') == 2
+    assert "repo:chargate" in body and "sbom:source" in body
