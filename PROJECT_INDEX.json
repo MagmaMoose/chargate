@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-02T00:00:00Z",
+  "generated": "2026-09-09T00:00:00Z",
   "summary": "Chargate is a Python CLI that wraps MegaLinter and adds net-new (PR-diff) finding gating: on a PR only findings the diff introduced relative to the merge-base can block; the full unfiltered SARIF is always emitted and shipped (DefectDojo / Security tab / artifact) and a CycloneDX BOM (Syft) is shipped to Dependency-Track. One `chargate` CLI backs TWO GitHub surfaces: a composite action (action.yml) and a pre-commit hook (.pre-commit-hooks.yaml). The `sarif/` subpackage is a pure, deterministic, I/O-free core; `git.py` is the only subprocess boundary. A SEPARATE deployable under broker/ mints Chargate[bot] tokens for PR-comment authorship via GitHub Actions OIDC \u2014 an AWS Lambda behind an API Gateway HTTP API, with its own pyproject and virtualenv, NOT part of the stdlib-only CLI wheel and NOT a dependency group of it.",
   "entrypoints": [
     "src/chargate/cli.py:main",
@@ -86,7 +86,7 @@
     },
     "sarif.model": {
       "path": "src/chargate/sarif/model.py",
-      "purpose": "Defensive, typed accessors over SARIF 2.1.0 result objects (primary uri, startLine, resolved level, security-severity, severity band, tool driver name, in-source suppression, and a best-effort `is_secret_result` classifier for the SOPS filter). Tolerates missing/None fields. Pure.",
+      "purpose": "Defensive, typed accessors over SARIF 2.1.0 result objects (primary uri, startLine, resolved level, security-severity, severity band, tool driver name, in-source suppression, and a best-effort `is_secret_result` classifier for the SOPS filter). Also strips the MegaLinter suffix from driver names (`canonical_tool_name` / `canonicalize_tool_names`) so the same scanner does not appear twice in GitHub's Security tab. Tolerates missing/None fields. Pure.",
       "exports": [
         "iter_results",
         "primary_uri",
@@ -98,7 +98,9 @@
         "SARIF_LEVELS",
         "is_suppressed",
         "tool_driver_name",
-        "is_secret_result"
+        "is_secret_result",
+        "canonical_tool_name",
+        "canonicalize_tool_names"
       ],
       "depends_on": []
     },
