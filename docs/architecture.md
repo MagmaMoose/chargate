@@ -10,7 +10,7 @@ cleanly into a **pure core** and a thin set of **side-effecting edges**.
 
 ```text
 src/chargate/
-  cli.py          # argparse dispatch: filter-sarif | ci | local | install-hooks | uninstall-hooks | version
+  cli.py          # argparse dispatch: filter-sarif | ci | sbom | local | install-hooks | uninstall-hooks | version
   sarif/          # ★ THE PURE CORE — deterministic, no I/O, heavily tested
     diff.py       #   unified-diff text -> DiffIndex (changed files + added line ranges)
     model.py      #   defensive SARIF result accessors (uri, startLine, level, severity)
