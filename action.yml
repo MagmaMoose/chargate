@@ -335,7 +335,7 @@ runs:
     # on pull_request, so the BOM only ever exists on a push.)
     - name: Generate CycloneDX SBOM
       if: ${{ (inputs.dependency_track_url != '' || inputs.sbom_only == 'true') && github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
-      uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
       with:
         path: '.'
         format: 'cyclonedx-json'
@@ -574,7 +574,7 @@ runs:
     - name: Upload SARIF to GitHub Security tab
       if: ${{ always() && inputs.upload_github_sarif == 'true' && github.event_name != 'pull_request' && steps.chargate.outputs.sarif_path != '' && hashFiles(steps.chargate.outputs.sarif_path) != '' }}
       continue-on-error: true
-      uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       with:
         sarif_file: ${{ steps.chargate.outputs.sarif_path }}
         token: ${{ inputs.github_token }}
