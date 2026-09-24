@@ -9,7 +9,7 @@ Every input and output of the `magmamoose/chargate` composite action, read from
 
 ## Inputs
 
-All 46 inputs are optional. A blank default means the action leaves the
+All inputs are optional. A blank default means the action leaves the
 value unset and the CLI's own default applies.
 
 | Input | Default | Description |
