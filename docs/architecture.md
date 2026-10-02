@@ -54,7 +54,9 @@ required.
 1. **`modes.resolve_mode`** decides PR (gate) vs baseline (no gate) from
    `GITHUB_EVENT_NAME` or an explicit flag.
 2. **`megalinter.run`** runs MegaLinter whole-repo with `DISABLE_ERRORS=true` (so
-   MegaLinter never sets the exit code) and locates the merged SARIF.
+   MegaLinter never sets the exit code) and locates the merged SARIF. When the images
+   come from a mirror, `RegistryFallback` pulls them first and falls back to `ghcr.io`
+   if the mirror cannot serve them.
 3. **`git.compute_changed_lines`** resolves `merge-base(base, head)`, runs
    `git diff --unified=0`, and hands the text to `sarif.diff.parse_unified_diff` →
    a `DiffIndex`.

@@ -767,3 +767,230 @@ def test_composite_action_sbom_only_passes_flags_the_cli_accepts():
         if flag not in ("--dt-no-auto-create", "--strict"):
             argv.append("x")
     parser.parse_args(argv)  # raises SystemExit(2) on an unknown flag
+
+
+# ── Registry fallback: a mirror that cannot serve the image must not fail the gate ──
+
+MIRROR = "cache.internal:5000"
+MIRRORED = f"{MIRROR}/oxsecurity/megalinter-security:v10.0.0"
+UPSTREAM = "ghcr.io/oxsecurity/megalinter-security:v10.0.0"
+BANDIT, TRIVY = "PYTHON_BANDIT", "REPOSITORY_TRIVY"
+
+
+class FakeDocker:
+    """The docker CLI behind ``puller=``.
+
+    Nothing is on the daemon unless listed in ``local``. A pull fails when its registry
+    host (or the whole image) is in ``failing``, and times out when the host is in
+    ``hanging``.
+    """
+
+    def __init__(self, failing=(), hanging=(), local=()):
+        self.failing, self.hanging, self.local = set(failing), set(hanging), set(local)
+        self.calls: list[tuple[list[str], float | None]] = []
+
+    def __call__(self, cmd: list[str], timeout: float | None) -> subprocess.CompletedProcess:
+        self.calls.append((cmd, timeout))
+        image = cmd[-1]
+        if cmd[1:3] == ["image", "inspect"]:
+            return subprocess.CompletedProcess(cmd, 0 if image in self.local else 1, "", "")
+        host = image.split("/", 1)[0]
+        if host in self.hanging:
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        if host in self.failing or image in self.failing:
+            err = f'Error response from daemon: Head "https://{host}/v2/": connection refused\n'
+            return subprocess.CompletedProcess(cmd, 1, "", err)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    @property
+    def pulls(self) -> list[str]:
+        return [cmd[-1] for cmd, _ in self.calls if cmd[1] == "pull"]
+
+
+def _recording(ran: list[list[str]], returncode: int = 0):
+    """A `docker run` runner that records each command instead of starting a container."""
+
+    def runner(cmd: list[str]) -> subprocess.CompletedProcess:
+        ran.append(cmd)
+        return _completed(cmd, returncode)
+
+    return runner
+
+
+def _mirror_config(tmp_path: Path, **overrides) -> ml.MegaLinterConfig:
+    return ml.MegaLinterConfig(
+        workspace=str(tmp_path), flavor="security", registry=MIRROR, **overrides
+    )
+
+
+def _only(registry: str, key: str) -> str:
+    return f"{registry}/oxsecurity/megalinter-only-{key.lower()}:v10.0.0"
+
+
+def test_plan_falls_back_to_upstream_for_a_mirrored_image(tmp_path: Path):
+    config = _mirror_config(tmp_path, namespace="mirrors/oxsecurity")
+    step = ml.resolve_plan(config, "amd64").steps[0]
+    assert step.image == f"{MIRROR}/mirrors/oxsecurity/megalinter-security:v10.0.0"
+    # The mirror's own path goes too: upstream only has the images under oxsecurity.
+    assert step.fallback_image == UPSTREAM
+
+
+def test_plan_fallback_keeps_a_digest_pin(tmp_path: Path):
+    digest = "sha256:" + "a" * 64
+    step = ml.resolve_plan(_mirror_config(tmp_path, image_tag=digest), "amd64").steps[0]
+    assert step.fallback_image == f"ghcr.io/oxsecurity/megalinter-security@{digest}"
+
+
+@pytest.mark.parametrize("registry", ["ghcr.io", "GHCR.IO", "ghcr.io/"])
+def test_plan_has_no_fallback_when_the_registry_already_is_upstream(tmp_path: Path, registry):
+    config = ml.MegaLinterConfig(workspace=str(tmp_path), registry=registry, namespace="acme")
+    assert ml.resolve_plan(config, "amd64").steps[0].fallback_image == ""
+
+
+def test_plan_never_rewrites_an_explicit_image_ref(tmp_path: Path):
+    config = _mirror_config(tmp_path, image_ref=f"{MIRROR}/acme/megalinter-custom-flavor:1")
+    assert ml.resolve_plan(config, "amd64").steps[0].fallback_image == ""
+
+
+def test_plan_has_no_fallback_when_it_is_disabled(tmp_path: Path):
+    config = _mirror_config(tmp_path, registry_fallback=False)
+    assert ml.resolve_plan(config, "amd64").steps[0].fallback_image == ""
+
+
+def test_plan_gives_every_standalone_image_its_own_fallback(tmp_path: Path):
+    config = _mirror_config(tmp_path, strategy="standalone", standalone_linters=(BANDIT, TRIVY))
+    steps = ml.resolve_plan(config, "amd64").steps
+    assert [s.fallback_image for s in steps] == [_only("ghcr.io", BANDIT), _only("ghcr.io", TRIVY)]
+
+
+def test_build_pull_command_passes_platform_when_set():
+    assert ml.build_pull_command(ml.MegaLinterConfig(), "img")[1:] == ["pull", "img"]
+    config = ml.MegaLinterConfig(platform="linux/amd64")
+    assert ml.build_pull_command(config, "img")[1:] == ["pull", "--platform", "linux/amd64", "img"]
+
+
+def test_run_uses_the_mirror_when_it_serves_the_image(tmp_path: Path, capsys):
+    docker, ran = FakeDocker(), []
+    ml.run(_mirror_config(tmp_path), runner=_recording(ran), puller=docker, arch="amd64")
+    assert docker.pulls == [MIRRORED]
+    assert ran[0][-1] == MIRRORED
+    assert "::warning::" not in capsys.readouterr().err
+
+
+def test_run_falls_back_to_upstream_when_the_mirror_fails(tmp_path: Path, capsys):
+    docker, ran = FakeDocker(failing={MIRROR}), []
+    run = ml.run(_mirror_config(tmp_path), runner=_recording(ran), puller=docker, arch="amd64")
+    assert docker.pulls == [MIRRORED, UPSTREAM]
+    assert ran[0][-1] == UPSTREAM
+    assert run.command[-1] == UPSTREAM
+    warnings = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("::warning::")]
+    assert len(warnings) == 1
+    assert MIRRORED in warnings[0]
+    assert UPSTREAM in warnings[0]
+    assert "connection refused" in warnings[0]
+
+
+def test_run_falls_back_when_the_mirror_pull_times_out(tmp_path: Path, capsys):
+    docker, ran = FakeDocker(hanging={MIRROR}), []
+    config = _mirror_config(tmp_path, pull_timeout=42)
+    ml.run(config, runner=_recording(ran), puller=docker, arch="amd64")
+    # Only the mirror is bounded; upstream gets as long as docker run's own pull would.
+    assert [(cmd[-1], t) for cmd, t in docker.calls if cmd[1] == "pull"] == [
+        (MIRRORED, 42),
+        (UPSTREAM, None),
+    ]
+    assert ran[0][-1] == UPSTREAM
+    assert "timed out after 42s" in capsys.readouterr().err
+
+
+def test_run_never_pulls_or_rewrites_an_explicit_image_ref(tmp_path: Path):
+    image_ref = f"{MIRROR}/acme/megalinter-custom-flavor:1"
+    docker, ran = FakeDocker(failing={MIRROR}), []
+    config = _mirror_config(tmp_path, image_ref=image_ref)
+    ml.run(config, runner=_recording(ran), puller=docker, arch="amd64")
+    assert docker.calls == []
+    assert ran[0][-1] == image_ref
+
+
+def test_run_with_the_fallback_disabled_fails_at_the_pull_as_before(tmp_path: Path):
+    # No explicit pull at all: `docker run` pulls from the mirror itself and fails there
+    # (exit 125), exactly what chargate did before the fallback existed.
+    docker, ran = FakeDocker(failing={MIRROR}), []
+    config = _mirror_config(tmp_path, registry_fallback=False)
+    run = ml.run(config, runner=_recording(ran, returncode=125), puller=docker, arch="amd64")
+    assert docker.calls == []
+    assert ran[0][-1] == MIRRORED
+    assert run.returncode == 125
+
+
+def test_run_pulls_both_registries_for_the_requested_platform(tmp_path: Path):
+    docker = FakeDocker(failing={MIRROR})
+    config = _mirror_config(tmp_path, platform="linux/amd64")
+    ml.run(config, runner=_recording([]), puller=docker, arch="arm64")
+    pulls = [cmd for cmd, _ in docker.calls if cmd[1] == "pull"]
+    assert [cmd[-1] for cmd in pulls] == [MIRRORED, UPSTREAM]
+    assert all(cmd[2:4] == ["--platform", "linux/amd64"] for cmd in pulls)
+
+
+def test_run_uses_an_image_already_on_the_daemon_without_pulling(tmp_path: Path):
+    # `docker run` would not pull it either, so a mirror outage must not break this runner.
+    docker, ran = FakeDocker(failing={MIRROR}, local={MIRRORED}), []
+    ml.run(_mirror_config(tmp_path), runner=_recording(ran), puller=docker, arch="amd64")
+    assert docker.pulls == []
+    assert ran[0][-1] == MIRRORED
+
+
+def test_run_names_both_failures_when_upstream_fails_too(tmp_path: Path):
+    docker, ran = FakeDocker(failing={MIRROR, "ghcr.io"}), []
+    with pytest.raises(ml.MegaLinterError) as excinfo:
+        ml.run(_mirror_config(tmp_path), runner=_recording(ran), puller=docker, arch="amd64")
+    assert MIRRORED in str(excinfo.value)
+    assert UPSTREAM in str(excinfo.value)
+    assert ran == []
+
+
+def test_standalone_skips_a_failed_mirror_for_the_rest_of_the_run(tmp_path: Path, capsys):
+    # One timeout and one warning, however many per-linter images the plan has.
+    docker = FakeDocker(hanging={MIRROR})
+    config = _mirror_config(
+        tmp_path, strategy="standalone", standalone_linters=(BANDIT, TRIVY), jobs=1
+    )
+    ml.run(config, runner=_recording([]), puller=docker, arch="amd64")
+    assert docker.pulls == [
+        _only(MIRROR, BANDIT),
+        _only("ghcr.io", BANDIT),
+        _only("ghcr.io", TRIVY),
+    ]
+    assert capsys.readouterr().err.count("::warning::") == 1
+
+
+def test_standalone_isolates_a_linter_neither_registry_can_serve(tmp_path: Path, capsys):
+    # Like a container that dies: that linter is lost and fails the run code, the rest run.
+    docker, ran = FakeDocker(failing={MIRROR, _only("ghcr.io", TRIVY)}), []
+    config = _mirror_config(
+        tmp_path, strategy="standalone", standalone_linters=(BANDIT, TRIVY), jobs=1
+    )
+    run = ml.run(config, runner=_recording(ran), puller=docker, arch="amd64")
+    assert [cmd[-1] for cmd in ran] == [_only("ghcr.io", BANDIT)]
+    assert run.returncode == 125
+    assert _only("ghcr.io", TRIVY) in capsys.readouterr().err
+
+
+def test_the_default_puller_kills_a_hung_mirror_pull(tmp_path: Path, monkeypatch):
+    # The fake puller above can only claim the bound; this runs the real one against a
+    # `docker` whose mirror pull never returns, and the run must still reach upstream.
+    fake = tmp_path / "bin" / "docker"
+    fake.parent.mkdir()
+    fake.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = image ]; then exit 1; fi\n'
+        f'case "$*" in *{MIRROR}/*) exec sleep 30 ;; esac\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ.get('PATH', '')}")
+    ran: list[list[str]] = []
+    config = _mirror_config(tmp_path, pull_timeout=0.5)
+    ml.run(config, runner=_recording(ran), arch="amd64")
+    assert ran[0][-1] == UPSTREAM

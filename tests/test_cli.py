@@ -555,6 +555,52 @@ def test_ci_explicit_flag_beats_the_env_default(pr_repo, monkeypatch):
     assert captured["config"].image().split("/")[0] == "ghcr.io"
 
 
+def test_ci_registry_fallback_is_on_by_default(pr_repo, monkeypatch):
+    from chargate import megalinter as ml
+
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--quiet"])  # fmt: skip
+    assert captured["config"].registry_fallback is True
+    assert captured["config"].pull_timeout == ml.DEFAULT_PULL_TIMEOUT
+
+
+def test_ci_registry_fallback_and_pull_timeout_fall_back_to_env(pr_repo, monkeypatch):
+    # A fleet that must never pull from the public registry opts out on the runner.
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    monkeypatch.setenv("CHARGATE_MEGALINTER_REGISTRY_FALLBACK", "FALSE")
+    monkeypatch.setenv("CHARGATE_MEGALINTER_PULL_TIMEOUT", "60")
+    main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+          "--quiet"])  # fmt: skip
+    assert captured["config"].registry_fallback is False
+    assert captured["config"].pull_timeout == 60
+
+
+def test_ci_rejects_a_registry_fallback_value_it_cannot_read(pr_repo, capsys, monkeypatch):
+    # Either guess is wrong for someone: one pulls from a registry the operator forbade,
+    # the other blocks CI on a mirror outage. So neither is taken.
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    monkeypatch.setenv("CHARGATE_MEGALINTER_REGISTRY_FALLBACK", "off-please")
+    code = main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+                 "--quiet"])  # fmt: skip
+    assert code == EXIT_ERROR
+    assert "CHARGATE_MEGALINTER_REGISTRY_FALLBACK" in capsys.readouterr().err
+    assert "config" not in captured
+
+
+def test_ci_rejects_a_pull_timeout_below_one_second(pr_repo, capsys, monkeypatch):
+    repo, base, head, sarif_path = pr_repo
+    captured = _capture_ml_config(monkeypatch, sarif_path)
+    code = main(["ci", "--mode", "pr", "--base", base, "--head", head, "--repo", str(repo),
+                 "--megalinter-pull-timeout", "0", "--quiet"])  # fmt: skip
+    assert code == EXIT_ERROR
+    assert "--megalinter-pull-timeout" in capsys.readouterr().err
+    assert "config" not in captured
+
+
 def test_ci_passes_arch_strategy_and_standalone_linters_through(pr_repo, monkeypatch):
     repo, base, head, sarif_path = pr_repo
     captured = _capture_ml_config(monkeypatch, sarif_path)

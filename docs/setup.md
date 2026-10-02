@@ -275,6 +275,12 @@ Hub publishing at `v9.4.0`, so `docker.io` cannot serve any current version. Poi
 `megalinter_registry` / `megalinter_namespace` at a mirror if you need one, or
 `megalinter_image` at a full reference to bypass name composition entirely.
 
+A mirror is not a new way for the gate to fail. If it cannot serve an image (down,
+too slow, missing the tag), Chargate logs a warning and pulls the same image from
+`ghcr.io` instead. Set `CHARGATE_MEGALINTER_REGISTRY_FALLBACK=false` in the runner or
+job environment if your runners must never pull from the public registry. Details and
+the timeout: [CLI reference](cli.md#chargate-ci).
+
 ### The `quality` flavor
 
 `flavor: quality` is **not** a MegaLinter flavor. MegaLinter publishes no

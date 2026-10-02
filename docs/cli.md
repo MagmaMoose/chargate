@@ -1,6 +1,6 @@
 # CLI reference
 
-<!-- sources: src/chargate/cli.py, src/chargate/gate.py -->
+<!-- sources: src/chargate/cli.py, src/chargate/gate.py, src/chargate/megalinter.py -->
 
 Both GitHub surfaces drive the same `chargate` CLI. Exit codes: `0` pass ·
 `1` blocking net-new findings · `2` setup/usage error.
@@ -53,11 +53,28 @@ chargate ci --mode auto --flavor all --sarif-out full.sarif
 ```
 
 Every image-selection flag also reads a `CHARGATE_*` env var when the flag is
-omitted (`CHARGATE_MEGALINTER_REGISTRY`, `CHARGATE_MEGALINTER_NAMESPACE`,
+omitted (`CHARGATE_MEGALINTER_REGISTRY`, `CHARGATE_MEGALINTER_REGISTRY_FALLBACK`,
+`CHARGATE_MEGALINTER_PULL_TIMEOUT`, `CHARGATE_MEGALINTER_NAMESPACE`,
 `CHARGATE_MEGALINTER_IMAGE`, `CHARGATE_MEGALINTER_TAG`, `CHARGATE_DOCKER_PLATFORM`,
 `CHARGATE_ARCH_STRATEGY`, `CHARGATE_JOBS`), so a self-hosted runner fleet can point
 every repo at an internal mirror without editing any workflow. Explicit flag beats
 env var beats built-in default.
+
+**A mirror that fails falls back to `ghcr.io`.** When the registry is anything other
+than `ghcr.io` (a mirror or pull-through cache), Chargate pulls each image itself
+before `docker run` and gives the registry `--megalinter-pull-timeout` seconds
+(default `300`). If that pull fails for any reason (unreachable, timed out, manifest
+unknown, auth error), it logs one `::warning::` and pulls the same image from
+`ghcr.io/oxsecurity` instead, so a cache outage costs a slower pull rather than every
+job on the runner pool. After the first failure the rest of the run skips the mirror.
+An image already on the Docker daemon is used as-is, and `--megalinter-image` is never
+rewritten. If `ghcr.io` fails too, the error names both failures and the run exits
+`2` (in standalone mode only that linter is lost, as when its container dies).
+
+Set `CHARGATE_MEGALINTER_REGISTRY_FALLBACK=false` on runners that must never pull from
+the public registry: Chargate then skips its own pull and fails at `docker run`, as it
+did before the fallback existed. Any value other than `true` or `false` exits `2`
+rather than guessing.
 
 Key flags beyond the shared filter options:
 
@@ -68,6 +85,8 @@ Key flags beyond the shared filter options:
 | `--flavor` | `all` | MegaLinter flavor (`all` = full image), or `quality` — a five-linter set chargate curates, with no upstream image, so it always runs standalone. See [The `quality` flavor](setup.md#the-quality-flavor). |
 | `--megalinter-tag` | `v10.0.0` | MegaLinter image tag, or a `sha256:…` digest to pin. |
 | `--megalinter-registry` | `ghcr.io` | Registry host. Docker Hub is frozen at `v9.4.0`, so it cannot serve `v9.5.0+`. |
+| `--megalinter-registry-fallback` | `true` | `true\|false`. When the registry is not `ghcr.io` and cannot serve an image, pull it from `ghcr.io` instead. `false` fails at the pull. |
+| `--megalinter-pull-timeout` | `300` | Seconds a non-`ghcr.io` registry gets to deliver an image before the fallback. |
 | `--megalinter-namespace` | `oxsecurity` | Image namespace (set for a mirror / pull-through cache). |
 | `--megalinter-image` | (none) | Full image reference, overriding registry/namespace/flavor/tag entirely. |
 | `--docker-platform` | (none) | Value for `docker run --platform` (e.g. `linux/amd64` to force emulation). |

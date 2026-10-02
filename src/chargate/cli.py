@@ -315,6 +315,16 @@ def cmd_ci(args: argparse.Namespace) -> int:
         if incremental and args.default_branch:
             # MegaLinter needs the base branch to compute the changed-file set.
             extra_env["DEFAULT_BRANCH"] = args.default_branch
+        # argparse checks `choices` on a flag but not on its env default, so a typo in
+        # CHARGATE_MEGALINTER_REGISTRY_FALLBACK lands here. It must not be read as either
+        # answer: one pulls from a registry the operator forbade, the other blocks CI.
+        if args.megalinter_registry_fallback not in ("true", "false"):
+            return _fail(
+                "CHARGATE_MEGALINTER_REGISTRY_FALLBACK must be true or false, got "
+                f"'{args.megalinter_registry_fallback}'."
+            )
+        if args.megalinter_pull_timeout < 1:
+            return _fail("--megalinter-pull-timeout must be at least 1 second.")
         ml_config = ml.MegaLinterConfig(
             flavor=args.flavor,
             image_tag=args.megalinter_tag,
@@ -330,6 +340,8 @@ def cmd_ci(args: argparse.Namespace) -> int:
             strategy=args.arch_strategy,
             standalone_linters=tuple(args.standalone_linter or ()),
             jobs=args.jobs,
+            registry_fallback=args.megalinter_registry_fallback == "true",
+            pull_timeout=args.megalinter_pull_timeout,
         )
         try:
             ml_run = ml.run(ml_config)
@@ -892,6 +904,26 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Registry host for the MegaLinter images (default: ghcr.io). MegaLinter froze "
             "Docker Hub publishing at v9.4.0, so docker.io cannot serve v9.5.0+."
+        ),
+    )
+    ci.add_argument(
+        "--megalinter-registry-fallback",
+        type=str.lower,
+        choices=("true", "false"),
+        default=_env_default("CHARGATE_MEGALINTER_REGISTRY_FALLBACK", "true"),
+        help=(
+            "When the registry is not ghcr.io and cannot serve an image, pull it from "
+            "ghcr.io instead (default: true). false fails at the pull, for runners that "
+            "must never pull from the public registry. Never applies to --megalinter-image."
+        ),
+    )
+    ci.add_argument(
+        "--megalinter-pull-timeout",
+        type=int,
+        default=_env_int_default("CHARGATE_MEGALINTER_PULL_TIMEOUT", ml.DEFAULT_PULL_TIMEOUT),
+        help=(
+            "Seconds a non-ghcr.io registry gets to deliver an image before the fallback "
+            f"(default: {ml.DEFAULT_PULL_TIMEOUT})."
         ),
     )
     ci.add_argument(
