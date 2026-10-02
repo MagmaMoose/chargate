@@ -23,7 +23,7 @@ value unset and the CLI's own default applies.
 | `head_ref` | (none) | Override the head ref/SHA (default: PR head SHA, else github.sha). |
 | `strict` | `false` | Fail the job if MegaLinter itself errors (a tool error, not a finding). A SARIF with no runs fails regardless. |
 | `flavor` | `security` | MegaLinter flavor: security (default) \| all (full lint image) \| python \| go \| ... |
-| `megalinter_registry` | (none) | Registry host for the MegaLinter images. Default ghcr.io, MegaLinter froze Docker Hub publishing at v9.4.0, so docker.io cannot serve v9.5.0+ at all. Point this at a mirror or pull-through cache if you have one. |
+| `megalinter_registry` | (none) | Registry host for the MegaLinter images. Default ghcr.io, MegaLinter froze Docker Hub publishing at v9.4.0, so docker.io cannot serve v9.5.0+ at all. Point this at a mirror or pull-through cache if you have one. If it cannot serve an image, Chargate warns and pulls from ghcr.io instead; set `CHARGATE_MEGALINTER_REGISTRY_FALLBACK=false` in the job env to fail instead. |
 | `megalinter_namespace` | (none) | Image namespace under the registry. Default oxsecurity. |
 | `megalinter_image` | (none) | Full image reference, overriding registry + namespace + flavor + tag entirely. Use it for a MegaLinter custom flavor (e.g. ghcr.io/you/repo/megalinter-custom-flavor:v10.0.0, the supported way to get a single-image arm64 build) or an internal mirror. When set, Chargate never composes an image name. |
 | `megalinter_tag` | (none) | MegaLinter image tag, or a `sha256:...` digest to pin. Default v10.0.0 (the immutable release tag, not the floating `v10` alias). |

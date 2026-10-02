@@ -51,7 +51,9 @@ inputs:
     description: >-
       Registry host for the MegaLinter images. Default ghcr.io — MegaLinter froze Docker
       Hub publishing at v9.4.0, so docker.io cannot serve v9.5.0+ at all. Point this at a
-      mirror or pull-through cache if you have one.
+      mirror or pull-through cache if you have one. If it cannot serve an image, Chargate
+      warns and pulls from ghcr.io instead; set CHARGATE_MEGALINTER_REGISTRY_FALLBACK=false
+      in the job env to fail instead.
     required: false
     default: ''
   megalinter_namespace:

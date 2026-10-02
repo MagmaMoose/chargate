@@ -8,7 +8,9 @@ against ``git diff`` paths.
 
 The Docker command / env assembly, the run plan and the SARIF merge are pure and
 unit-tested. The actual ``docker run`` is injected (``runner=``) so the orchestration
-is testable without Docker.
+is testable without Docker, and so are the ``docker pull`` calls of the registry
+fallback (``puller=``, see :class:`RegistryFallback`): when the images come from a
+mirror, a mirror outage costs a pull from ghcr.io, not the job.
 
 Two things here are load-bearing and were each a live defect:
 
@@ -39,9 +41,10 @@ import re
 import shutil
 import subprocess  # nosec B404 - chargate's job is to shell out to the MegaLinter container
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from chargate.linters import FLAVOR_STANDALONE_SETS, STANDALONE_LINTERS, SYNTHETIC_FLAVORS
@@ -63,6 +66,12 @@ STANDALONE_REPO_PREFIX = "megalinter-only-"
 # v10 is also the floor for arm64: the megalinter-only-* images are single-arch at
 # v9.6.0 and below, so no earlier tag can scan on arm64 at all.
 DEFAULT_TAG = "v10.0.0"
+
+# Seconds a non-default registry (a mirror or pull-through cache) gets to deliver an image
+# before chargate pulls it from DEFAULT_REGISTRY instead. A flavor image is 1.2-1.6 GiB and
+# a direct ghcr.io pull measured 62-178s on the self-hosted amd64 pool, so a cold cache
+# still has room to fetch it upstream, while a hung one costs five minutes, not the job.
+DEFAULT_PULL_TIMEOUT = 300
 
 CONTAINER_WORKSPACE = "/tmp/lint"  # MegaLinter's DEFAULT_DOCKER_WORKSPACE_DIR.  # nosec B108
 
@@ -149,6 +158,10 @@ class MegaLinterConfig:
     strategy: str = "auto"  # one of ARCH_STRATEGIES.
     standalone_linters: tuple[str, ...] = ()
     jobs: int = 4  # standalone mode: concurrent linter containers.
+    # Pull from DEFAULT_REGISTRY when `registry` cannot serve an image (see
+    # RegistryFallback). Off for runners that must never pull from the public registry.
+    registry_fallback: bool = True
+    pull_timeout: float = DEFAULT_PULL_TIMEOUT  # seconds `registry` gets before that.
 
     def _ref(self, repo: str) -> str:
         base = "/".join(
@@ -189,6 +202,34 @@ class MegaLinterConfig:
         """
         return self._ref(f"{STANDALONE_REPO_PREFIX}{linter_key.strip().lower()}")
 
+    def _upstream(self) -> MegaLinterConfig | None:
+        """This config aimed at MegaLinter's own registry, or None when there is no fallback.
+
+        None when the fallback is off or ``registry`` already is :data:`DEFAULT_REGISTRY`.
+        The namespace resets too: a mirror may file the images under a path of its own
+        (``mirrors/oxsecurity``, a Harbor proxy project), and upstream has them only under
+        :data:`DEFAULT_NAMESPACE`.
+        """
+        if not self.registry_fallback:
+            return None
+        if self.registry.strip().strip("/").lower() == DEFAULT_REGISTRY:
+            return None
+        return replace(self, registry=DEFAULT_REGISTRY, namespace=DEFAULT_NAMESPACE)
+
+    def fallback_image(self) -> str:
+        """Upstream's copy of :meth:`image`, or ``""`` when there is nothing to fall back to.
+
+        Never a rewrite of ``image_ref``: the operator named that image, so it runs as
+        named or not at all.
+        """
+        upstream = None if self.image_ref else self._upstream()
+        return upstream.image() if upstream else ""
+
+    def standalone_fallback_image(self, linter_key: str) -> str:
+        """Upstream's copy of :meth:`standalone_image`, or ``""`` when there is none."""
+        upstream = self._upstream()
+        return upstream.standalone_image(linter_key) if upstream else ""
+
     def container_report_dir(self, subdir: str = "") -> str:
         """The report folder as MegaLinter sees it — ALWAYS absolute.
 
@@ -221,6 +262,9 @@ class RunStep:
     image: str
     env: dict[str, str]
     report_dir: Path  # Host path this step writes its merged SARIF into.
+    # Upstream's copy of `image`, pulled when the configured registry cannot serve it;
+    # "" leaves the pull to `docker run`, as before.
+    fallback_image: str = ""
 
 
 @dataclass(frozen=True)
@@ -400,6 +444,14 @@ def build_docker_command(
     return cmd
 
 
+def build_pull_command(config: MegaLinterConfig, image: str) -> list[str]:
+    """A ``docker pull`` of ``image`` for the same ``--platform`` the container runs as."""
+    cmd = [shutil.which("docker") or "docker", "pull"]
+    if config.platform:
+        cmd += ["--platform", config.platform]
+    return [*cmd, image]
+
+
 def docker_arch(runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None) -> str:
     """The Docker DAEMON's architecture — not the CLI host's.
 
@@ -523,7 +575,9 @@ def resolve_plan(config: MegaLinterConfig, arch: str) -> RunPlan:
         strategy = "flavor"
 
     if strategy == "flavor":
-        step = RunStep("", config.image(), build_env(config), config.report_path())
+        step = RunStep(
+            "", config.image(), build_env(config), config.report_path(), config.fallback_image()
+        )
         return RunPlan("flavor", arch, (step,))
 
     keep, skipped = _standalone_linters(config, arch)
@@ -540,6 +594,7 @@ def resolve_plan(config: MegaLinterConfig, arch: str) -> RunPlan:
             config.standalone_image(key),
             build_env(config, single_linter=key),
             config.report_path(f"standalone/{key.lower()}"),
+            config.standalone_fallback_image(key),
         )
         for key in keep
     )
@@ -624,23 +679,115 @@ def _echo_step_output(step: RunStep, completed: subprocess.CompletedProcess) -> 
     print(body.rstrip(), file=sys.stderr)
 
 
+# Runs one docker CLI call (`pull`, `image inspect`) with a timeout in seconds, or None.
+PullRunner = Callable[[list[str], float | None], subprocess.CompletedProcess]
+
+
+def _pull_runner(cmd: list[str], timeout: float | None) -> subprocess.CompletedProcess:
+    """Run one docker CLI call capturing its output; kill it after ``timeout`` seconds."""
+    return subprocess.run(  # nosec B603
+        cmd, capture_output=True, text=True, check=False, timeout=timeout
+    )
+
+
+class RegistryFallback:
+    """Pull each image before it runs, and use upstream's copy if the registry fails.
+
+    A mirror or pull-through cache is a dependency the gate did not have before, and the
+    gate is a required check: with the cache down, every job behind it would fail at the
+    pull. So a step with a :attr:`RunStep.fallback_image` is pulled here first, and the
+    configured registry gets :attr:`MegaLinterConfig.pull_timeout` seconds. On any
+    failure (unreachable, timed out, manifest unknown, auth) chargate warns once and pulls
+    the upstream image instead, unbounded, like ``docker run``'s own pull. A step without
+    a fallback image is left to ``docker run``, exactly as before.
+
+    * An image already on the daemon is used as-is, as ``docker run`` would, so a mirror
+      outage cannot break a runner that never needed the mirror.
+    * After the first failure the configured registry is skipped for the rest of the run:
+      a dead mirror costs one timeout and one warning however many images the plan has.
+    * If upstream fails too, :meth:`image_for` raises :class:`MegaLinterError` naming both
+      failures, rather than letting ``docker run`` retry the dead mirror without a bound.
+    """
+
+    def __init__(self, config: MegaLinterConfig, puller: PullRunner | None = None) -> None:
+        self._config = config
+        self._puller = puller or _pull_runner
+        self._lock = threading.Lock()
+        self._registry_failure: str | None = None  # why the configured registry failed
+
+    def image_for(self, step: RunStep) -> str:
+        """The image reference to run ``step`` with, pulled if the daemon lacks it."""
+        if not step.fallback_image or self._present(step.image):
+            return step.image
+        reason = self._registry_failure
+        if reason is None:
+            reason = self._pull(step.image, self._config.pull_timeout)
+            if reason is None:
+                return step.image
+            self._record_failure(step, reason)
+        if self._present(step.fallback_image):
+            return step.fallback_image
+        upstream_reason = self._pull(step.fallback_image, None)
+        if upstream_reason is None:
+            return step.fallback_image
+        raise MegaLinterError(
+            f"Could not pull {step.image}: the configured registry failed ({reason}), and "
+            f"so did the fallback {step.fallback_image} ({upstream_reason})."
+        )
+
+    def _record_failure(self, step: RunStep, reason: str) -> None:
+        with self._lock:
+            first = self._registry_failure is None
+            if first:
+                self._registry_failure = reason
+        if first:
+            print(
+                f"::warning::chargate: could not pull {step.image} ({reason}); falling back "
+                f"to {DEFAULT_REGISTRY} for this run: {step.fallback_image}",
+                file=sys.stderr,
+            )
+
+    def _present(self, image: str) -> bool:
+        docker = shutil.which("docker") or "docker"
+        inspect = [docker, "image", "inspect", "--format", "{{.Id}}", image]
+        return self._puller(inspect, None).returncode == 0
+
+    def _pull(self, image: str, timeout: float | None) -> str | None:
+        """Pull ``image``: None on success, else a one-line reason."""
+        bound = f" (timeout {timeout:g}s)" if timeout is not None else ""
+        print(f"chargate: pulling {image}{bound}", file=sys.stderr)
+        try:
+            proc = self._puller(build_pull_command(self._config, image), timeout)
+        except subprocess.TimeoutExpired:
+            return f"timed out after {timeout:g}s"
+        if proc.returncode == 0:
+            return None
+        output = f"{proc.stdout or ''}\n{proc.stderr or ''}".splitlines()
+        detail = next((line.strip() for line in reversed(output) if line.strip()), "")
+        return detail[:300] or f"docker pull exited {proc.returncode}"
+
+
 def run(
     config: MegaLinterConfig,
     *,
     runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
     arch: str | None = None,
+    puller: PullRunner | None = None,
 ) -> MegaLinterRun:
     """Run MegaLinter — one flavor container, or one container per linter — and report.
 
     Raises :class:`MegaLinterError` when this architecture cannot run what was asked for;
-    the message names the architecture and every way out (see :data:`ARM64_HELP`).
+    the message names the architecture and every way out (see :data:`ARM64_HELP`). Also
+    raised when neither the configured registry nor upstream can serve the flavor image
+    (see :class:`RegistryFallback`, which ``puller`` drives).
     """
     resolved_arch = arch or docker_arch()
     plan = resolve_plan(config, resolved_arch)
+    images = RegistryFallback(config, puller)
 
     if plan.strategy == "flavor":
         step = plan.steps[0]
-        command = build_docker_command(config, step.env, step.image)
+        command = build_docker_command(config, step.env, images.image_for(step))
         completed = (runner or _streaming_runner)(command)
         return MegaLinterRun(
             returncode=completed.returncode,
@@ -654,10 +801,21 @@ def run(
     # Output is captured and replayed per linter, because four concurrent MegaLinter
     # runs interleaved line-by-line is not a log anyone can read.
     run_fn = runner or _capturing_runner
-    commands = [build_docker_command(config, step.env, step.image) for step in plan.steps]
-    workers = max(1, min(config.jobs, len(commands)))
+
+    def start(step: RunStep) -> tuple[list[str], subprocess.CompletedProcess]:
+        try:
+            image = images.image_for(step)
+        except MegaLinterError as exc:
+            # Isolated like a container that died: this linter is lost, the rest count.
+            return [], subprocess.CompletedProcess([], 125, "", str(exc))
+        command = build_docker_command(config, step.env, image)
+        return command, run_fn(command)
+
+    workers = max(1, min(config.jobs, len(plan.steps)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        completions = list(pool.map(run_fn, commands))
+        started = list(pool.map(start, plan.steps))
+    commands = [command for command, _ in started]
+    completions = [completed for _, completed in started]
     for step, completed in zip(plan.steps, completions, strict=True):
         _echo_step_output(step, completed)
     merge_sarif(
@@ -667,7 +825,7 @@ def run(
     return MegaLinterRun(
         # Any failing container fails the run; --strict decides whether that gates.
         returncode=max((c.returncode for c in completions), default=0),
-        command=tuple(commands[0]) if commands else (),
+        command=tuple(next((command for command in commands if command), ())),
         sarif_path=config.sarif_path(),
         strategy="standalone",
         arch=resolved_arch,
