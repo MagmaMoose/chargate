@@ -47,14 +47,14 @@ value unset and the CLI's own default applies.
 | `oidc_audience` | `chargate` | OIDC audience requested for the token-broker exchange (advanced). |
 | `defectdojo_url` | (none) | DefectDojo base URL. Set to enable import of the FULL SARIF. |
 | `defectdojo_token` | (none) | DefectDojo API token (pass a secret). Used only if defectdojo_url is set. |
-| `defectdojo_product` | (none) | DefectDojo product name (auto-created if missing). Defaults to the repo name. |
+| `defectdojo_product` | `github.event.repository.name` | DefectDojo product name (auto-created if missing). |
 | `defectdojo_product_type` | `Research and Development` | DefectDojo product type name (used to auto-create a new product). |
 | `defectdojo_engagement` | `ci` | DefectDojo engagement name (auto-created if missing). |
 | `defectdojo_close_old` | `true` | Close findings no longer present on reimport. |
 | `dependency_track_url` | (none) | Dependency-Track base URL. Set to enable the CycloneDX BOM upload (pass a Variable). |
 | `dependency_track_api_key` | (none) | Dependency-Track API key (pass a Secret). Needs BOM_UPLOAD (+ PROJECT_CREATION_UPLOAD for auto-create, + VIEW_PORTFOLIO for the PR-comment project link). |
-| `dependency_track_project_name` | (none) | Dependency-Track project name (auto-created if missing). |
-| `dependency_track_project_version` | (none) | Dependency-Track project version. |
+| `dependency_track_project_name` | `github.repository` | Dependency-Track project name (auto-created if missing). |
+| `dependency_track_project_version` | `github.ref_name` | Dependency-Track project version. |
 | `dependency_track_auto_create` | `true` | Auto-create the project/version on first upload. |
 | `dependency_track_project_tags` | (none) | Extra Dependency-Track project tags, comma-separated. `repo:<name>` is always added: a repo has both a source project and Diatreme's assembled-image project, and a repo building several images produces project names that cannot be mapped back to it. Anything grouping a repo's projects needs that join key. |
 | `sbom_only` | `false` | Ship the CycloneDX BOM to Dependency-Track and do nothing else: no MegaLinter, no SARIF, no gate. For consumers whose gate runs on `pull_request` only, which never reaches the BOM upload inside the gate. Push/tag events only. A misconfigured sink fails the job; a Dependency-Track outage only warns unless `strict` is also set. |

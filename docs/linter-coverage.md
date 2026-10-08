@@ -14,7 +14,7 @@ maps the old set onto what runs now — useful when migrating from v1, and when 
 | Dockerfile | Hadolint | `DOCKERFILE_HADOLINT` |
 | Shell | ShellCheck | `BASH_SHELLCHECK` |
 | GitHub Actions | actionlint | `ACTION_ACTIONLINT` |
-| JavaScript | ESLint | `JAVASCRIPT_ESLINT` |
+| JavaScript | ESLint | `JAVASCRIPT_ES` |
 | Dependencies / SCA | pip-audit, npm audit, govulncheck | `REPOSITORY_OSV_SCANNER`, `REPOSITORY_TRIVY`, `REPOSITORY_GRYPE` |
 | Secrets | TruffleHog | `REPOSITORY_BETTERLEAKS`, `REPOSITORY_SECRETLINT`, `REPOSITORY_KINGFISHER` |
 | SBOM | — | `REPOSITORY_SYFT`, `REPOSITORY_TRIVY_SBOM` |
