@@ -11,7 +11,7 @@ cleanly into a **pure core** and a thin set of **side-effecting edges**.
 ```text
 src/chargate/
   cli.py          # argparse dispatch: filter-sarif | ci | sbom | local | install-hooks | uninstall-hooks | version
-  sarif/          # ★ THE PURE CORE — deterministic, no I/O, heavily tested
+  sarif/          # ★ THE PURE CORE: deterministic, no I/O, heavily tested
     diff.py       #   unified-diff text -> DiffIndex (changed files + added line ranges)
     model.py      #   defensive SARIF result accessors (uri, startLine, level, severity)
     filter.py     #   net-new classification + FilterPolicy + filter_sarif()
@@ -98,7 +98,7 @@ The output documents are written **before** that decision. `cmd_ci` writes
 `--filtered-out` and `--counts-json` as soon as the filter has run, then reaches the
 runs-less check and exits `2`, so a run that scanned nothing still leaves a well-formed
 counts file of zeros behind. The documents describe whatever was classified, which is
-the right contract — but it means a downstream consumer must read the exit code, not the
+the right contract, but it means a downstream consumer must read the exit code, not the
 file's existence. See [Consuming the output](consuming-output.md).
 
 ## The token broker

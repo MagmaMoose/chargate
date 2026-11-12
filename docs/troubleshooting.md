@@ -1,8 +1,6 @@
 # Troubleshooting
 
-<!-- sources: src/chargate/gate.py, broker/app/broker.py, broker/app/lambda_handler.py, scripts/request-
-     app-token.sh
-     -->
+<!-- sources: src/chargate/gate.py, broker/app/broker.py, broker/app/lambda_handler.py, scripts/request-app-token.sh -->
 
 Symptom, cause, fix. Start with the exit code or the error string you actually saw.
 
@@ -52,19 +50,19 @@ output and that the finding is classified as a secret.
 
 The gate only ever reads the merged SARIF, so a linter whose descriptor does not set
 `can_output_sarif` is invisible to it however cleanly it runs. Standalone mode therefore
-skips those by name, with the reason `linter emits no SARIF — it could never reach the
+skips those by name, with the reason `linter emits no SARIF: it could never reach the
 gate`, and lists them in `linters_skipped` and on the PR rather than dropping them
 silently.
 
 Three entries used to be missing from that list. `ACTION_ACTIONLINT`, `PYTHON_PYLINT`
 and `POWERSHELL_POWERSHELL` carried `sarif=True` in Chargate's registry purely because
-that is the `_entry` default — none had ever been probed, and none of them sets
-`can_output_sarif` at MegaLinter `v10.0.0`. Each one cost a container pull per run and
+that is the `_entry` default (none had ever been probed, and none of them sets
+`can_output_sarif` at MegaLinter `v10.0.0`). Each one cost a container pull per run and
 contributed nothing the gate could read, which looks exactly like a clean repo. They are
 now recorded as `sarif=False` and skipped with that reason.
 
 `tests/test_linters_registry.py` cross-references every `sarif` flag against MegaLinter's
-own descriptors at the pinned tag, so the table and upstream cannot drift apart again —
+own descriptors at the pinned tag, so the table and upstream cannot drift apart again.
 the same way the `arm64` flags are re-probed against the live registry.
 
 If you enabled one of these expecting findings: there are none to have. Use a linter that

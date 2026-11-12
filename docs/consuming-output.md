@@ -5,7 +5,7 @@
 Chargate classifies; the caller decides. Every run writes two documents another tool
 can read without importing any of Chargate: the **net-new SARIF** and the **counts
 JSON**. The counts JSON carries a `schema_version` and is a **stable public
-interface** — versioned, and broken only deliberately.
+interface** (versioned, and broken only deliberately).
 
 The first consumer is [brimyr](https://github.com/MagmaMoose/brimyr), a patch-coverage
 gate that folds Chargate's findings into the same pull-request verdict
@@ -17,8 +17,8 @@ A process boundary needs a documented shape, so here it is.
 ## Gate on the counts, display the SARIF
 
 The counts JSON is Chargate's own document: its keys mean what this page says they
-mean, and the invariants below hold. The filtered SARIF is **MegaLinter's** shape — one
-`runs` entry per linter, whatever each linter chose to put in it — and it is for showing
+mean, and the invariants below hold. The filtered SARIF is **MegaLinter's** shape: one
+`runs` entry per linter, whatever each linter chose to put in it, and it is for showing
 a human what was found: rendering a summary, uploading it, attaching it to a comment.
 
 Counting results in the SARIF to decide pass/fail is re-implementing
@@ -29,7 +29,7 @@ and which bucket took them.
 
 Two surfaces are deliberately **not** interface: the stderr summary lines and the
 job-summary markdown. Both are written for people and change whenever a better sentence
-turns up. The action's step outputs are interface — they are declared in `action.yml`
+turns up. The action's step outputs are interface: they are declared in `action.yml`
 like any other.
 
 ## The command
@@ -49,12 +49,12 @@ chargate filter-sarif \
 | `--base` / `--head` | The two ends of the diff. Classification is against `merge-base(base, head)` unless `--no-merge-base`. |
 | `--out` | Where the net-new-only SARIF goes: the input document with every non-net-new result pruned. |
 | `--counts-json` | Where the counts document goes. |
-| `--no-gate` | Report only — Chargate stops deciding, so the caller can. |
+| `--no-gate` | Report only. Chargate stops deciding, so the caller can. |
 
 `chargate ci` writes the same pair through `--filtered-out` and `--counts-json`. They
 are the same writers over the same `FilterResult`, so the contract does not change with
 the subcommand; `ci` has no `--no-gate`, its report-only equivalent is `--fail-on none`
-(`fail_on: none` on the action). The composite action always passes both — see
+(`fail_on: none` on the action). The composite action always passes both. See
 [From the action](#from-the-action).
 
 `--no-gate` leaves exactly two exit codes, and the difference between them matters more
@@ -63,13 +63,13 @@ than any verdict:
 | Exit | Meaning under `--no-gate` |
 | --- | --- |
 | `0` | The classification ran. Both documents were written; the answer is in them. |
-| `2` | Chargate could not classify at all — unreadable SARIF, missing merge-base, shallow clone. |
+| `2` | Chargate could not classify at all (unreadable SARIF, missing merge-base, shallow clone). |
 
 A `2` is not "no findings", it is **no answer**. A consumer that treats the two alike
 ships the exact failure this project exists to remove: a gate that scanned nothing and
 reported green. Without `--no-gate` the exit code also carries `1` for a net-new finding
-at or above `--fail-on` — that is Chargate deciding, which a consumer running its own
-gate does not want.
+at or above `--fail-on` (that is Chargate deciding, which a consumer running its own
+gate does not want).
 
 ## The counts document
 
@@ -112,8 +112,8 @@ the boundary, and asserting is how it surfaces as an error instead of as a numbe
 
 !!! warning "Quality linters emit no `security-severity`, so the band maps stay empty"
     The `per_severity_*` maps are populated only from a numeric `security-severity`
-    property. Security scanners set it; quality linters do not — Ruff, ESLint, PMD and
-    golangci-lint emit a SARIF `level` and nothing else. On a
+    property. Security scanners set it; quality linters do not (Ruff, ESLint, PMD and
+    golangci-lint emit a SARIF `level` and nothing else). On a
     [`flavor: quality`](setup.md#the-quality-flavor) run `per_severity_net_new` is
     therefore `{}` while `per_level_net_new` is populated, so a consumer thresholding on
     bands over quality findings never blocks and never says why. Threshold on levels
@@ -130,12 +130,12 @@ the boundary, and asserting is how it surfaces as an error instead of as a numbe
 | --- | --- |
 | A key added | No. A reader that does not know it ignores it. |
 | A key removed or renamed | **Yes.** |
-| A key keeping its name and changing meaning | **Yes**, and the worst kind — nothing errors, the number is just wrong. |
+| A key keeping its name and changing meaning | **Yes**, and the worst kind: nothing errors, the number is just wrong. |
 | A new value inside an existing map (a level or band not seen before) | No. The maps are open. |
 
 The rule on the far side follows from that table: **hard-fail on a `schema_version` you
 do not recognise.** Do not fall back to a best-effort read of the keys you happen to
-find, because guessing has exactly one shape of failure — a key you cannot find reads as
+find, because guessing has exactly one shape of failure: a key you cannot find reads as
 zero, zero net-new reads as a pass, and the gate goes green on a document it never
 understood. Refusing is loud. Guessing is silent, and which of those two you get is what
 this codebase is built around.
@@ -152,8 +152,8 @@ first key, so a consumer reading a truncated or streamed file still gets it firs
 | `filtered_sarif_path` | `chargate-reports/net-new.sarif` | Every run. |
 | `counts_path` | `chargate-reports/counts.json` | Every run. |
 
-Both are workspace-relative, and both are written unconditionally — including on a
-baseline (push) run, where the net-new set is empty by construction. That is deliberate:
+Both are workspace-relative, and both are written unconditionally (including on a
+baseline push run, where the net-new set is empty by construction). That is deliberate:
 a consumer that finds no file cannot tell "nothing was introduced" from "the step never
 got that far", and one of those two must not read as a pass.
 
@@ -174,7 +174,7 @@ got that far", and one of those two must not read as a pass.
 
 !!! danger "A counts file is not proof that anything was scanned"
     `chargate ci` writes both documents *before* it decides its own exit code, so a run
-    whose SARIF carried no `runs` at all — MegaLinter produced nothing — still leaves a
+    whose SARIF carried no `runs` at all (MegaLinter produced nothing) still leaves a
     well-formed `counts.json` full of zeros behind, and *then* exits `2` for exactly
     that reason. Read the step's outcome as well as the file. Zeros from a scan that
     never happened are indistinguishable from a clean pull request, which is the failure
@@ -184,4 +184,4 @@ got that far", and one of those two must not read as a pass.
 
 The `gate_result` / `net_new_count` / `total_count` outputs remain the quick path for a
 workflow that only wants a number in a message. `counts_path` is for a tool that needs
-the whole breakdown — which bucket, which level, which band — without parsing SARIF.
+the whole breakdown: which bucket, which level, which band, without parsing SARIF.

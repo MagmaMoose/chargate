@@ -3,7 +3,7 @@
 <!-- sources: .mega-linter.yml, src/chargate/linters.py -->
 
 Chargate v2 replaced a hand-rolled twelve-tool orchestration with MegaLinter. This page
-maps the old set onto what runs now — useful when migrating from v1, and when asking
+maps the old set onto what runs now: useful when migrating from v1, and when asking
 "is *X* still being scanned?"
 
 ## The mapping
@@ -17,7 +17,7 @@ maps the old set onto what runs now — useful when migrating from v1, and when 
 | JavaScript | ESLint | `JAVASCRIPT_ES` |
 | Dependencies / SCA | pip-audit, npm audit, govulncheck | `REPOSITORY_OSV_SCANNER`, `REPOSITORY_TRIVY`, `REPOSITORY_GRYPE` |
 | Secrets | TruffleHog | `REPOSITORY_BETTERLEAKS`, `REPOSITORY_SECRETLINT`, `REPOSITORY_KINGFISHER` |
-| SBOM | — | `REPOSITORY_SYFT`, `REPOSITORY_TRIVY_SBOM` |
+| SBOM | (none) | `REPOSITORY_SYFT`, `REPOSITORY_TRIVY_SBOM` |
 
 Secrets scanning moved to MegaLinter's native set: `betterleaks` is v10's gitleaks
 successor, joined by `secretlint` and `kingfisher`.
@@ -46,7 +46,7 @@ devskim, dustilock, kubescape, tflint, hadolint, shellcheck, cfn-lint, ansible-l
 trivy-sbom.
 
 Upstream's thirteen amd64-only linters are all style and language tooling (jscpd,
-powershell, chktex, …). Those are skipped **by name, never silently** — see
+powershell, chktex, …). Those are skipped **by name, never silently**. See
 [Security model](security-model.md#what-a-reduced-scan-looks-like).
 
 ## Choosing a different set

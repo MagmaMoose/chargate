@@ -94,8 +94,8 @@ findings. Ruff, ESLint, PMD and golangci-lint emit a `level` and no numeric
 `security-severity`, so `fail_on: high` blocks on an `error` from a
 [`flavor: quality`](setup.md#the-quality-flavor) run just as it would on a scanner
 finding scored 7.0. What stays empty is the **counts document's** `per_severity_*`
-maps, which are populated only from a real `security-severity` — so a *downstream*
-consumer thresholding on those bands sees nothing and must threshold on levels
+maps, which are populated only from a real `security-severity` (so a *downstream*
+consumer thresholding on those bands sees nothing and must threshold on levels)
 instead. See [Consuming the output](consuming-output.md#the-counts-document).
 
 !!! tip "Full vs filtered SARIF"
