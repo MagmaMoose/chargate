@@ -11,10 +11,10 @@ Grant the job only what the features you use need:
 
 ```yaml
 permissions:
-  contents: read           # checkout — the only hard requirement
+  contents: read           # checkout: the only hard requirement
   pull-requests: write     # PR comments (omit, or use `read`, with pr_comment: false)
   security-events: write   # SARIF to the Security tab (needs GHAS on private repos)
-  id-token: write          # OPTIONAL — author comments as Chargate[bot]
+  id-token: write          # OPTIONAL: author comments as Chargate[bot]
 ```
 
 `contents: read` alone is enough to run the gate. Everything else buys a feature, and
@@ -22,8 +22,8 @@ dropping it degrades that feature rather than failing the run.
 
 The optional `Chargate[bot]` token is minted through the token broker, is short-lived,
 is scoped to the calling repository, and carries `pull_requests: write` **only**. Without
-`id-token: write` comments fall back to `github-actions[bot]` — no key management either
-way. See [Broker deployment](broker-deployment.md).
+`id-token: write` comments fall back to `github-actions[bot]` (no key management either
+way). See [Broker deployment](broker-deployment.md).
 
 ## Injection-hardened
 
@@ -35,8 +35,8 @@ injection outright rather than trying to sanitise it.
 
 ## Pinned supply chain
 
-Every third-party action Chargate calls — `checkout`, `setup-python`,
-`codeql-action/upload-sarif`, `upload-artifact`, `sbom-action` — is **SHA-pinned** with a
+Every third-party action Chargate calls (`checkout`, `setup-python`,
+`codeql-action/upload-sarif`, `upload-artifact`, `sbom-action`) is **SHA-pinned** with a
 `# vX.Y.Z` comment naming the tag that SHA belongs to.
 
 The core CLI has **no runtime dependencies**: it is stdlib-only Python, so the gate

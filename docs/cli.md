@@ -82,7 +82,7 @@ Key flags beyond the shared filter options:
 | --- | --- | --- |
 | `--mode` | `auto` | `auto` (from `GITHUB_EVENT_NAME`), `pr` (net-new gate), or `baseline` (no gate). |
 | `--sarif` | (none) | Use an existing SARIF instead of running MegaLinter. |
-| `--flavor` | `all` | MegaLinter flavor (`all` = full image), or `quality` — a five-linter set chargate curates, with no upstream image, so it always runs standalone. See [The `quality` flavor](setup.md#the-quality-flavor). |
+| `--flavor` | `all` | MegaLinter flavor (`all` = full image), or `quality` (a five-linter set chargate curates, with no upstream image, so it always runs standalone). See [The `quality` flavor](setup.md#the-quality-flavor). |
 | `--megalinter-tag` | `v10.0.0` | MegaLinter image tag, or a `sha256:…` digest to pin. |
 | `--megalinter-registry` | `ghcr.io` | Registry host. Docker Hub is frozen at `v9.4.0`, so it cannot serve `v9.5.0+`. |
 | `--megalinter-registry-fallback` | `true` | `true\|false`. When the registry is not `ghcr.io` and cannot serve an image, pull it from `ghcr.io` instead. `false` fails at the pull. |
@@ -125,13 +125,13 @@ from the event and honors `GITHUB_API_URL` for GHES.
 
 ## `chargate sbom`
 
-Ship a CycloneDX BOM to Dependency-Track on its own — no MegaLinter, no SARIF, no
+Ship a CycloneDX BOM to Dependency-Track on its own: no MegaLinter, no SARIF, no
 gate. Seconds, not the ~15 minutes a scan costs.
 
 `chargate ci` already carries the BOM sink, but only fires it on **non-PR** events:
 a BOM per pull request would litter Dependency-Track with throwaway `N/merge`
-project versions. A consumer whose gate runs on `pull_request` only — the usual
-shape, because a full scan on every merge is the most expensive thing in CI — never
+project versions. A consumer whose gate runs on `pull_request` only (the usual
+shape, because a full scan on every merge is the most expensive thing in CI) never
 reaches that path, so the repo never appears in Dependency-Track at all. This
 subcommand is that missing push-time path standing alone.
 
@@ -153,7 +153,7 @@ It takes the same Dependency-Track flags as `chargate ci` (`--dependency-track-u
 | `--quiet` | off | Suppress the human summary. |
 
 **Exit policy is the inverse of the sink-on-a-gate rule, deliberately.** A
-*misconfigured* sink — no URL, no project, no API key, no BOM file — exits `2`.
+*misconfigured* sink (no URL, no project, no API key, no BOM file) exits `2`.
 This command exists only to upload, so "nothing to upload to" is a broken job, not
 a sink someone switched off; silence in exactly that case is what let a whole org's
 repos go missing from Dependency-Track unnoticed. A Dependency-Track *outage* stays

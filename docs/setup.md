@@ -165,7 +165,7 @@ Uploads the **full** SARIF (never the filtered one):
   with:
     defectdojo_url: https://defectdojo.example.com   # active iff this is set
     defectdojo_token: ${{ secrets.DEFECTDOJO_TOKEN }}
-    # Optional — these default to the repo name / "Research and Development" / "ci":
+    # Optional: these default to the repo name / "Research and Development" / "ci":
     # defectdojo_product: my-service
     # defectdojo_product_type: Research and Development   # used to auto-create a new product
     # defectdojo_engagement: ci
@@ -217,12 +217,12 @@ on PRs, since reimport updates one Test rather than spawning versions.)
 
 A workflow triggered on `pull_request` alone never sees a push event, so it never
 reaches the upload above and the repo **silently never appears in Dependency-Track**
-— while DefectDojo, which imports on every event, fills up normally. That asymmetry
+while DefectDojo, which imports on every event, fills up normally. That asymmetry
 is easy to miss for months.
 
 Don't add `push` to the gate itself (a full MegaLinter run on every merge, bot
 commits included, is usually the most expensive thing in CI). Add a second, cheap
-job with `sbom_only` instead — it ships the BOM and nothing else, in seconds:
+job with `sbom_only` instead: it ships the BOM and nothing else, in seconds:
 
 ```yaml
 on:
@@ -289,11 +289,11 @@ quality linters, run as per-linter `megalinter-only-*` containers.
 
 | Linter | Covers |
 | --- | --- |
-| `GO_GOLANGCI_LINT` | Go — the meta-linter, so `GO_REVIVE` would be redundant. |
+| `GO_GOLANGCI_LINT` | Go (the meta-linter, so `GO_REVIVE` would be redundant). |
 | `JAVASCRIPT_ES` | JavaScript (ESLint). |
 | `TYPESCRIPT_ES` | TypeScript (ESLint). |
 | `JAVA_PMD` | Java bugs and code smells. |
-| `PYTHON_RUFF` | Python — the flake8 / isort / pyupgrade families in one container. |
+| `PYTHON_RUFF` | Python (the flake8 / isort / pyupgrade families in one container). |
 
 **Five, not a flavor's worth, deliberately.** MegaLinter's quality half over a mature
 repo produces hundreds of net-new findings on the first pull request, because "changed
@@ -311,7 +311,7 @@ at all. Said here rather than discovered later by a .NET team whose quality gate
 zero findings forever.
 
 !!! note "It always runs standalone, on every architecture"
-    With no flavor image to run, `quality` takes the per-linter path on amd64 too — the
+    With no flavor image to run, `quality` takes the per-linter path on amd64 too: the
     one place every other flavor uses a single container. `arch_strategy: flavor` or
     `fail` therefore cannot be honoured and Chargate raises, naming this reason rather
     than the arm64 guidance, which would be a confusing answer to a question nobody
@@ -320,7 +320,7 @@ zero findings forever.
     stops reasoning about what upstream publishes and runs it.
 
 Quality linters emit a SARIF `level` and no numeric `security-severity`, which decides
-how you threshold over them — see
+how you threshold over them. See
 [the band note in Consuming the output](consuming-output.md#the-counts-document).
 
 ### Kubernetes manifests

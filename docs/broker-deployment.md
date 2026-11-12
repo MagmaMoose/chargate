@@ -18,7 +18,7 @@ consumer repo's workflow           any pinned chargate tag
         │
         ▼
   broker-chargate.magmamoose.com   Cloudflare DNS, PROXIED (orange cloud)
-  chargate.magmamoose.com          also served — the legacy name pinned consumers still call
+  chargate.magmamoose.com          also served: the legacy name pinned consumers still call
         │                          CNAME → the API Gateway custom-domain target
         ▼
   API Gateway HTTP API             $default route + stage · throttle 2 rps / burst 10
@@ -171,16 +171,16 @@ Steps marked **H** need a human with credentials or a console.
    (orange cloud). The hostname resolves for the first time.
 
     !!! warning "Proxying needs the zone on Full (strict), and fails opaquely without it"
-        Proxied, every request returned Cloudflare **521** while AWS saw nothing — API Gateway's
+        Proxied, every request returned Cloudflare **521** while AWS saw nothing. API Gateway's
         `Count` metric had no datapoints and a unique probe path never reached the Lambda. The
         origin was healthy throughout (TCP/443 on every IP, correct certificate for both
         plausible SNIs, no AAAA records so not the IPv6 trap), and port 80 was refused on every
-        origin IP — the port a *Flexible* origin fetch dials. Setting the zone's SSL/TLS mode to
+        origin IP (the port a *Flexible* origin fetch dials). Setting the zone's SSL/TLS mode to
         **Full (strict)** is what fixed it.
 
     !!! danger "Serve the OLD hostname too, or no consumer gets the byline"
         `token_broker_url` is an action input with a **default**, so the old hostname is frozen
-        into every tag released before a rename — and consumers pin chargate by SHA through a
+        into every tag released before a rename, and consumers pin chargate by SHA through a
         centrally-provisioned workflow, so they cannot all move at once. The module takes
         `additional_domain_names` for exactly this; each entry gets its own certificate, domain
         and mapping, all free. Remove the entry once nothing references the old name.
