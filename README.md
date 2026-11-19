@@ -3,7 +3,7 @@
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Chargate-2ea44f?logo=github)](https://github.com/marketplace/actions/chargate)
 [![CI](https://github.com/MagmaMoose/chargate/actions/workflows/ci.yml/badge.svg)](https://github.com/MagmaMoose/chargate/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/MagmaMoose/chargate?sort=semver&logo=github)](https://github.com/MagmaMoose/chargate/releases)
-[![Docs](https://img.shields.io/badge/docs-chargate-blue)](https://magmamoose.github.io/chargate/)
+[![Docs](https://img.shields.io/badge/docs-chargate-blue)](https://docs.magmamoose.com/chargate/)
 [![License: Apache 2.0](https://img.shields.io/github/license/MagmaMoose/chargate)](LICENSE)
 
 > **Gate pull requests on the findings _this PR_ introduced — not your whole backlog.**
@@ -14,9 +14,9 @@ the gate passes or fails on findings the PR introduces relative to the merge-bas
 large existing backlog never blocks anyone — while the full, unfiltered SARIF is still
 emitted and shipped, so your security system keeps seeing everything.
 
-**[Documentation](https://magmamoose.github.io/chargate/)** ·
-[Setup](https://magmamoose.github.io/chargate/setup/) ·
-[Action reference](https://magmamoose.github.io/chargate/action-reference/) ·
+**[Documentation](https://docs.magmamoose.com/chargate/)** ·
+[Setup](https://docs.magmamoose.com/chargate/setup/) ·
+[Action reference](https://docs.magmamoose.com/chargate/action-reference/) ·
 [Marketplace](https://github.com/marketplace/actions/chargate)
 
 ## Quickstart
@@ -77,11 +77,11 @@ All inputs and every output → **[Action reference](https://magmamoose.github.i
 
 | | |
 | --- | --- |
-| [Setup and usage](https://magmamoose.github.io/chargate/setup/) | Workflows, the pre-commit hook, sinks, MegaLinter config, migrating from v1 |
-| [Net-new gating](https://magmamoose.github.io/chargate/net-new/) | Exactly what counts as net-new, and how `fail_on` decides |
-| [Action reference](https://magmamoose.github.io/chargate/action-reference/) · [CLI reference](https://magmamoose.github.io/chargate/cli/) | Every input, output, command and exit code |
-| [Consuming the output](https://magmamoose.github.io/chargate/consuming-output/) | The `counts.json` contract for downstream gates |
-| [Architecture](https://magmamoose.github.io/chargate/architecture/) · [Troubleshooting](https://magmamoose.github.io/chargate/troubleshooting/) | How it works, and what to do when it doesn't |
+| [Setup and usage](https://docs.magmamoose.com/chargate/setup/) | Workflows, the pre-commit hook, sinks, MegaLinter config, migrating from v1 |
+| [Net-new gating](https://docs.magmamoose.com/chargate/net-new/) | Exactly what counts as net-new, and how `fail_on` decides |
+| [Action reference](https://docs.magmamoose.com/chargate/action-reference/) · [CLI reference](https://docs.magmamoose.com/chargate/cli/) | Every input, output, command and exit code |
+| [Consuming the output](https://docs.magmamoose.com/chargate/consuming-output/) | The `counts.json` contract for downstream gates |
+| [Architecture](https://docs.magmamoose.com/chargate/architecture/) · [Troubleshooting](https://docs.magmamoose.com/chargate/troubleshooting/) | How it works, and what to do when it doesn't |
 
 ## Local use
 
@@ -93,7 +93,7 @@ brew install calebsargeant/tap/chargate && chargate install-hooks
 ```
 
 Deliberately narrower than the CI net: it is a first line, not a substitute.
-See [Setup](https://magmamoose.github.io/chargate/setup/).
+See [Setup](https://docs.magmamoose.com/chargate/setup/).
 
 ## Where it sits
 
@@ -105,7 +105,7 @@ what passes.
 
 Pin `@v2` for the floating major, or a tag or SHA to freeze.
 v2 is a ground-up re-platform onto MegaLinter — coming from `@v1`, see
-[Migrating from v1](https://magmamoose.github.io/chargate/setup/#migrating-from-v1).
+[Migrating from v1](https://docs.magmamoose.com/chargate/setup/#migrating-from-v1).
 
 ## Security · Contributing · License
 
